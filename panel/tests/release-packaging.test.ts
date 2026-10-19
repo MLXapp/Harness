@@ -252,7 +252,10 @@ describe("release packaging", () => {
     );
 
     expect(pkg.scripts.package).toBe("npm run dist");
-    expect(pkg.scripts.dist).toBe(
+    // MLX Studio builds its DMG with build-studio-dmg.sh; upstream's
+    // release driver stays available for merges as dist:upstream.
+    expect(pkg.scripts.dist).toBe("./scripts/build-studio-dmg.sh");
+    expect(pkg.scripts["dist:upstream"]).toBe(
       "VMLX_RELEASE_SCOPE=production ./scripts/build-release-dmgs.sh all",
     );
     expect(pkg.build.beforePack).toBe(

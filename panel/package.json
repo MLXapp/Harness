@@ -1,11 +1,16 @@
 {
-  "name": "vmlx",
-  "version": "1.6.80",
-  "description": "The most complete MLX inference engine for Mac — voice, vision, Mamba, 5-layer caching, 20+ agentic tools",
+  "name": "mlx-studio",
+  "productName": "MLX Studio",
+  "version": "0.1.0",
+  "description": "MLX Studio: run, chat with and serve AI models locally on Apple Silicon. Built on vMLX by JANGQ AI.",
   "main": "dist/main/index.mjs",
-  "author": "Jinho Jang <eric@jangq.ai>",
-  "license": "SEE LICENSE IN LICENSE",
-  "homepage": "https://vmlx.net",
+  "author": "Flex UK Limited (MLX Network) <info@mlx.app>",
+  "license": "Apache-2.0",
+  "homepage": "https://studio.mlx.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MLXapp/studio.git"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "./scripts/bundle-python.sh && ./scripts/verify-bundled-python.sh && electron-vite build",
@@ -21,8 +26,9 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,json,md}\"",
     "icons": "node generate-icons.js",
     "package": "npm run dist",
-    "dist": "VMLX_RELEASE_SCOPE=production ./scripts/build-release-dmgs.sh all",
-    "postinstall": "electron-builder install-app-deps"
+    "dist": "./scripts/build-studio-dmg.sh",
+    "postinstall": "electron-builder install-app-deps",
+    "dist:upstream": "VMLX_RELEASE_SCOPE=production ./scripts/build-release-dmgs.sh all"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -83,9 +89,9 @@
     "vitest": "^4.0.18"
   },
   "build": {
-    "appId": "net.vmlx.app",
-    "productName": "vMLX",
-    "copyright": "Copyright 2026 JANGQ AI. All rights reserved.",
+    "appId": "app.mlx.studio",
+    "productName": "MLX Studio",
+    "copyright": "Copyright 2026 Flex UK Limited (MLX Network). Built on vMLX, Copyright 2026 JANGQ AI.",
     "beforePack": "scripts/electron-builder-before-pack.cjs",
     "afterPack": "scripts/electron-builder-after-pack.cjs",
     "artifactBuildStarted": "scripts/electron-builder-after-all-artifact-build.cjs",
@@ -105,7 +111,7 @@
         "\\.safetensors$"
       ],
       "notarize": {
-        "teamId": "55KGF2S5AY"
+        "teamId": "CCKXS9W488"
       },
       "minimumSystemVersion": "14.5.0"
     },
@@ -122,7 +128,7 @@
         {
           "x": 160,
           "y": 220,
-          "name": "vMLX.app"
+          "name": "MLX Studio.app"
         },
         {
           "x": 600,
@@ -130,7 +136,8 @@
           "type": "link",
           "path": "/Applications"
         }
-      ]
+      ],
+      "title": "MLX Studio ${version}"
     },
     "extraResources": [
       {
@@ -165,6 +172,7 @@
     "directories": {
       "buildResources": "resources",
       "output": "release"
-    }
+    },
+    "artifactName": "MLX-Studio-${version}-${arch}.${ext}"
   }
 }

@@ -99,7 +99,7 @@ async function enforce(pm: ProcessManager): Promise<void> {
   console.warn(`[MemoryEnforcer] Over budget (${(remaining / 1024).toFixed(1)} / ${config.maxMemoryGB} GB) but all models are pinned`)
   try {
     new Notification({
-      title: 'vMLX Memory Warning',
+      title: 'MLX Studio Memory Warning',
       body: `Using ${(remaining / 1024).toFixed(1)} GB of ${config.maxMemoryGB} GB budget. All models are pinned — unpin or stop a model to free memory.`,
     }).show()
   } catch {

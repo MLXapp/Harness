@@ -27,7 +27,7 @@ interface ImageGalleryProps {
   onDelete?: (gen: ImageGenerationInfo) => void;
 }
 
-// MLX Studio Image Gallery — mlx.studio — Jinho Jang
+// MLX Studio Image Gallery (from vMLX by JANGQ AI)
 export function ImageGallery({
   generations,
   generating,
@@ -72,7 +72,6 @@ export function ImageGallery({
             ? t('image.gallery.emptyEditBody')
             : t('image.gallery.emptyGenBody')}
         </p>
-        <p className="text-[9px] text-muted-foreground/30 mt-8">mlx.studio</p>
       </div>
     );
   }
