@@ -1,73 +1,24 @@
-# vMLX Logo & Branding
+# MLX Studio icon and logo
 
-## Files Created
+- `resources/logo.svg` — master icon (1024 px canvas, macOS grid: 824 px rounded
+  square). The MLX emblem — Material Design Icons "alpha-x" box (Pictogrammers,
+  Apache 2.0), the same shape as mlx.app's `components/Logo.tsx` — filled with the
+  MLX brand gradient (ink `#1D1D1F` to orange `#F08A00`) on an aluminum body.
+- `resources/icon.png` — 1024 px render used by electron-builder (it makes the .icns).
+- `src/renderer/public/{favicon-16,favicon-32,app-icon-64}.png` — derived by
+  `npm run icons` (`generate-icons.js`).
+- `build/dmg-background.svg` → `dmg-background.png` (760×460) and `@2x`.
+- In the app, the sidebar draws the emblem as vector art (`components/brand/Logo.tsx`),
+  so it follows light and dark (white to orange in dark).
 
-### Logo Assets
-- **`resources/logo.svg`** - Master SVG logo (512x512)
-  - Blue gradient background (Apple-style)
-  - "vMLX" text in SF Pro Display style
-  - Subtle chip icon accent (representing Apple Silicon/MLX)
-
-### App Icons
-- **`resources/icon.png`** - Main app icon (1024x1024)
-  - Used by electron-builder for macOS .app bundle
-  - Automatically generates .icns during build
-
-### Favicons
-- **`public/favicon.svg`** - SVG favicon (32x32 optimized)
-- **`public/favicon-32.png`** - PNG fallback (32x32)
-- **`public/favicon-16.png`** - PNG fallback (16x16)
-
-## Design Details
-
-### Color Palette
-- Background gradient: `#1e3a8a` → `#3b82f6` (blue-700 to blue-500)
-- Text: White with subtle gradient (`#ffffff` → `#e0e7ff`)
-- Accent chip: Light blue tones (`#60a5fa`, `#93c5fd`, `#dbeafe`)
-
-### Typography
-- Font: SF Pro Display / -apple-system fallback
-- Weight: 600 (Semibold)
-- Letter spacing: -2 (tight, Apple-style)
-
-### Visual Theme
-- Rounded square background (115px border radius on 512px = ~22.5%)
-- Minimalist chip icon above text (represents MLX/Apple Silicon)
-- Clean, modern Apple aesthetic
-- Matches macOS Big Sur+ icon style
-
-## Regenerating Icons
-
-To regenerate icons from the SVG source:
+Regenerate after editing the SVGs:
 
 ```bash
+cd panel
+node -e "require('sharp')('resources/logo.svg',{density:72}).resize(1024,1024).png().toFile('resources/icon.png')"
 npm run icons
+node -e "const s=require('sharp');s('build/dmg-background.svg',{density:72}).resize(760,460).png().toFile('build/dmg-background.png');s('build/dmg-background.svg',{density:144}).resize(1520,920).png().toFile('build/dmg-background@2x.png')"
 ```
 
-This will:
-1. Convert `resources/logo.svg` → `resources/icon.png` (1024x1024)
-2. Generate favicon sizes (32px, 16px)
-
-## App Bundle
-
-The app will display as **"vMLX"** in:
-- macOS menu bar
-- Dock
-- Application folder
-- Finder
-
-Product name is set in `package.json`:
-```json
-"build": {
-  "productName": "vMLX",
-  ...
-}
-```
-
-## Notes
-
-- Icon follows macOS Big Sur+ design guidelines
-- SVG favicon for modern browsers
-- PNG fallbacks for older browsers
-- 1024x1024 source ensures crisp display on Retina displays
-- electron-builder auto-generates .icns with all required sizes
+The "vMLX" logo and name are not used as MLX Studio branding; vMLX is credited in
+About, Preferences and the README.
