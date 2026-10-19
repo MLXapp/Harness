@@ -1,0 +1,558 @@
+"""MiMo-V2.6 DFlash lane mechanics on a tiny synthetic JANGHT model (no real weights).
+
+* verify rollback: a multi-row verify followed by Target.rollback(r) must leave every cache (full KVCache and the SWA
+  RotatingKVCache, wrapped: prompt longer than the window) equivalent to forwarding only the committed tokens -- the
+  next step's logits must match;
+* rollback fails closed on a rotating cache that is not in concat order;
+* the drafter: context window trimming, finite proposals of the configured block width, taps of the right width.
+"""
+from __future__ import annotations
+
+import json
+
+import numpy as np
+import pytest
+
+mx = pytest.importorskip("mlx.core")
+pytest.importorskip("jang_tools.mimo_v2.v26_model")
+
+from tests.test_mimo_v26_janght_loader import _bundle, D, V  # noqa: E402
+from vmlx_engine import mimo_dflash as MD  # noqa: E402
+from vmlx_engine.models.mimo_v26_janght import build_mimo_v26_janght_model  # noqa: E402
+
+
+def _rel(a, b):
+    a = a.astype(mx.float32); b = b.astype(mx.float32)
+    return float((mx.linalg.norm(a - b) / mx.linalg.norm(b)).item())
+
+
+@pytest.mark.parametrize("r", [0, 1, 5, 7])
+def test_verify_rollback_equals_committed_prefix(tmp_path, r):
+    _bundle(tmp_path)
+    model = build_mimo_v26_janght_model(tmp_path)
+    tgt = MD.Target(model, [0, 1])
+    rng = np.random.default_rng(2)
+    prompt = rng.integers(0, V, size=22).tolist()                  # > sliding window 16: rotating caches wrapped
+    block = rng.integers(0, V, size=8).tolist()
+    nxt = int(rng.integers(0, V))
+    ca = model.make_cache(); tgt.forward(prompt, ca); tgt.forward(block, ca); MD.Target.rollback(ca, r)
+    kept = block[: 8 - r]
+    cb = model.make_cache(); tgt.forward(prompt, cb)
+    for t in kept:                                                  # committed tokens one at a time (decode steps)
+        tgt.forward([t], cb)
+    la, _ = tgt.forward([nxt], ca)
+    lb, _ = tgt.forward([nxt], cb)
+    assert _rel(la[-1], lb[-1]) < 3e-2
+    for c1, c2 in zip(ca, cb):
+        assert c1.offset == c2.offset
+    tgt.close()
+
+
+def test_rollback_refuses_rotated_cache(tmp_path):
+    _bundle(tmp_path)
+    model = build_mimo_v26_janght_model(tmp_path)
+    tgt = MD.Target(model, [0, 1])
+    c = model.make_cache()
+    tgt.forward(list(range(20)), c)
+    for t in range(5):
+        tgt.forward([t], c)                                          # single-row updates rotate in place
+    with pytest.raises(RuntimeError):
+        MD.Target.rollback(c, 2)
+    tgt.close()
+
+
+def test_drafter_shapes_and_window():
+    c = {"hidden_size": D, "intermediate_size": 512, "num_hidden_layers": 2, "num_attention_heads": 8, "num_key_value_heads": 2,
+         "head_dim": 128, "partial_rotary_factor": 0.5, "rope_theta": 10000.0, "rms_norm_eps": 1e-6, "sliding_window": 32,
+         "block_size": 8, "dflash_config": {"target_layer_ids": [0, 1], "mask_token_id": 7, "block_size": 8, "attention_value_scale": 0.612}}
+    m = MD.MiMoDFlashDrafter(c)
+    mx.eval(m.parameters())
+    taps = mx.random.normal((40, 2 * D)).astype(mx.bfloat16)
+    m.add_context(taps, 0)
+    assert m.kv[0][0].shape[2] == 32 and m.ctx_end == 40
+    m.add_context(taps[:3], 40)
+    assert m.kv[0][0].shape[2] == 32 and m.ctx_end == 43
+    h = m.draft(mx.random.normal((1, 8, D)).astype(mx.bfloat16), 43)
+    assert h.shape == (1, 8, D) and bool(mx.all(mx.isfinite(h.astype(mx.float32))).item())
+    with pytest.raises(AssertionError):
+        m.draft(mx.random.normal((1, 8, D)).astype(mx.bfloat16), 44)
+
+
+def _lane(tmp_path):
+    _bundle(tmp_path)
+    model = build_mimo_v26_janght_model(tmp_path)
+    c = {"hidden_size": D, "intermediate_size": 512, "num_hidden_layers": 1, "num_attention_heads": 8, "num_key_value_heads": 2,
+         "head_dim": 128, "partial_rotary_factor": 0.5, "rope_theta": 10000.0, "rms_norm_eps": 1e-6, "sliding_window": 64,
+         "block_size": 6, "dflash_config": {"target_layer_ids": [0, 1], "mask_token_id": 7, "block_size": 6, "attention_value_scale": 0.612}}
+    drafter = MD.MiMoDFlashDrafter(c); mx.eval(drafter.parameters())
+    return model, MD.Target(model, [0, 1]), drafter
+
+
+def _ar_greedy(model, prompt, n):
+    # the prompt's head on its last row only, as the lane's prefill does (a full-chunk head can break a bf16 tie
+    # differently on this tiny random model)
+    cache = model.make_cache()
+    lg = model.lm_head(model.model(mx.array([prompt]), cache)[:, -1:])[0, -1]
+    out = [int(mx.argmax(lg).item())]
+    while len(out) < n:
+        lg = model(mx.array([[out[-1]]]), cache=cache)[0, -1]; out.append(int(mx.argmax(lg).item()))
+    return out
+
+
+def test_oracle_drafts_fully_accepted_and_equal_ar(tmp_path):
+    model, tgt, drafter = _lane(tmp_path)
+    prompt = np.random.default_rng(4).integers(0, V, size=30).tolist()
+    ref = _ar_greedy(model, prompt, 25)
+    oracle = lambda n_emitted, k: ref[n_emitted: n_emitted + k] + [0] * max(0, n_emitted + k - len(ref))
+    st = MD.LaneStats(); out = []
+    for new, _ in MD.mimo_rounds(tgt, drafter, None, prompt, 25, set(), 0.0, stats=st, adaptive=False, propose=oracle):
+        out.extend(new)
+    assert out == ref
+    assert st.rounds > 0 and all(a == 5 for a in st.accepted[:-1]), st.accepted
+    tgt.close()
+
+
+def _run(tgt, drafter, prompt, n, **kw):
+    return [t for new, _ in MD.mimo_rounds(tgt, drafter, None, prompt, n, set(), 0.0, adaptive=False, **kw) for t in new]
+
+
+def test_random_drafts_equal_ar_and_turn_state_resumes(tmp_path):
+    """The end-of-turn session state (cache + drafter taps) resumes the next turn: greedy output == AR."""
+    model, tgt, drafter = _lane(tmp_path)
+    prompt = np.random.default_rng(6).integers(0, V, size=40).tolist()
+    session = {}
+    out = _run(tgt, drafter, prompt, 20, session=session)
+    assert out == _ar_greedy(model, prompt, 20)
+    # the cache holds the prompt + every emitted token but the last (sampled, not forwarded)
+    assert session["forwarded"] == len(prompt) + len(out) - 1
+    assert int(session["taps"].shape[0]) == min(drafter.window, session["forwarded"])
+    prompt2 = prompt + out + [5, 9]
+    st = MD.LaneStats()
+    resume = {"target_cache": session["target_cache"], "draft_context": session["taps"], "cache_len": session["forwarded"]}
+    out2 = _run(tgt, drafter, prompt2, 6, stats=st, resume=resume)
+    assert st.cached_tokens == session["forwarded"]
+    assert out2 == _ar_greedy(model, prompt2, 6)
+    tgt.close()
+
+
+@pytest.mark.parametrize("max_tokens", [3, 4, 7])
+def test_round_cut_short_by_max_tokens_keeps_only_emitted_rows(tmp_path, max_tokens):
+    """Oracle drafts (5 accepted per round) cut by max_tokens mid-round: the stored state must hold exactly the
+    emitted tokens, so a resumed turn still equals AR (the ported lane kept rows of tokens never emitted)."""
+    model, tgt, drafter = _lane(tmp_path)
+    prompt = np.random.default_rng(8).integers(0, V, size=30).tolist()
+    ref = _ar_greedy(model, prompt, 40)
+    oracle = lambda n_emitted, k: ref[n_emitted: n_emitted + k] + [0] * max(0, n_emitted + k - len(ref))
+    session = {}
+    out = [t for new, _ in MD.mimo_rounds(tgt, drafter, None, prompt, max_tokens, set(), 0.0, adaptive=False,
+                                          propose=oracle, session=session) for t in new]
+    assert out == ref[:max_tokens]
+    assert session["forwarded"] == len(prompt) + max_tokens - 1
+    prompt2 = prompt + out
+    resume = {"target_cache": session["target_cache"], "draft_context": session["taps"], "cache_len": session["forwarded"]}
+    # resuming re-forwards only the last emitted token (a 1-row step, as AR decoding does), so it continues the AR
+    # sequence itself (a one-shot prefill of prompt2 can flip near-tie argmaxes on this tiny random model)
+    assert _run(tgt, drafter, prompt2, 5, resume=resume) == ref[max_tokens: max_tokens + 5]
+    tgt.close()
+
+
+def test_snapshot_clone_isolated_from_later_rotating_writes(tmp_path):
+    """A boundary snapshot of the SWA RotatingKVCache must not change while the request keeps decoding (single-token
+    rotating updates write into the live buffer in place); resuming it equals AR."""
+    from vmlx_engine import mimo_session
+
+    model, tgt, drafter = _lane(tmp_path)
+    prompt = np.random.default_rng(9).integers(0, V, size=60).tolist()   # longer than the SWA window: wrapped
+    snaps = []
+    on_snap = lambda cut, cache, taps: snaps.append((cut, mimo_session.clone(cache, tgt.model.make_cache), taps))
+    out = _run(tgt, drafter, prompt, 12, snapshot_cuts=[37], on_snapshot=on_snap)
+    assert out == _ar_greedy(model, prompt, 12)
+    (cut, snap, taps), = snaps
+    from mlx_lm.models.cache import RotatingKVCache
+    rings = [c for c in snap if isinstance(c, RotatingKVCache)]
+    assert rings and all(int(c.keys.shape[2]) <= int(c.max_size) for c in rings)   # dead concat rows trimmed
+    before = [np.array(c.keys.astype(mx.float32)) for c in snap if c.keys is not None]
+    _run(tgt, drafter, prompt + out, 10)                   # unrelated decoding on a fresh cache must not touch it
+    resume = {"target_cache": snap, "draft_context": taps, "cache_len": cut}
+    assert all(np.array_equal(a, np.array(c.keys.astype(mx.float32))) for a, c in zip(before, [c for c in snap if c.keys is not None]))
+    assert _run(tgt, drafter, prompt, 8, resume=resume) == _ar_greedy(model, prompt, 8)
+    tgt.close()
+
+
+def test_session_ssd_round_trip_resumes_equal_to_ar(tmp_path, monkeypatch):
+    """Store a snapshot through mimo_session with an SSD tier, drop RAM, restore it from SSD: output == AR."""
+    from vmlx_engine import mimo_session
+    from vmlx_engine.dflash2_session_disk import DFlash2SessionSSD
+
+    model, tgt, drafter = _lane(tmp_path)
+    E = V - 1                                               # an "end of turn" id: the SSD cut finder keys on it
+    prompt = np.random.default_rng(10).integers(0, V - 2, size=50).tolist()
+    prompt[29] = E
+    monkeypatch.setattr(mimo_session, "STORE", None)
+    monkeypatch.setattr(mimo_session, "SSD", DFlash2SessionSSD(root=str(tmp_path / "ssd"), max_size_bytes=0, model_key="t"))
+    snaps = []
+    _run(tgt, drafter, prompt, 6, snapshot_cuts=[30],
+         on_snapshot=lambda cut, cache, taps: snaps.append((cut, mimo_session.clone(cache, tgt.model.make_cache), taps)))
+    (cut, snap, taps), = snaps
+    receipt = mimo_session.store({"kind": "system", "tokens": prompt[:cut], "cache_len": cut, "target_cache": snap,
+                                  "draft_context": taps, "model_key": "k"})
+    assert receipt.result(timeout=30)["durable"]
+    mimo_session.clear()                                    # RAM tier gone: the restore comes from SSD
+    tok = type("T", (), {"convert_tokens_to_ids": lambda self, t: -1})()
+    resume = mimo_session.lookup("k", prompt, tok, tgt.model.make_cache, eos_ids=[E])
+    assert resume is not None and resume["source"] == "mimo-dflash-ssd" and resume["cache_len"] == cut
+    assert _run(tgt, drafter, prompt, 8, resume=resume) == _ar_greedy(model, prompt, 8)
+    tgt.close()
+
+
+_THREAD_SCRIPT = r'''
+import json, sys, threading
+from pathlib import Path
+import mlx.core as mx
+from mlx.utils import tree_flatten
+from vmlx_engine import mimo_dflash as MD
+d = Path(sys.argv[1]); D = int(sys.argv[2])
+c = {"hidden_size": D, "intermediate_size": 512, "num_hidden_layers": 1, "num_attention_heads": 8, "num_key_value_heads": 2,
+     "head_dim": 128, "partial_rotary_factor": 0.5, "rope_theta": 10000.0, "rms_norm_eps": 1e-6, "sliding_window": 64,
+     "block_size": 6, "dflash_config": {"target_layer_ids": [0, 1], "mask_token_id": 7, "block_size": 6, "attention_value_scale": 0.612}}
+m = MD.MiMoDFlashDrafter(c); mx.eval(m.parameters())
+(d / "config.json").write_text(json.dumps(c))
+mx.save_safetensors(str(d / "dflash_draft_model.safetensors"), dict(tree_flatten(m.parameters())))
+mx.save_safetensors(str(d / "mask_embedding.safetensors"), {"embedding": mx.ones((D,), dtype=mx.bfloat16),
+                                                             "mask_token_id": mx.array([7], dtype=mx.int32)})
+drafter, mask_vec = MD.load_drafter(d)          # loader thread (as the server's model load)
+out = {}
+def gen():                                     # the server generates on another thread with its own streams
+    s = mx.new_stream(mx.gpu)
+    with mx.stream(s):
+        out["mask"] = float((mask_vec.astype(mx.float32) * 2).sum().item())
+        taps = mx.zeros((4, 2 * D), dtype=mx.bfloat16); drafter.add_context(taps, 0)
+        h = drafter.draft(mx.zeros((1, 6, D), dtype=mx.bfloat16), 4); mx.eval(h); out["ok"] = True
+t = threading.Thread(target=gen); t.start(); t.join()
+assert out.get("ok") and out["mask"] == 2.0 * D, out
+print("THREAD OK")
+'''
+
+
+def test_drafter_loaded_on_one_thread_runs_on_another(tmp_path):
+    """Served lanes load on the loader thread and generate on a worker thread. Every array load_drafter returns must be
+    materialized at load: a lazy mx.load array evaluated later from another thread aborts the process ("There is no
+    Stream(cpu, 1) in current thread", 2026-10-15 MiMo JANGHT serve)."""
+    import subprocess, sys
+    r = subprocess.run([sys.executable, "-c", _THREAD_SCRIPT, str(tmp_path), str(D)], capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0 and "THREAD OK" in r.stdout, (r.returncode, r.stdout[-500:], r.stderr[-1500:])
+
+
+def test_adaptive_ar_bursts_defer_drafter_context_and_stay_equal_to_ar(tmp_path):
+    """With the adaptive policy (AR bursts + draft rounds), deferred drafter context still yields AR-equal greedy output
+    and a session state aligned with the emitted tokens."""
+    model, tgt, drafter = _lane(tmp_path)
+    prompt = np.random.default_rng(12).integers(0, V, size=35).tolist()
+    session = {}
+    out = [t for new, _ in MD.mimo_rounds(tgt, drafter, None, prompt, 30, set(), 0.0, adaptive=True, session=session)
+           for t in new]
+    ref = _ar_greedy(model, prompt, 30)
+    assert out == ref
+    assert session["forwarded"] == len(prompt) + len(out) - 1
+    assert int(session["taps"].shape[0]) == min(drafter.window, session["forwarded"])
+    resume = {"target_cache": session["target_cache"], "draft_context": session["taps"], "cache_len": session["forwarded"]}
+    assert _run(tgt, drafter, prompt + out, 5, resume=resume) == _ar_greedy(model, prompt, 35)[30:35]
+    tgt.close()
+
+
+def test_pipelined_ar_burst_eos_keeps_eos_row_and_resumes(tmp_path):
+    """A pipelined AR burst that samples EOS has already launched the next step with the EOS as input: the cache then
+    holds prompt + every emitted token (EOS included), flagged eos_forwarded, and that state resumes the next turn."""
+    model, tgt, drafter = _lane(tmp_path)
+    prompt = np.random.default_rng(14).integers(0, V, size=33).tolist()
+    ref = _ar_greedy(model, prompt, 12)
+    eos = {ref[3]}                                          # inside the first AR burst (the policy starts with AR)
+    session, st = {}, MD.LaneStats()
+    out = [t for new, _ in MD.mimo_rounds(tgt, drafter, None, prompt, 12, eos, 0.0, adaptive=True, session=session,
+                                          stats=st) for t in new]
+    assert out == ref[:4] and out[-1] in eos
+    assert st.eos_forwarded and session["forwarded"] == len(prompt) + len(out)
+    assert int(session["target_cache"][0].offset) == session["forwarded"]
+    assert int(session["taps"].shape[0]) == min(drafter.window, session["forwarded"])
+    tgt.close()
+
+
+def test_prefill_stops_at_a_chunk_boundary_when_the_request_is_cancelled(tmp_path):
+    """SimpleEngine's cancellation scope (client gone) must stop the MiMo lane's prompt prefill at the next chunk
+    boundary instead of running every chunk (a dropped 30k prompt held the engine 106-108 s, 2026-10-16), and the lane
+    must then serve the next request normally (output == AR)."""
+    from vmlx_engine.utils.generation_cancellation import GenerationCancelled, generation_cancellation_scope
+
+    model, tgt, drafter = _lane(tmp_path)
+    prompt = np.random.default_rng(11).integers(0, V, size=40).tolist()
+    forwards = {"n": 0}
+    real_forward = tgt.forward
+
+    def counting_forward(*a, **k):
+        forwards["n"] += 1
+        return real_forward(*a, **k)
+
+    tgt.forward = counting_forward
+    with pytest.raises(GenerationCancelled):
+        with generation_cancellation_scope(lambda: forwards["n"] >= 2):
+            _run(tgt, drafter, prompt, 10, prefill_step=8)       # 5 chunks of 8: cancel after the second
+    assert forwards["n"] == 2
+    tgt.forward = real_forward
+    assert _run(tgt, drafter, prompt, 10) == _ar_greedy(model, prompt, 10)
+    tgt.close()
+
+
+def test_chunk_cuts_and_ssd_candidates():
+    from vmlx_engine import mimo_session
+    from vmlx_engine.dflash2_session_disk import candidate_cuts
+
+    assert mimo_session.chunk_cuts(0, 50, 16) == [16, 32, 48]
+    assert mimo_session.chunk_cuts(20, 50, 16) == [32, 48]          # only past the restored prefix
+    assert mimo_session.chunk_cuts(32, 48, 16) == []                # strictly below the boundary
+    assert mimo_session.chunk_cuts(0, 50, 0) == []
+    assert candidate_cuts(list(range(50)), None, [], every=16) == [48, 32, 16]
+    assert candidate_cuts(list(range(50)), None, []) == []
+
+
+def test_partial_prefix_hit_restores_the_last_chunk_and_equals_ar(tmp_path, monkeypatch):
+    """A prompt diverging INSIDE the stored region (no message edge in between) restores the last chunk entry below the
+    divergence from SSD; chunks chain (each a delta on the previous one). Output == the same lane run cold with its
+    prefill split at the same position (the restore is exact; a split vs one-shot prefill differs by bf16 rounding,
+    ~1 % relative logits on this tiny random model, which can flip its near-ties -- the same class as the production
+    4096-token prefill chunking)."""
+    from vmlx_engine import mimo_session
+    from vmlx_engine.dflash2_session_disk import DFlash2SessionSSD
+
+    model, tgt, drafter = _lane(tmp_path)
+    rng = np.random.default_rng(11)
+    a = rng.integers(0, V - 2, size=60).tolist()
+    b = a[:45] + rng.integers(0, V - 2, size=13).tolist()
+    monkeypatch.setenv("VMLX_MIMO_DFLASH_CHUNK_SNAPSHOT_EVERY", "16")
+    monkeypatch.setattr(mimo_session, "STORE", None)
+    monkeypatch.setattr(mimo_session, "SSD", DFlash2SessionSSD(root=str(tmp_path / "ssd"), max_size_bytes=0, model_key="t"))
+    writer = mimo_session.ChunkWriter(None)
+    receipts = []
+
+    def snap(cut, cache, taps):
+        receipts.append(writer.put({"kind": "chunk", "tokens": a[:cut], "cache_len": cut, "draft_context": taps,
+                                    "target_cache": mimo_session.clone(cache, tgt.model.make_cache), "model_key": "k"}))
+
+    _run(tgt, drafter, a, 4, snapshot_cuts=mimo_session.chunk_cuts(0, len(a), 16), on_snapshot=snap)
+    assert [r.result(timeout=30)["durable"] for r in receipts] == [True, True, True]
+    assert [r.vmlx_ssd_ref["depth"] for r in receipts] == [0, 1, 2]
+    assert writer.parent_for(40, None)["len"] == 32 and writer.parent_for(10, None) is None
+    mimo_session.clear()
+    tok = type("T", (), {"convert_tokens_to_ids": lambda self, t: -1})()
+    resume = mimo_session.lookup("k", b, tok, tgt.model.make_cache, eos_ids=[])
+    assert resume is not None and resume["source"] == "mimo-dflash-ssd" and resume["cache_len"] == 32
+    got = _run(tgt, drafter, b, 8, resume=resume)
+    assert got == _run(tgt, drafter, b, 8, snapshot_cuts=[32], on_snapshot=lambda *_: None)
+    tgt.close()
+
+
+def test_sampled_path_matches_the_target_distribution(tmp_path):
+    """Sampled DFlash (temperature 1, top-k 8; the random toy drafter is rejected ~87 % of the time, so the residual path
+    carries most tokens): the empirical marginals of the first three emitted tokens over seeded runs match the exact
+    target distribution, enumerated through the lane's OWN forwards (prompt prefill, then one 6-row verify-shaped
+    forward). Against a one-shot 1-row reference the toy model's 6-row vs 1-row rounding alone is TV ~0.03 (2026-10-16
+    probe), which is numerics, not the algorithm; that is why the reference uses the lane's row shapes."""
+    from dflash.model_mlx import _sampling_probs
+
+    K, N = 8, 2500
+    model, tgt, drafter = _lane(tmp_path)
+    prompt = np.random.default_rng(3).integers(0, V - 2, size=24).tolist()
+
+    def dist(rows=()):
+        cache = model.make_cache()
+        lg, _ = tgt.forward(prompt, cache, last_only=True)
+        if rows:
+            lg, _ = tgt.forward(list(rows) + [0] * (6 - len(rows)), cache)
+        row = lg[len(rows) - 1] if rows else lg[-1]
+        return np.array(_sampling_probs(row[None], 1.0, 1.0, K)[0].astype(mx.float32)).astype(np.float64)
+
+    p0 = dist()
+    p1, p2 = np.zeros(V), np.zeros(V)
+    for a in np.nonzero(p0)[0]:
+        pa = dist((int(a),)); p1 += p0[a] * pa
+        for b in np.nonzero(pa)[0]:
+            p2 += p0[a] * pa[b] * dist((int(a), int(b)))
+    emp = np.zeros((3, V))
+    for i in range(N):
+        mx.random.seed(1000 + i)
+        out = [t for new, _ in MD.mimo_rounds(tgt, drafter, None, prompt, 3, set(), 1.0, 1.0, K, adaptive=False)
+               for t in new]
+        for j in range(3):
+            emp[j, out[j]] += 1
+    tgt.close()
+    rng = np.random.default_rng(0)
+    for j, p in enumerate((p0, p1, p2)):
+        p = p / p.sum()
+        tv = 0.5 * np.abs(emp[j] / N - p).sum()
+        band = np.quantile([0.5 * np.abs(np.bincount(rng.choice(V, size=N, p=p), minlength=V) / N - p).sum()
+                            for _ in range(40)], 0.99)
+        assert tv <= 1.25 * band, (j, tv, band)
+
+
+def test_spec_round_builds_verify_from_device_drafts_and_equals_ar(tmp_path, monkeypatch):
+    """A draft round queues the verify forward from the lazy draft tokens (no host read-back of the drafts before the
+    verify graph is built; the round's read-backs follow the verify), and greedy output stays equal to AR."""
+    monkeypatch.setenv("VMLX_MIMO_DFLASH_DRAFT_PMIN", "0")              # full blocks: every round verifies drafts
+    model, tgt, drafter = _lane(tmp_path)
+    prompt = np.random.default_rng(11).integers(0, V, size=37).tolist()   # not a multiple of the block / window
+    events = []
+    real_forward = tgt.forward
+
+    def forward(ids, cache, *a, **k):
+        if isinstance(ids, mx.array) and ids.ndim == 2 and int(ids.shape[1]) > 1 and not k.get("last_only"):
+            events.append("verify-from-array")
+        elif not isinstance(ids, mx.array) and len(ids) > 1 and not k.get("last_only"):
+            events.append("verify-from-list")
+        return real_forward(ids, cache, *a, **k)
+
+    monkeypatch.setattr(tgt, "forward", forward)
+    out = _run(tgt, drafter, prompt, 19)
+    assert out == _ar_greedy(model, prompt, 19)
+    assert events and set(events) == {"verify-from-array"}, events
+    tgt.close()
+
+
+def test_add_context_queues_without_blocking():
+    c = {"hidden_size": D, "intermediate_size": 512, "num_hidden_layers": 2, "num_attention_heads": 8, "num_key_value_heads": 2,
+         "head_dim": 128, "partial_rotary_factor": 0.5, "rope_theta": 10000.0, "rms_norm_eps": 1e-6, "sliding_window": 32,
+         "block_size": 8, "dflash_config": {"target_layer_ids": [0, 1], "mask_token_id": 7, "block_size": 8, "attention_value_scale": 0.612}}
+    m = MD.MiMoDFlashDrafter(c)
+    mx.eval(m.parameters())
+    taps = mx.random.normal((21, 2 * D)).astype(mx.bfloat16)
+    ref = MD.MiMoDFlashDrafter(c); ref.update(m.parameters())
+    m.add_context(taps[:13], 0); m.add_context(taps[13:], 13)
+    ref.add_context(taps, 0)
+    for (k1, v1), (k2, v2) in zip(m.kv, ref.kv):
+        assert k1.shape == k2.shape and v1.shape == v2.shape
+        assert _rel(k1, k2) < 1e-2 and _rel(v1, v2) < 1e-2
+
+
+@pytest.mark.parametrize("p_min", ["0.05", "0.5", "1.0"])
+def test_confidence_cut_keeps_greedy_equal_to_ar(tmp_path, monkeypatch, p_min):
+    """VMLX_MIMO_DFLASH_DRAFT_PMIN cuts a block where the drafter's running confidence drops: fewer verify rows, the
+    same greedy output (incl. blocks cut to the anchor alone)."""
+    monkeypatch.setenv("VMLX_MIMO_DFLASH_DRAFT_PMIN", p_min)
+    model, tgt, drafter = _lane(tmp_path)
+    prompt = np.random.default_rng(13).integers(0, V, size=29).tolist()
+    st = MD.LaneStats()
+    out = [t for new, _ in MD.mimo_rounds(tgt, drafter, None, prompt, 21, set(), 0.0, stats=st, adaptive=False)
+           for t in new]
+    assert out == _ar_greedy(model, prompt, 21)
+    assert st.cut_drafts > 0
+    tgt.close()
+
+
+def test_confident_drafts_counts_the_leading_run():
+    dl = mx.log(mx.array([[[0.9, 0.1], [0.6, 0.4], [0.99, 0.01]]], dtype=mx.float32))
+    tok = mx.array([[0, 0, 0]], dtype=mx.int32)
+    assert MD._confident_drafts(dl, tok, None, 0.5) == 3          # running product 0.9, 0.54, 0.5346
+    assert MD._confident_drafts(dl, tok, None, 0.55) == 1
+    assert MD._confident_drafts(dl, tok, None, 0.95) == 0
+    q = mx.array([[[0.2, 0.8], [0.5, 0.5], [0.1, 0.9]]], dtype=mx.float32)
+    assert MD._confident_drafts(dl, mx.array([[1, 0, 1]], dtype=mx.int32), q, 0.38) == 2   # 0.8, 0.4, 0.36
+    assert MD._confident_drafts(dl, tok[:, :0], None, 0.5) == 0
+
+
+def test_draft_p_min_parsing(monkeypatch):
+    monkeypatch.delenv("VMLX_MIMO_DFLASH_DRAFT_PMIN", raising=False)
+    monkeypatch.delenv("VMLX_MIMO_DFLASH_DRAFT_PMIN_SAMPLED", raising=False)
+    assert MD._draft_p_min() == 0.4 and MD._draft_p_min(sampled=True) == 0.0      # measured defaults
+    for raw, want in (("", 0.4), ("0", 0.0), ("0.25", 0.25), ("2", 0.0), ("-1", 0.0), ("x", 0.4)):
+        monkeypatch.setenv("VMLX_MIMO_DFLASH_DRAFT_PMIN", raw)
+        assert MD._draft_p_min() == want
+    monkeypatch.setenv("VMLX_MIMO_DFLASH_DRAFT_PMIN_SAMPLED", "0.3")
+    assert MD._draft_p_min(sampled=True) == 0.3
+
+
+# ---- drafter-less AR lane (release audit 2026-10-18 R15: MiMo failed every request with its DFlash drafter off) ----
+def _ar_lane(tmp_path):
+    _bundle(tmp_path)
+    model = build_mimo_v26_janght_model(tmp_path)
+    return model, MD._lane_for(model, None)["target"]
+
+
+@pytest.mark.parametrize("adaptive", [True, False])
+def test_drafterless_lane_equals_ar_and_resumes_its_turn_state(tmp_path, adaptive):
+    model, tgt = _ar_lane(tmp_path)
+    assert tgt.layer_ids == []
+    prompt = np.random.default_rng(21).integers(0, V, size=37).tolist()      # not a multiple of the 8-token burst
+    session, st = {}, MD.LaneStats()
+    out = [t for new, _ in MD.mimo_rounds(tgt, None, None, prompt, 21, set(), 0.0, stats=st, adaptive=adaptive,
+                                          session=session) for t in new]
+    assert out == _ar_greedy(model, prompt, 21)
+    assert st.rounds == 0 and st.ar_steps == 20                              # first token comes from the prefill
+    assert session["taps"] is None and session["forwarded"] == len(prompt) + len(out) - 1
+    assert int(session["target_cache"][0].offset) == session["forwarded"]
+    resume = {"target_cache": session["target_cache"], "draft_context": None, "cache_len": session["forwarded"]}
+    st2 = MD.LaneStats()
+    out2 = [t for new, _ in MD.mimo_rounds(tgt, None, None, prompt + out, 5, set(), 0.0, stats=st2, resume=resume)
+            for t in new]
+    assert st2.cached_tokens == session["forwarded"]
+    assert out2 == _ar_greedy(model, prompt, 26)[21:26]
+
+
+def test_drafterless_lane_eos_inside_a_burst_keeps_the_cache_aligned(tmp_path):
+    model, tgt = _ar_lane(tmp_path)
+    prompt = np.random.default_rng(22).integers(0, V, size=29).tolist()
+    ref = _ar_greedy(model, prompt, 12)
+    eos = {ref[5]}
+    session, st = {}, MD.LaneStats()
+    out = [t for new, _ in MD.mimo_rounds(tgt, None, None, prompt, 12, eos, 0.0, stats=st, session=session) for t in new]
+    assert out == ref[: ref.index(ref[5]) + 1] and out[-1] in eos
+    expect = len(prompt) + len(out) - (0 if st.eos_forwarded else 1)
+    assert session["forwarded"] == expect == int(session["target_cache"][0].offset)
+
+
+def test_drafterless_entries_restore_only_on_the_ar_lane(tmp_path, monkeypatch):
+    from vmlx_engine import mimo_session
+    from vmlx_engine.dflash2_session_disk import DFlash2SessionSSD
+
+    model, tgt = _ar_lane(tmp_path)
+    E = V - 1
+    prompt = np.random.default_rng(23).integers(0, V - 2, size=45).tolist()
+    prompt[26] = E
+    monkeypatch.setattr(mimo_session, "STORE", None)
+    monkeypatch.setattr(mimo_session, "SSD", DFlash2SessionSSD(root=str(tmp_path / "ssd"), max_size_bytes=0, model_key="ar"))
+    snaps = []
+    list(MD.mimo_rounds(tgt, None, None, prompt, 4, set(), 0.0, snapshot_cuts=[27],
+                        on_snapshot=lambda cut, cache, taps: snaps.append((cut, mimo_session.clone(cache, tgt.model.make_cache), taps))))
+    (cut, snap, taps), = snaps
+    assert taps is None
+    receipt = mimo_session.store({"kind": "system", "tokens": prompt[:cut], "cache_len": cut, "target_cache": snap,
+                                  "draft_context": None, "model_key": "k"})
+    assert receipt.result(timeout=30)["durable"]
+    mimo_session.clear()
+    tok = type("T", (), {"convert_tokens_to_ids": lambda self, t: -1})()
+    # the speculative lane cannot resume an entry without drafter context
+    assert mimo_session.lookup("k", prompt, tok, tgt.model.make_cache, eos_ids=[E]) is None
+    resume = mimo_session.lookup("k", prompt, tok, tgt.model.make_cache, eos_ids=[E], need_draft=False)
+    assert resume is not None and resume["source"] == "mimo-ar-ssd" and resume["cache_len"] == cut
+    got = [t for new, _ in MD.mimo_rounds(tgt, None, None, prompt, 8, set(), 0.0, resume=resume) for t in new]
+    assert got == _ar_greedy(model, prompt, 8)
+
+
+def test_drafterless_ssd_tier_uses_its_own_namespace(tmp_path, monkeypatch):
+    from vmlx_engine import mimo_session
+    from vmlx_engine import dflash2_session_disk as disk
+    from vmlx_engine.dspark import session as dspark_session
+
+    seen = []
+
+    class FakeSSD:
+        def __init__(self, root, max_size_bytes, model_key):
+            seen.append(model_key)
+            self.store = type("S", (), {"directory": str(root)})()
+
+    monkeypatch.setitem(dspark_session._DEFAULTS, "enabled", True)
+    monkeypatch.setitem(dspark_session._DEFAULTS, "root", str(tmp_path))
+    monkeypatch.setitem(dspark_session._DEFAULTS, "max_size_bytes", 0)
+    monkeypatch.setattr(disk, "DFlash2SessionSSD", FakeSSD)
+    monkeypatch.setattr(disk, "model_identity", lambda t, d: f"{t}+{d}")
+    monkeypatch.setattr(mimo_session, "SSD", None)
+    mimo_session.attach_ssd("/m/target", "/m/target/dflash")
+    mimo_session.attach_ssd("/m/target", None)
+    assert seen == ["mimo-dflash|/m/target+/m/target/dflash", "mimo-ar|/m/target+/m/target"]

@@ -1,0 +1,774 @@
+# SPDX-License-Identifier: Apache-2.0
+"""
+Tests for model inspector utilities.
+
+Usage:
+    pytest tests/test_model_inspector.py -v
+"""
+
+import json
+import os
+import tempfile
+from pathlib import Path
+
+import pytest
+
+
+def test_lfm_head_dim_is_derived_from_hidden_size_and_attention_heads():
+    from vmlx_engine.utils.model_inspector import _detect_turboquant_layer_types
+
+    cfg = {
+        "model_type": "lfm2_moe",
+        "hidden_size": 2048,
+        "num_attention_heads": 32,
+        "num_hidden_layers": 6,
+        "layer_types": [
+            "conv",
+            "full_attention",
+            "conv",
+            "conv",
+            "full_attention",
+            "conv",
+        ],
+    }
+
+    layer_types, key_dim, value_dim = _detect_turboquant_layer_types(cfg, 6)
+
+    assert layer_types == ["ssm", "attention", "ssm", "ssm", "attention", "ssm"]
+    assert key_dim == 64
+    assert value_dim == 64
+
+
+def test_bailing_hybrid_is_not_compressed_latent_mla_for_cache_policy():
+    """Ling/Bailing has kv_lora_rank but stores expanded KV on global layers."""
+    from vmlx_engine.utils.model_inspector import (
+        _detect_turboquant_layer_types,
+        is_mla_model,
+    )
+
+    cfg = {
+        "model_type": "bailing_hybrid",
+        "num_hidden_layers": 32,
+        "layer_group_size": 8,
+        "kv_lora_rank": 512,
+        "qk_nope_head_dim": 128,
+        "qk_rope_head_dim": 64,
+        "v_head_dim": 128,
+    }
+
+    assert is_mla_model(cfg) is False
+    layer_types, key_dim, value_dim = _detect_turboquant_layer_types(cfg, 32)
+    assert key_dim == 192
+    assert value_dim == 128
+    assert [i for i, t in enumerate(layer_types) if t == "attention"] == [
+        7,
+        15,
+        23,
+        31,
+    ]
+    assert layer_types.count("ssm") == 28
+
+
+def test_bailing_hybrid_turboquant_layers_ignore_mtp_cache_slot():
+    """Bailing MTP heads live in model.layers but not in generation cache."""
+    from vmlx_engine.utils.model_inspector import _detect_turboquant_layer_types
+
+    cfg = {
+        "model_type": "bailing_hybrid",
+        "num_hidden_layers": 32,
+        "layer_group_size": 8,
+        "kv_lora_rank": 512,
+        "qk_nope_head_dim": 128,
+        "qk_rope_head_dim": 64,
+        "v_head_dim": 128,
+    }
+    layer_types, _, _ = _detect_turboquant_layer_types(cfg, 32)
+    assert len(layer_types) == 32
+    assert layer_types.count("attention") == 4
+
+
+def test_nemotron_turboquant_layer_types_skip_moe_but_keep_native_cache_slots():
+    """Nemotron's pattern has Mamba, attention, and no-cache MoE layers.
+
+    TurboQuant cache patching must run detection over the full layer pattern,
+    then produce one cache entry for every native M/* cache slot. Running
+    detection over the already-short native cache length double-skips MoE
+    layers and causes nemotron_h to index past the cache list at generation.
+    """
+    from vmlx_engine.utils.model_inspector import _detect_turboquant_layer_types
+
+    pattern = "MEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEMEM*EMEMEMEME"
+    cfg = {
+        "model_type": "nemotron_h",
+        "num_hidden_layers": len(pattern),
+        "hybrid_override_pattern": pattern,
+        "head_dim": 64,
+    }
+
+    layer_types, key_dim, value_dim = _detect_turboquant_layer_types(
+        cfg, len(pattern)
+    )
+
+    assert key_dim == 64
+    assert value_dim == 64
+    assert len(layer_types) == pattern.count("M") + pattern.count("*")
+    assert layer_types.count("ssm") == pattern.count("M")
+    assert layer_types.count("attention") == pattern.count("*")
+
+
+def test_jang_loader_applies_selective_attention_tq_policy_to_nemotron():
+    """Nemotron hybrid state stays native until that family has live TQ proof."""
+    from mlx_lm.models.cache import ArraysCache, KVCache
+    from vmlx_engine.utils.jang_loader import _patch_turboquant_make_cache
+
+    pattern = "MEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEM*EMEMEMEM*EMEMEMEME"
+    native_cache = [
+        ArraysCache(size=2) if ch == "M" else KVCache()
+        for ch in pattern
+        if ch in ("M", "*")
+    ]
+
+    class FakeModel:
+        layers = [object() for _ in pattern]
+
+        def make_cache(self):
+            return list(native_cache)
+
+    model = FakeModel()
+    _patch_turboquant_make_cache(
+        model,
+        {
+            "turboquant": {
+                "enabled": True,
+                "default_key_bits": 3,
+                "default_value_bits": 3,
+                "critical_key_bits": 4,
+                "critical_value_bits": 4,
+                "critical_layers": [0, 1, 2, -3, -2, -1],
+            }
+        },
+        {
+            "model_type": "nemotron_h",
+            "num_hidden_layers": len(pattern),
+            "hybrid_override_pattern": pattern,
+            "head_dim": 64,
+        },
+    )
+
+    patched = model.make_cache()
+    assert len(patched) == len(native_cache)
+    assert sum(type(c).__name__ == "ArraysCache" for c in patched) == pattern.count("M")
+    assert sum(type(c).__name__ == "KVCache" for c in patched) == 0
+    assert sum(type(c).__name__ == "TurboQuantKVCache" for c in patched) == pattern.count("*")
+
+
+def _make_model_dir(tmp_path, config, weight_files=None):
+    """Create a minimal model directory for testing."""
+    model_dir = tmp_path / "test-model"
+    model_dir.mkdir(exist_ok=True)
+
+    # Write config.json
+    with open(model_dir / "config.json", "w") as f:
+        json.dump(config, f)
+
+    # Create dummy weight files
+    if weight_files is None:
+        weight_files = ["model.safetensors"]
+    for wf in weight_files:
+        (model_dir / wf).write_bytes(b"\x00" * 1024)  # 1KB dummy
+
+    return str(model_dir)
+
+
+class TestModelInfo:
+    """Tests for ModelInfo dataclass."""
+
+    def test_is_moe_property(self):
+        from vmlx_engine.utils.model_inspector import ModelInfo
+
+        info = ModelInfo(
+            model_path="/tmp/test",
+            model_type="test",
+            architecture="TestModel",
+            n_routed_experts=64,
+            num_experts_per_tok=8,
+        )
+        assert info.is_moe is True
+
+    def test_is_not_moe_when_no_experts(self):
+        from vmlx_engine.utils.model_inspector import ModelInfo
+
+        info = ModelInfo(
+            model_path="/tmp/test",
+            model_type="test",
+            architecture="TestModel",
+        )
+        assert info.is_moe is False
+
+    def test_active_params_moe(self):
+        from vmlx_engine.utils.model_inspector import ModelInfo
+
+        info = ModelInfo(
+            model_path="/tmp/test",
+            model_type="test",
+            architecture="TestModel",
+            param_count_billions=120.0,
+            n_routed_experts=512,
+            num_experts_per_tok=22,
+        )
+        # Expert count alone cannot determine the dense/expert split.
+        assert info.active_params_billions is None
+        info.config = {
+            "model_type": "nemotron_h", "hidden_size": 4096,
+            "num_hidden_layers": 2, "hybrid_override_pattern": "EE",
+            "vocab_size": 131072, "intermediate_size": 2688,
+            "moe_latent_size": 1024, "n_routed_experts": 512,
+            "num_experts_per_tok": 22,
+        }
+        active = info.active_params_billions
+        assert active is not None
+        assert 0 < active < info.param_count_billions
+
+    def test_active_params_dense(self):
+        from vmlx_engine.utils.model_inspector import ModelInfo
+
+        info = ModelInfo(
+            model_path="/tmp/test",
+            model_type="test",
+            architecture="TestModel",
+            param_count_billions=7.0,
+        )
+        assert info.active_params_billions == 7.0
+
+
+class TestInspectModel:
+    """Tests for inspect_model()."""
+
+    def test_basic_transformer(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import inspect_model
+
+        config = {
+            "architectures": ["LlamaForCausalLM"],
+            "model_type": "llama",
+            "hidden_size": 4096,
+            "num_hidden_layers": 32,
+            "num_attention_heads": 32,
+            "num_key_value_heads": 8,
+            "vocab_size": 32000,
+            "intermediate_size": 11008,
+        }
+        model_dir = _make_model_dir(tmp_path, config)
+        info = inspect_model(model_dir)
+
+        assert info.model_type == "llama"
+        assert info.architecture == "LlamaForCausalLM"
+        assert info.hidden_size == 4096
+        assert info.num_layers == 32
+        assert info.vocab_size == 32000
+        assert not info.is_quantized
+        assert not info.is_moe
+        assert not info.needs_latent_moe
+        assert info.param_count_billions > 0
+
+    def test_quantized_model(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import inspect_model
+
+        config = {
+            "architectures": ["LlamaForCausalLM"],
+            "model_type": "llama",
+            "hidden_size": 4096,
+            "num_hidden_layers": 32,
+            "num_attention_heads": 32,
+            "vocab_size": 32000,
+            "intermediate_size": 11008,
+            "quantization": {
+                "bits": 4,
+                "group_size": 64,
+                "mode": "affine",
+            },
+        }
+        model_dir = _make_model_dir(tmp_path, config)
+        info = inspect_model(model_dir)
+
+        assert info.is_quantized is True
+        assert info.quant_bits == 4
+        assert info.quant_group_size == 64
+        assert info.quant_mode == "affine"
+
+    def test_null_quant_bits_are_treated_as_full_precision(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import (
+            estimate_conversion_memory_gb,
+            format_model_info,
+            inspect_model,
+        )
+
+        config = {
+            "architectures": ["DeepseekV4ForCausalLM"],
+            "model_type": "deepseek_v4",
+            "hidden_size": 4096,
+            "num_hidden_layers": 43,
+            "num_attention_heads": 32,
+            "vocab_size": 129280,
+            "intermediate_size": 11008,
+            "n_routed_experts": 256,
+            "num_experts_per_tok": 6,
+            "quantization": {
+                "bits": None,
+                "group_size": None,
+                "mode": None,
+            },
+        }
+        model_dir = _make_model_dir(tmp_path, config)
+        info = inspect_model(model_dir)
+
+        assert info.is_quantized is False
+        assert info.quant_bits is None
+        assert estimate_conversion_memory_gb(info, 4) > 0
+        assert "Quantization: None (full precision)" in format_model_info(info)
+        assert "None-bit" not in format_model_info(info)
+
+    def test_moe_model(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import inspect_model
+
+        config = {
+            "architectures": ["DeepseekV3ForCausalLM"],
+            "model_type": "deepseek_v3",
+            "hidden_size": 4096,
+            "num_hidden_layers": 60,
+            "num_attention_heads": 32,
+            "vocab_size": 128000,
+            "intermediate_size": 11008,
+            "n_routed_experts": 256,
+            "num_experts_per_tok": 8,
+            "moe_intermediate_size": 1536,
+        }
+        model_dir = _make_model_dir(tmp_path, config)
+        info = inspect_model(model_dir)
+
+        assert info.is_moe is True
+        assert info.n_routed_experts == 256
+        assert info.num_experts_per_tok == 8
+
+    def test_nemotron_h_latent_moe(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import inspect_model
+
+        config = {
+            "architectures": ["NemotronHForCausalLM"],
+            "model_type": "nemotron_h",
+            "hidden_size": 4096,
+            "num_hidden_layers": 88,
+            "num_attention_heads": 32,
+            "vocab_size": 131072,
+            "intermediate_size": 2688,
+            "moe_latent_size": 1024,
+            "moe_intermediate_size": 2688,
+            "n_routed_experts": 512,
+            "num_experts_per_tok": 22,
+            "hybrid_override_pattern": "MEMEMEM*" * 11,
+        }
+        model_dir = _make_model_dir(tmp_path, config)
+        info = inspect_model(model_dir)
+
+        assert info.needs_latent_moe is True
+        assert info.moe_latent_size == 1024
+        assert info.is_hybrid is True
+        assert info.is_moe is True
+
+    def test_multimodal_model(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import inspect_model
+
+        config = {
+            "architectures": ["Qwen2VLForConditionalGeneration"],
+            "model_type": "qwen2_vl",
+            "hidden_size": 3584,
+            "num_hidden_layers": 28,
+            "num_attention_heads": 28,
+            "vocab_size": 151936,
+            "intermediate_size": 18944,
+            "vision_config": {"hidden_size": 1280},
+        }
+        model_dir = _make_model_dir(tmp_path, config)
+        info = inspect_model(model_dir)
+
+        assert info.is_mllm is True
+
+    def test_missing_directory(self):
+        from vmlx_engine.utils.model_inspector import inspect_model
+
+        with pytest.raises(FileNotFoundError, match="not found"):
+            inspect_model("/nonexistent/path")
+
+    def test_missing_config(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import inspect_model
+
+        model_dir = tmp_path / "empty-model"
+        model_dir.mkdir()
+
+        with pytest.raises(FileNotFoundError, match="config.json"):
+            inspect_model(str(model_dir))
+
+    def test_weight_files_counted(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import inspect_model
+
+        config = {
+            "model_type": "llama",
+            "hidden_size": 4096,
+            "num_hidden_layers": 32,
+            "num_attention_heads": 32,
+            "vocab_size": 32000,
+            "intermediate_size": 11008,
+        }
+        model_dir = _make_model_dir(
+            tmp_path, config,
+            weight_files=["model-00001.safetensors", "model-00002.safetensors"],
+        )
+        info = inspect_model(model_dir)
+
+        assert len(info.weight_files) == 2
+
+
+class TestEstimateMemory:
+    """Tests for memory estimation functions."""
+
+    def test_estimate_memory_basic(self):
+        from vmlx_engine.utils.model_inspector import ModelInfo, estimate_memory_gb
+
+        info = ModelInfo(
+            model_path="/tmp/test",
+            model_type="test",
+            architecture="TestModel",
+            param_count_billions=7.0,
+        )
+
+        # 4-bit: 7B * 4/8 * 1.2 = 4.2 GB
+        mem_4bit = estimate_memory_gb(info, 4)
+        assert 3.0 < mem_4bit < 6.0
+
+        # 16-bit: 7B * 16/8 * 1.2 = 16.8 GB
+        mem_16bit = estimate_memory_gb(info, 16)
+        assert 14.0 < mem_16bit < 20.0
+
+        # More bits = more memory
+        assert mem_16bit > mem_4bit
+
+    def test_estimate_conversion_memory(self):
+        from vmlx_engine.utils.model_inspector import (
+            ModelInfo,
+            estimate_conversion_memory_gb,
+        )
+
+        info = ModelInfo(
+            model_path="/tmp/test",
+            model_type="test",
+            architecture="TestModel",
+            param_count_billions=7.0,
+        )
+
+        conv_mem = estimate_conversion_memory_gb(info, target_bits=4)
+        # Should be more than inference memory (source + target)
+        assert conv_mem > 0
+
+    def test_available_memory(self):
+        from vmlx_engine.utils.model_inspector import available_memory_gb
+
+        mem = available_memory_gb()
+        assert mem > 0
+        assert mem < 1024  # Sanity: less than 1TB
+
+    def test_total_memory(self):
+        from vmlx_engine.utils.model_inspector import total_memory_gb
+
+        mem = total_memory_gb()
+        assert mem > 0
+        assert mem < 1024
+
+
+class TestEstimateParamCount:
+    """Tests for parameter count estimation."""
+
+    def test_llama_7b_estimate(self):
+        from vmlx_engine.utils.model_inspector import _estimate_param_count
+
+        config = {
+            "hidden_size": 4096,
+            "num_hidden_layers": 32,
+            "num_attention_heads": 32,
+            "num_key_value_heads": 32,
+            "vocab_size": 32000,
+            "intermediate_size": 11008,
+        }
+        params = _estimate_param_count(config)
+        # Should be roughly 7B (within 20%)
+        assert 5.5 < params < 9.0
+
+    def test_empty_config(self):
+        from vmlx_engine.utils.model_inspector import _estimate_param_count
+
+        assert _estimate_param_count({}) == 0.0
+        assert _estimate_param_count({"hidden_size": 4096}) == 0.0
+
+    def test_moe_model_estimate(self):
+        from vmlx_engine.utils.model_inspector import _estimate_param_count
+
+        config = {
+            "hidden_size": 4096,
+            "num_hidden_layers": 60,
+            "num_attention_heads": 32,
+            "vocab_size": 128000,
+            "intermediate_size": 11008,
+            "n_routed_experts": 256,
+            "moe_intermediate_size": 1536,
+        }
+        params = _estimate_param_count(config)
+        # MoE with 256 experts should be very large
+        assert params > 50
+
+
+class TestListModels:
+    """Tests for list_models_in_dir()."""
+
+    def test_empty_directory(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import list_models_in_dir
+
+        models = list_models_in_dir(str(tmp_path))
+        assert models == []
+
+    def test_finds_models(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import list_models_in_dir
+
+        # Create two model directories
+        for name in ["model-a", "model-b"]:
+            model_dir = tmp_path / name
+            model_dir.mkdir()
+            with open(model_dir / "config.json", "w") as f:
+                json.dump({
+                    "model_type": "llama",
+                    "hidden_size": 4096,
+                    "num_hidden_layers": 32,
+                    "num_attention_heads": 32,
+                    "vocab_size": 32000,
+                    "intermediate_size": 11008,
+                }, f)
+            (model_dir / "model.safetensors").write_bytes(b"\x00" * 1024)
+
+        models = list_models_in_dir(str(tmp_path))
+        assert len(models) == 2
+
+    def test_skips_non_model_dirs(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import list_models_in_dir
+
+        # Dir with config but no weights
+        no_weights = tmp_path / "no-weights"
+        no_weights.mkdir()
+        with open(no_weights / "config.json", "w") as f:
+            json.dump({"model_type": "llama"}, f)
+
+        # Dir with weights but no config
+        no_config = tmp_path / "no-config"
+        no_config.mkdir()
+        (no_config / "model.safetensors").write_bytes(b"\x00" * 1024)
+
+        models = list_models_in_dir(str(tmp_path))
+        assert len(models) == 0
+
+    def test_nonexistent_directory(self):
+        from vmlx_engine.utils.model_inspector import list_models_in_dir
+
+        models = list_models_in_dir("/nonexistent/path")
+        assert models == []
+
+
+class TestFormatModelInfo:
+    """Tests for format_model_info()."""
+
+    def test_formats_basic_model(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import format_model_info, inspect_model
+
+        config = {
+            "architectures": ["LlamaForCausalLM"],
+            "model_type": "llama",
+            "hidden_size": 4096,
+            "num_hidden_layers": 32,
+            "num_attention_heads": 32,
+            "vocab_size": 32000,
+            "intermediate_size": 11008,
+        }
+        model_dir = _make_model_dir(tmp_path, config)
+        info = inspect_model(model_dir)
+        output = format_model_info(info)
+
+        assert "llama" in output.lower()
+        assert "4096" in output
+        assert "32" in output
+        assert "memory" in output.lower()
+
+    def test_formats_moe_model(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import format_model_info, inspect_model
+
+        config = {
+            "architectures": ["NemotronHForCausalLM"],
+            "model_type": "nemotron_h",
+            "hidden_size": 4096,
+            "num_hidden_layers": 88,
+            "num_attention_heads": 32,
+            "vocab_size": 131072,
+            "intermediate_size": 2688,
+            "moe_latent_size": 1024,
+            "n_routed_experts": 512,
+            "num_experts_per_tok": 22,
+            "hybrid_override_pattern": "M" * 88,
+        }
+        model_dir = _make_model_dir(tmp_path, config)
+        info = inspect_model(model_dir)
+        output = format_model_info(info)
+
+        assert "MoE" in output
+        assert "LatentMoE" in output
+        assert "512" in output
+
+
+class TestResolveModelPath:
+    """Tests for resolve_model_path()."""
+
+    def test_local_path(self, tmp_path):
+        from vmlx_engine.utils.model_inspector import resolve_model_path
+
+        model_dir = tmp_path / "test-model"
+        model_dir.mkdir()
+
+        result = resolve_model_path(str(model_dir))
+        assert result == str(model_dir.resolve())
+
+    def test_nonexistent_path(self):
+        from vmlx_engine.utils.model_inspector import resolve_model_path
+
+        with pytest.raises(FileNotFoundError, match="not found"):
+            resolve_model_path("/nonexistent/model/path")
+
+    def test_hf_id_not_cached(self):
+        from vmlx_engine.utils.model_inspector import resolve_model_path
+
+        with pytest.raises(FileNotFoundError, match="Download"):
+            resolve_model_path("fake-org/nonexistent-model-12345")
+
+
+class TestDefaultOutputName:
+    """Tests for convert command output naming."""
+
+    def test_hf_id(self):
+        from vmlx_engine.commands.convert import _default_output_name
+
+        result = _default_output_name("nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", 4)
+        assert result == "NVIDIA-Nemotron-3-Super-120B-A12B-vmlx-4bit"
+
+    def test_local_path(self):
+        from vmlx_engine.commands.convert import _default_output_name
+
+        result = _default_output_name("/path/to/my-model", 8)
+        assert result == "my-model-vmlx-8bit"
+
+    def test_strips_bf16_suffix(self):
+        from vmlx_engine.commands.convert import _default_output_name
+
+        result = _default_output_name("org/model-BF16", 4)
+        assert result == "model-vmlx-4bit"
+
+    def test_strips_fp16_suffix(self):
+        from vmlx_engine.commands.convert import _default_output_name
+
+        result = _default_output_name("org/model-FP16", 4)
+        assert result == "model-vmlx-4bit"
+
+    def test_trailing_slash(self):
+        from vmlx_engine.commands.convert import _default_output_name
+
+        result = _default_output_name("/path/to/model/", 4)
+        assert result == "model-vmlx-4bit"
+
+    def test_various_bits(self):
+        from vmlx_engine.commands.convert import _default_output_name
+
+        for bits in [2, 3, 4, 6, 8]:
+            result = _default_output_name("org/model", bits)
+            assert result == f"model-vmlx-{bits}bit"
+
+
+class TestMemoryEstimateMatchesTheMeasuredResidencyModel:
+    """`vmlx info` sized memory by MoE-ness; residency follows the LOADER.
+
+    Measured with vmmap 2026-08-11 and recorded in
+    panel/src/main/modelLaunchMemory.ts: ordinary loads COPY every weight into
+    dirty Metal buffers, so resident lands near weightBytes plus a fixed ~2 GB
+    whatever the quant format (MM2.7 measured 0.96x). Only expert-STREAMING
+    families stay below their weight size — DSV4-Flash ~0.26x, MiniMax-M3
+    ~0.80x — and both happen to be MoE, which is what made "MoE is cheaper"
+    look true.
+
+    The old rule read that coincidence backwards: every MoE got the LOWEST
+    multiplier (1.10) and dense the highest (1.20), so a fully-resident MoE was
+    under-estimated and a plain dense model over-estimated, while the fixed
+    overhead was modelled as a percentage that vanishes on small models and
+    explodes on large ones. For a 671B model at 4-bit the old rule returned
+    402.6 GB against 236.8 GB now.
+    """
+
+    def _info(self, model_type: str, params: float):
+        from vmlx_engine.utils.model_inspector import ModelInfo
+
+        return ModelInfo(
+            model_path="x",
+            model_type=model_type,
+            architecture="A",
+            param_count_billions=params,
+        )
+
+    def test_ordinary_families_land_near_weight_bytes_plus_fixed_overhead(self):
+        from vmlx_engine.utils.model_inspector import estimate_memory_gb
+
+        for model_type in ("llama", "qwen3_moe", "gemma4"):
+            got = estimate_memory_gb(self._info(model_type, 30.0), 4)
+            assert got == 30.0 * 4 / 8 + 2.0, (
+                f"{model_type} no longer uses the measured "
+                "weight-bytes-plus-fixed-overhead model"
+            )
+
+    def test_moe_ness_alone_no_longer_changes_the_estimate(self):
+        """A resident MoE costs what a dense model of the same size costs."""
+        from vmlx_engine.utils.model_inspector import estimate_memory_gb
+
+        assert estimate_memory_gb(self._info("qwen3_moe", 30.0), 4) == (
+            estimate_memory_gb(self._info("llama", 30.0), 4)
+        )
+
+    def test_expert_streaming_families_stay_below_their_weights(self):
+        from vmlx_engine.utils.model_inspector import estimate_memory_gb
+
+        base = 671.0 * 4 / 8
+        dsv4 = estimate_memory_gb(self._info("deepseek_v4", 671.0), 4)
+        assert dsv4 < base, "DSV4 must estimate BELOW its weight size"
+        assert dsv4 == base * 0.7 + 2.0
+
+        m3_base = 230.0 * 4 / 8
+        m3 = estimate_memory_gb(self._info("minimax_m3", 230.0), 4)
+        assert m3 == m3_base * 0.85 + 2.0
+
+    def test_the_ratios_agree_with_the_panel_that_measured_them(self):
+        """Two surfaces, one measurement history — keep them in step."""
+        from pathlib import Path
+
+        panel = (
+            Path(__file__).resolve().parents[1]
+            / "panel/src/main/modelLaunchMemory.ts"
+        ).read_text(encoding="utf-8")
+        inspector = (
+            Path(__file__).resolve().parents[1]
+            / "vmlx_engine/utils/model_inspector.py"
+        ).read_text(encoding="utf-8")
+
+        for family, ratio in (("deepseek_v4", "0.7"), ("minimax_m3", "0.85")):
+            assert f"ratio: {ratio}" in panel, (
+                f"panel changed the measured {family} residency ratio"
+            )
+            assert f'"{family}": {ratio}' in inspector, (
+                f"model_inspector no longer carries the measured {family} ratio"
+            )

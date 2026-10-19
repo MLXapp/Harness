@@ -1,0 +1,475 @@
+"""Tests for ImageGenEngine — model loading, no silent downloads, format detection."""
+import pytest
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+
+class TestImageExporterNames:
+    @pytest.mark.parametrize("variant", ["fill", "kontext"])
+    @pytest.mark.parametrize("suffix", ["q4", "q8", "bf16", "4bit"])
+    def test_full_edit_names(self, variant, suffix):
+        from vmlx_engine.image_gen import _normalize_for_lookup
+        for name in (f"mflux-community/flux-1-dev-{variant}-mflux-{suffix}",
+                     f"FLUX.1-{variant}-dev-mflux-{suffix}"):
+            assert _normalize_for_lookup(name) == f"dev-{variant}"
+
+    def test_specialised_variant_is_not_generic_fill(self):
+        from vmlx_engine.image_gen import _normalize_for_lookup, EDIT_MODELS
+        assert _normalize_for_lookup("flux-1-dev-fill-catvton-mflux-q4") not in EDIT_MODELS
+
+
+class TestImageGuidanceDefaults:
+    @pytest.mark.parametrize("model,mclass,expected", [
+        ("dev", "Flux1", 3.5), ("qwen-image-edit", "QwenImageEdit", 4.0),
+        ("dev-kontext", "Flux1Kontext", 2.5), ("dev-fill", "Flux1Fill", 30.0),
+        ("z-image-turbo", "ZImage", 1.0), ("schnell", "Flux1", 0.0),
+    ])
+    @pytest.mark.parametrize("supplied", [None, 0.0, 7.25])
+    def test_adapter_receives_model_default_or_explicit_value(self, model, mclass, expected, supplied):
+        from PIL import Image
+        from types import SimpleNamespace
+        from vmlx_engine.image_gen import ImageGenEngine
+        eng = ImageGenEngine()
+        eng._model = MagicMock()
+        eng._loaded = True
+        eng._model_name = model
+        eng._mflux_class = mclass
+        eng._generate_with_trace = MagicMock(return_value=(
+            SimpleNamespace(image=Image.new("RGB", (64, 64))), MagicMock(job_id="test-job")))
+        kwargs = dict(prompt="test", width=64, height=64, steps=1, seed=1)
+        if supplied is not None:
+            kwargs["guidance"] = supplied
+        if mclass in eng._EDIT_CLASSES:
+            eng.edit(image_path="source.png", mask_path="mask.png", **kwargs)
+        else:
+            eng.generate(**kwargs)
+        assert eng._generate_with_trace.call_args.kwargs["guidance"] == (
+            expected if supplied is None else supplied)
+
+    def test_product_default_tables_match_panel_registry(self):
+        import re
+        import vmlx_engine.image_gen as mod
+        source = (Path(mod.__file__).resolve().parents[1] /
+                  "panel/src/shared/imageModels.ts").read_text()
+        rows = re.findall(r"steps: ([\d.]+),\s+guidance: ([\d.]+),[\s\S]*?mfluxName: '([^']+)'", source)
+        assert len(rows) == 16
+        assert {"fibo", "seedvr2-3b", "flux2-klein-4b", "flux2-klein-9b"} <= {name for _, _, name in rows}
+        for steps, guidance, name in rows:
+            assert mod.DEFAULT_STEPS[name] == int(steps)
+            assert mod.DEFAULT_GUIDANCE[name] == float(guidance)
+
+
+class TestImageGenEngineLoading:
+    """Verify unified load() loads locally and never downloads."""
+
+    def test_load_local_mflux_native(self, tmp_path):
+        """Model loads from mflux-native format (numbered safetensors)."""
+        (tmp_path / "transformer").mkdir()
+        (tmp_path / "transformer" / "0.safetensors").write_bytes(b"fake")
+        (tmp_path / "text_encoder_2").mkdir()
+        (tmp_path / "text_encoder_2" / "0.safetensors").write_bytes(b"fake")
+
+        model_path = str(tmp_path)
+        transformer_dir = Path(model_path) / "transformer"
+        has_transformer = transformer_dir.is_dir() and any(
+            f.suffix == '.safetensors' for f in transformer_dir.iterdir()
+        )
+        assert has_transformer
+
+    def test_load_no_local_raises(self):
+        """load() raises RuntimeError when no local files exist."""
+        from vmlx_engine.image_gen import ImageGenEngine
+        eng = ImageGenEngine()
+        with pytest.raises(RuntimeError, match="No local model files"):
+            eng.load("schnell", quantize=4, model_path="/nonexistent/path")
+
+    def test_load_no_model_path_raises(self):
+        """load() raises RuntimeError when model_path is None."""
+        from vmlx_engine.image_gen import ImageGenEngine
+        eng = ImageGenEngine()
+        with pytest.raises(RuntimeError, match="No local model files"):
+            eng.load("z-image-turbo")
+
+    def test_load_diffusers_format(self, tmp_path):
+        """Model directory with diffusers format has safetensors."""
+        (tmp_path / "transformer").mkdir()
+        (tmp_path / "transformer" / "diffusion_pytorch_model-00001.safetensors").write_bytes(b"fake")
+        transformer_dir = Path(str(tmp_path)) / "transformer"
+        has_transformer = transformer_dir.is_dir() and any(
+            f.suffix == '.safetensors' for f in transformer_dir.iterdir()
+        )
+        assert has_transformer
+
+    def test_no_model_class_from_name_in_load(self):
+        """load() should not call ModelClass.from_name() — only ModelConfig.from_name()."""
+        import vmlx_engine.image_gen as img_mod
+        source = open(img_mod.__file__).read()
+        load_section = source.split("def load(")[1].split("\n    def ")[0]
+        # ModelConfig.from_name is OK (metadata lookup)
+        # Flux1.from_name / ZImage.from_name etc. would trigger downloads — NOT OK
+        lines_with_from_name = [l for l in load_section.split('\n')
+                                if 'from_name(' in l and 'ModelConfig' not in l]
+        assert len(lines_with_from_name) == 0, f"Found from_name() calls: {lines_with_from_name}"
+
+    def test_no_silent_download_in_load(self):
+        """load() source should not contain download/hub/snapshot calls."""
+        import vmlx_engine.image_gen as img_mod
+        source = open(img_mod.__file__).read()
+        load_section = source.split("def load(")[1].split("\n    def ")[0]
+        download_patterns = ["hf_hub_download", "snapshot_download", "from_pretrained"]
+        for pattern in download_patterns:
+            assert pattern not in load_section, f"Found '{pattern}' in load() — may silently download"
+
+
+class TestEditModels:
+    """Verify edit model registry and loading."""
+
+    def test_edit_models_dict_exists(self):
+        from vmlx_engine.image_gen import EDIT_MODELS
+        assert "qwen-image-edit" in EDIT_MODELS
+
+    def test_load_edit_model_unknown_raises(self):
+        from vmlx_engine.image_gen import ImageGenEngine
+        eng = ImageGenEngine()
+        with pytest.raises((ValueError, Exception)):
+            eng.load_edit_model("nonexistent-model-xyz")
+
+
+class TestSupportedModels:
+    """Verify SUPPORTED_MODELS has expected entries."""
+
+    def test_generation_models_present(self):
+        from vmlx_engine.image_gen import SUPPORTED_MODELS
+        assert "schnell" in SUPPORTED_MODELS
+        assert "dev" in SUPPORTED_MODELS
+        assert "z-image-turbo" in SUPPORTED_MODELS
+
+    def test_only_native_dual_models_overlap(self):
+        from vmlx_engine.image_gen import SUPPORTED_MODELS, EDIT_MODELS
+        assert set(EDIT_MODELS) & set(SUPPORTED_MODELS) == {
+            "qwen-image-2.1", "qwen-image-2.1-turbo"}
+
+
+
+class TestMPOConversion:
+    """Verify image format handling for edits."""
+
+    def test_pil_import(self):
+        from PIL import Image
+        assert Image is not None
+
+    def test_rgb_conversion(self):
+        from PIL import Image
+        img = Image.new("RGBA", (64, 64), (255, 0, 0, 128))
+        rgb = img.convert("RGB")
+        assert rgb.mode == "RGB"
+
+    def test_dimension_rounding(self):
+        """mflux rounds dimensions to multiples of 16."""
+        width, height = 800, 600
+        rounded_w = (width // 16) * 16
+        rounded_h = (height // 16) * 16
+        assert rounded_w == 800  # 800 is already multiple of 16
+        assert rounded_h == 592  # 600 → 592
+
+
+class TestImageCapabilities:
+    """The loaded model's real contract, derived from class + signature."""
+
+    def _engine(self, mclass, params):
+        from vmlx_engine.image_gen import ImageGenEngine
+
+        class Model:
+            pass
+
+        def make(names):
+            src = "def generate_image(self, " + ", ".join(f"{n}=None" for n in names) + "): pass"
+            ns = {}
+            exec(src, ns)
+            return ns["generate_image"]
+
+        Model.generate_image = make(params)
+        eng = ImageGenEngine()
+        eng._model = Model()
+        eng._mflux_class = mclass
+        eng._model_name = "m"
+        eng._quantize = 8
+        return eng
+
+    def test_generation_model_with_negative_prompt_and_img2img(self):
+        caps = self._engine("QwenImage", ["seed", "prompt", "num_inference_steps", "height", "width", "guidance", "image_path", "image_strength", "negative_prompt"]).capabilities()
+        assert caps["mode"] == "generate" and caps["negative_prompt"] is True and caps["variation_strength"] is True
+        assert caps["edit_strength"] is None and caps["mask"] == "none" and caps["count"] is True and caps["quantize"] == 8
+
+    def test_klein_has_no_negative_prompt(self):
+        caps = self._engine("Flux2Klein", ["seed", "prompt", "num_inference_steps", "height", "width", "guidance"]).capabilities()
+        assert caps["negative_prompt"] is False and caps["variation_strength"] is False
+
+    @pytest.mark.parametrize("mclass,module_name", [
+        ("Flux2Klein", "mflux.models.flux2.variants.txt2img.flux2_klein"),
+        ("Flux2KleinEdit", "mflux.models.flux2.variants.edit.flux2_klein_edit"),
+    ])
+    def test_installed_klein_public_signature_excludes_negative_prompt(self, mclass, module_name):
+        import inspect
+        module = pytest.importorskip(module_name)
+        params = inspect.signature(getattr(module, mclass).generate_image).parameters
+        # The private CFG helper takes a negative prompt, but the public
+        # adapter fixes it to a blank string and exposes no such parameter.
+        assert "negative_prompt" not in params
+
+    @pytest.mark.parametrize("mclass", ["Flux2Klein", "Flux2KleinEdit"])
+    @pytest.mark.parametrize("negative", [None, "", "blurry"])
+    def test_klein_never_forwards_unsupported_negative_prompt(self, mclass, negative):
+        from PIL import Image
+        from types import SimpleNamespace
+        params = ["seed", "prompt", "num_inference_steps", "height", "width", "guidance"]
+        if mclass == "Flux2KleinEdit":
+            params.append("image_paths")
+        eng = self._engine(mclass, params)
+        eng._loaded = True
+        eng._generate_with_trace = MagicMock(return_value=(
+            SimpleNamespace(image=Image.new("RGB", (64, 64))), MagicMock(job_id="klein")))
+        args = dict(prompt="a blue bird", width=64, height=64, steps=1,
+                    seed=123, guidance=4, negative_prompt=negative)
+        if mclass == "Flux2KleinEdit":
+            eng.edit(image_path="source.png", **args)
+        else:
+            eng.generate(**args)
+        sent = eng._generate_with_trace.call_args.kwargs
+        assert "negative_prompt" not in sent
+        assert sent["guidance"] == 4 and sent["seed"] == 123
+        assert eng.capabilities()["negative_prompt"] is False
+
+    def test_flux_signature_does_not_claim_unused_negative_prompt(self):
+        caps = self._engine("Flux1", ["seed", "prompt", "negative_prompt", "image_path", "image_strength"]).capabilities()
+        assert caps["negative_prompt"] is False
+        assert caps["variation_strength"] is True
+
+    @pytest.mark.parametrize("supported", [False, True])
+    def test_flux_guidance_uses_loaded_model_config(self, supported):
+        from types import SimpleNamespace
+        engine = self._engine("Flux1", ["guidance"])
+        engine._model.model_config = SimpleNamespace(supports_guidance=supported)
+        assert engine.capabilities()["guidance"] is supported
+        engine._mflux_class = "QwenImage"
+        assert engine.capabilities()["guidance"] is None
+
+    def test_installed_schnell_and_dev_guidance_configs(self):
+        module = pytest.importorskip("mflux.models.common.config.model_config")
+        assert module.ModelConfig.schnell().supports_guidance is False
+        assert module.ModelConfig.dev().supports_guidance is True
+
+    def test_installed_flux_negative_parameter_has_no_runtime_reads(self):
+        # Qualification pin: reassess the explicit adapter contract if upstream
+        # starts using the argument. A signature alone is not behavior proof.
+        import dis
+        flux = pytest.importorskip("mflux.models.flux.variants.txt2img.flux")
+        fn = flux.Flux1.generate_image
+        assert "negative_prompt" in fn.__code__.co_varnames
+        assert not any(i.opname.startswith("LOAD_") and i.argval == "negative_prompt"
+                       for i in dis.get_instructions(fn))
+
+    def test_edit_classes_never_take_strength_and_fill_needs_a_mask(self):
+        for mclass in ("QwenImageEdit", "Flux1Kontext", "Flux1Fill", "Flux2KleinEdit"):
+            caps = self._engine(mclass, ["seed", "prompt", "num_inference_steps", "height", "width", "guidance", "image_path", "image_strength", "negative_prompt"]).capabilities()
+            assert caps["mode"] == "edit" and caps["edit_strength"] is False and caps["count"] is False, mclass
+            assert caps["mask"] == ("required" if mclass == "Flux1Fill" else "none")
+
+    def test_health_exposes_the_capabilities(self):
+        import inspect
+        import vmlx_engine.server as server
+        assert 'result["image"] = _image_gen.capabilities()' in inspect.getsource(server)
+
+class TestQwen21NativeAdapter:
+    @pytest.mark.parametrize('turbo', [False, True])
+    def test_bundle_metadata_overrides_renamed_folder(self, tmp_path, turbo):
+        import json
+        from vmlx_engine.image_gen import _detect_class_from_model_index
+        data = {'_class_name': 'QwenImage21Pipeline'}
+        if turbo:
+            data['sample_sigmas'] = [1.0, .978453, .95418, .926626, .89508, .845148, .704534, .414568]
+        (tmp_path / 'model_index.json').write_text(json.dumps(data))
+        assert _detect_class_from_model_index(str(tmp_path)) == (
+            'QwenImage21Edit', 'qwen-image-2.1-turbo' if turbo else 'qwen-image-2.1')
+
+    @pytest.mark.parametrize('turbo', [False, True])
+    @pytest.mark.parametrize('operation', ['generate', 'edit', 'variation'])
+    def test_native_kwargs_defaults_and_dual_capabilities(self, turbo, operation):
+        from PIL import Image
+        from types import SimpleNamespace
+        from vmlx_engine.image_gen import ImageGenEngine
+        class Native:
+            def generate_image(self, seed, prompt, num_inference_steps=None, width=None,
+                               height=None, guidance=1, negative_prompt=None,
+                               image_paths=None, strength=1, mask_image=None): pass
+        eng = ImageGenEngine()
+        eng._model = Native()
+        eng._loaded = True
+        eng._mflux_class = 'QwenImage21Edit'
+        eng._model_name = 'qwen-image-2.1-turbo' if turbo else 'qwen-image-2.1'
+        eng._generate_with_trace = MagicMock(return_value=(
+            SimpleNamespace(image=Image.new('RGBA', (64, 64))), MagicMock(job_id='q21')))
+        args = dict(prompt='paint blue', width=64, height=64, seed=123)
+        if operation == 'edit':
+            eng.edit(image_path='ref.png', mask_path='mask.png', strength=.6, **args)
+        elif operation == 'variation':
+            eng.generate(image_path='ref.png', image_strength=.6, **args)
+        else:
+            eng.generate(**args)
+        sent = eng._generate_with_trace.call_args.kwargs
+        assert sent['seed'] == 123
+        assert sent['num_inference_steps'] == (8 if turbo else 40)
+        assert sent['guidance'] == 1
+        assert 'image_path' not in sent and 'image_strength' not in sent
+        if operation != 'generate':
+            assert sent['image_paths'] == ['ref.png'] and sent['strength'] == .6
+        if operation == 'edit':
+            assert sent['mask_image'] == 'mask.png'
+        cap = eng.capabilities()
+        assert cap['mode'] == 'dual' and cap['edit_strength'] and cap['variation_strength']
+        assert cap['mask'] == 'optional'
+        assert cap['guidance'] is (not turbo)
+        assert cap['negative_prompt'] is (not turbo)
+
+
+class TestSeedVR2NativeAdapter:
+    def _engine(self):
+        from PIL import Image
+        from types import SimpleNamespace
+        from vmlx_engine.image_gen import ImageGenEngine
+
+        class Native:
+            def generate_image(self, seed, image_path, resolution, softness=0.0):
+                pass
+
+        eng = ImageGenEngine()
+        eng._model = Native()
+        eng._loaded = True
+        eng._mflux_class = "SeedVR2"
+        eng._model_name = "seedvr2-3b"
+        eng._generate_with_trace = MagicMock(return_value=(
+            SimpleNamespace(image=Image.new("RGB", (768, 384))), MagicMock(job_id="upscale")))
+        return eng
+
+    @pytest.mark.parametrize("resolution,softness,expected", [
+        (None, None, {"resolution": 384, "softness": 0.0}),
+        (512, 0.3, {"resolution": 512, "softness": 0.3}),
+    ])
+    def test_dispatch_is_native_and_dimensions_are_actual(self, resolution, softness, expected):
+        eng = self._engine()
+        result = eng.edit(prompt="", image_path="reference.png", seed=123,
+                          resolution=resolution, softness=softness)
+        assert eng._generate_with_trace.call_args.kwargs == {
+            "seed": 123, "image_path": "reference.png", **expected,
+        }
+        assert (result.width, result.height, result.steps) == (768, 384, 1)
+        assert result.seed == 123
+        caps = eng.capabilities()
+        assert caps["mode"] == "edit" and caps["upscale"] is True
+        for name in ("prompt", "steps", "guidance", "negative_prompt", "count", "edit_strength", "variation_strength"):
+            assert caps[name] is False
+        assert caps["mask"] == "none"
+
+    @pytest.mark.parametrize("unsupported", [
+        {"prompt": "make blue"}, {"mask_path": "mask.png"},
+        {"steps": 1}, {"guidance": 1}, {"strength": 0.5},
+        {"negative_prompt": "blurry"},
+    ])
+    def test_rejects_non_native_controls_before_inference(self, unsupported):
+        eng = self._engine()
+        args = dict(prompt="", image_path="reference.png", seed=123)
+        args.update(unsupported)
+        with pytest.raises(ValueError, match="SeedVR2 upscaling accepts"):
+            eng.edit(**args)
+        eng._generate_with_trace.assert_not_called()
+
+    @pytest.mark.parametrize("controls", [
+        {"resolution": 0}, {"resolution": 1}, {"resolution": True},
+        {"resolution": 2.5}, {"softness": -0.1}, {"softness": 1.1},
+        {"softness": float("nan")}, {"softness": True},
+    ])
+    def test_rejects_invalid_upscale_controls(self, controls):
+        eng = self._engine()
+        with pytest.raises(ValueError):
+            eng.edit(prompt="", image_path="reference.png", **controls)
+        eng._generate_with_trace.assert_not_called()
+
+    def test_non_upscale_adapter_rejects_upscale_controls(self):
+        eng = self._engine()
+        eng._mflux_class = "QwenImageEdit"
+        with pytest.raises(ValueError, match="only by SeedVR2"):
+            eng.edit(prompt="make blue", image_path="reference.png", resolution=512)
+        eng._generate_with_trace.assert_not_called()
+
+    @pytest.mark.parametrize("scaled_edge", [96, 0])
+    def test_scale_string_uses_native_scale_parser(self, monkeypatch, tmp_path, scaled_edge):
+        import sys
+        from types import SimpleNamespace
+        from PIL import Image
+        source = tmp_path / "reference.png"
+        Image.new("RGB", (128, 64)).save(source)
+        scale = SimpleNamespace(value=1.5, get_scaled_value=MagicMock(return_value=scaled_edge))
+        parser = MagicMock(return_value=scale)
+        monkeypatch.setitem(sys.modules, "mflux.utils.scale_factor",
+                            SimpleNamespace(ScaleFactor=SimpleNamespace(parse=parser)))
+        eng = self._engine()
+        if scaled_edge == 0:
+            with pytest.raises(ValueError, match="rounds the source"):
+                eng.edit(prompt="", image_path=str(source), seed=123, resolution="1.5x")
+            eng._generate_with_trace.assert_not_called()
+        else:
+            eng.edit(prompt="", image_path=str(source), seed=123, resolution="1.5x")
+            assert eng._generate_with_trace.call_args.kwargs["resolution"] is scale
+        parser.assert_called_once_with("1.5x")
+        scale.get_scaled_value.assert_called_once_with(64)
+
+    @pytest.mark.parametrize("cancel_at", ["before", "after"])
+    def test_upscale_keeps_request_owned_cancellation(self, cancel_at):
+        from types import SimpleNamespace
+        from PIL import Image
+        from vmlx_engine.image_requests import ImageRequest, ImageRequestCancelled, current_image_request
+        eng = self._engine()
+        del eng._generate_with_trace  # Use the real observable dispatch.
+        request = ImageRequest("seedvr-cancel")
+        def generate(**kwargs):
+            request.stop()
+            return SimpleNamespace(image=Image.new("RGB", (128, 64)))
+        eng._model.generate_image = MagicMock(side_effect=generate)
+        if cancel_at == "before":
+            request.stop()
+        token = current_image_request.set(request)
+        try:
+            with pytest.raises(ImageRequestCancelled):
+                eng.edit(prompt="", image_path="reference.png", seed=123)
+            assert eng._model.generate_image.call_count == (0 if cancel_at == "before" else 1)
+        finally:
+            current_image_request.reset(token)
+
+
+class TestFIBONativePrompt:
+    def test_plain_text_has_actionable_error_before_inference(self):
+        from vmlx_engine.image_gen import ImageGenEngine
+        eng = ImageGenEngine()
+        eng._model = MagicMock()
+        eng._loaded = True
+        eng._mflux_class = "FIBO"
+        eng._generate_with_trace = MagicMock()
+        with pytest.raises(ValueError, match="FIBO requires a valid JSON prompt"):
+            eng.generate("a red mug")
+        eng._generate_with_trace.assert_not_called()
+
+    def test_json_prompt_is_preserved_byte_for_byte(self):
+        from PIL import Image
+        from types import SimpleNamespace
+        from vmlx_engine.image_gen import ImageGenEngine
+        eng = ImageGenEngine()
+        eng._model = MagicMock()
+        eng._loaded = True
+        eng._mflux_class = "FIBO"
+        eng._model_name = "fibo"
+        eng._generate_with_trace = MagicMock(return_value=(
+            SimpleNamespace(image=Image.new("RGB", (64, 64))), MagicMock(job_id="fibo")))
+        prompt = '{ "short_description": "A red mug", "custom": [1, true] }'
+        eng.generate(prompt, width=64, height=64, steps=1, seed=42)
+        assert eng._generate_with_trace.call_args.kwargs["prompt"] == prompt
+        assert eng.capabilities()["prompt_format"] == "json"

@@ -1,0 +1,28 @@
+name: Release automation CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install contract-test dependencies
+        run: python -m pip install --disable-pip-version-check pytest==8.4.2 PyYAML==6.0.2
+      - name: Validate release automation contracts
+        run: >-
+          python -m pytest tests/test_release_automation.py -q
+          -k "release_metadata_round_trip or website_deployer or workflows_are_manual or release_automation_excludes"
+      - name: Validate public document boundary
+        run: |
+          python -m pytest tests/test_public_hygiene.py -q
+          python tests/public_hygiene.py

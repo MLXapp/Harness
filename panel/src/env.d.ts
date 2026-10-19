@@ -1,0 +1,766 @@
+import { ElectronAPI } from "@electron-toolkit/preload";
+
+declare global {
+  interface Window {
+    electron: ElectronAPI;
+    api: {
+      navigation: {
+        onAction: (callback: (action: import('./shared/nativeNavigation').NativeNavigationAction) => void) => () => void;
+      };
+      models: {
+        scan: (modelType?: string) => Promise<any[]>;
+        info: (modelPath: string) => Promise<any>;
+        getDirectories: (modelType?: string) => Promise<{
+          directories: string[];
+          userDirectories: string[];
+          builtinDirectories: string[];
+        }>;
+        addDirectory: (
+          dirPath: string,
+          modelType?: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        removeDirectory: (
+          dirPath: string,
+          modelType?: string,
+        ) => Promise<{ success: boolean }>;
+        browseDirectory: () => Promise<{ canceled: boolean; path?: string }>;
+        classifyDflash2: (path?: string) => Promise<boolean>
+        dsparkDrafter?: (bundlePath?: string) => Promise<{ name: string; path: string; default: boolean } | null>
+        dflash2Drafters: (bundlePath?: string, scanLibrary?: boolean) => Promise<Array<{ name: string; path: string; bundled?: boolean }>>
+        detectConfig: (modelPath: string) => Promise<{
+          nativeGlmSsd?: boolean
+          family?: string;
+          toolParser?: string;
+          reasoningParser?: string;
+          supportsThinking?: boolean;
+          supportsAdaptiveThinking?: boolean;
+          supportsInstructMode?: boolean;
+          supportedReasoningEfforts?: Array<'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+          defaultReasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+          supportsThinkingBudget?: boolean;
+          thinkInTemplate?: boolean;
+          dsv4PoolQuantDefault?: boolean;
+          recommendedPrefillStepSize?: number;
+          cacheType?: string;
+          cacheSubtype?: string;
+          architectureHints?: Record<string, string | number | boolean>;
+          usePagedCache?: boolean;
+          enableAutoToolChoice?: boolean;
+          isMultimodal?: boolean;
+          forceTextOnly?: boolean;
+          runtimeModalities?: string[];
+          isTurboQuant?: boolean;
+          quantizationLabel?: string;
+          nativeMtp?: {
+            supported?: boolean;
+            depth?: number;
+            depthSource?: string;
+            runtimeScope?: 'text' | 'text+vl';
+            nativeCacheType?: string;
+            requiresDeterministicSampling?: boolean;
+            defaultMode?: 'auto' | 'off';
+            blockedReason?: string;
+          };
+          description?: string;
+          maxContextLength?: number;
+        } | null>;
+        detectTypes: (
+          modelPaths: string[],
+        ) => Promise<Record<string, "text" | "image" | "unknown">>;
+        getGenerationDefaults: (modelPath: string) => Promise<{
+          doSample?: boolean;
+          temperature?: number;
+          topP?: number;
+          topK?: number;
+          minP?: number;
+          repeatPenalty?: number;
+          maxNewTokens?: number;
+          maxThinkingTokens?: number;
+          thinkingBudgetSupported?: boolean;
+          supportsThinkingBudget?: boolean;
+          source?: "jang_config" | "generation_config";
+        } | null>;
+        searchHF: (
+          query: string,
+          sortBy?: string,
+          sortDir?: string,
+          modelType?: string,
+        ) => Promise<
+          Array<{
+            id: string;
+            author: string;
+            downloads: number;
+            likes: number;
+            lastModified: string;
+            tags: string[];
+            pipelineTag?: string;
+            size?: string;
+          }>
+        >;
+        fetchReadme: (repoId: string) => Promise<string | null>;
+        getRecentModels: (author: string, sort: 'createdAt' | 'lastModified') => Promise<Array<{
+          id: string; author: string; downloads: number; likes: number;
+          createdAt: string; lastModified: string; tags: string[];
+          pipelineTag?: string; size?: string;
+        }>>;
+        getRecommendedModels: () => Promise<
+          Array<{
+            id: string;
+            author: string;
+            downloads: number;
+            likes: number;
+            lastModified: string;
+            tags: string[];
+            pipelineTag?: string;
+          }>
+        >;
+        getCollectionModels: (slug: string) => Promise<
+          Array<{
+            id: string;
+            author: string;
+            downloads: number;
+            likes: number;
+            lastModified: string;
+            tags: string[];
+            pipelineTag?: string;
+            size?: string;
+            note?: string;
+          }>
+        >;
+        downloadModel: (
+          repoId: string,
+        ) => Promise<{ status: string; path?: string; error?: string }>;
+        cancelDownload: (
+          jobId?: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        getDownloadDir: () => Promise<string>;
+        setDownloadDir: (dir: string) => Promise<{ success: boolean }>;
+        /** vmlx#57: delete a local model directory (path-gated). */
+        deleteLocal: (modelPath: string) => Promise<{
+          success: boolean;
+          error?: string;
+          deletedPath?: string;
+          freedBytes?: number;
+          alreadyGone?: boolean;
+        }>;
+        browseDownloadDir: () => Promise<{ canceled: boolean; path?: string }>;
+        onDownloadProgress: (
+          callback: (data: { repoId: string; progress: string }) => void,
+        ) => () => void;
+        getDownloadStatus: () => Promise<any>;
+        onDownloadStarted: (callback: (data: any) => void) => () => void;
+        onDownloadQueued: (callback: (data: any) => void) => () => void;
+        onDownloadPaused: (callback: (data: any) => void) => () => void;
+        pauseDownload: (
+          jobId: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        resumeDownload: (
+          jobId: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        onDownloadComplete: (callback: (data: any) => void) => () => void;
+        onDownloadError: (callback: (data: any) => void) => () => void;
+        startDownload: (
+          repoId: string,
+        ) => Promise<{ status: string; path?: string; error?: string }>;
+        checkImageModel: (
+          modelName: string,
+          quantize?: number,
+        ) => Promise<{
+          available: boolean;
+          localPath?: string;
+          repoId?: string;
+          missing?: string[];
+        }>;
+        downloadImageModel: (
+          modelName: string,
+          quantize?: number,
+        ) => Promise<{
+          jobId?: string;
+          status: string;
+          localPath?: string;
+          repoId?: string;
+          queuePosition?: number;
+        }>;
+        openDownloadWindow: () => Promise<void>;
+      };
+      chat: {
+        createFolder: (name: string, parentId?: string) => Promise<any>;
+        getFolders: () => Promise<any[]>;
+        deleteFolder: (id: string) => Promise<{ success: boolean }>;
+        create: (
+          title: string,
+          modelId: string,
+          folderId?: string,
+          modelPath?: string,
+        ) => Promise<any>;
+        ensureForModel: (title: string, modelPath: string) => Promise<any>;
+        getAll: (folderId?: string) => Promise<any[]>;
+        getByModel: (modelPath: string) => Promise<any[]>;
+        get: (id: string) => Promise<any>;
+        update: (id: string, updates: any) => Promise<{ success: boolean }>;
+        delete: (id: string) => Promise<{ success: boolean }>;
+        deleteMessage: (messageId: string) => Promise<{ success: boolean }>;
+        deleteMessagesFrom: (chatId: string, fromTimestamp: number) => Promise<{ success: boolean }>;
+        /** vmlx#70: bulk-delete chat history. Omit scope to wipe everything. */
+        deleteAll: (scope?: { folderId?: string; modelPath?: string }) =>
+          Promise<{ success: boolean; deleted?: number; error?: string }>;
+        search: (query: string) => Promise<any[]>;
+        getMessages: (chatId: string) => Promise<any[]>;
+        addMessage: (
+          chatId: string,
+          role: string,
+          content: string,
+        ) => Promise<any>;
+        sendMessage: (
+          chatId: string,
+          content: string,
+          endpoint?: { host: string; port: number },
+          attachments?: Array<{
+            dataUrl: string;
+            name: string;
+            kind?: "image" | "video" | "audio" | "text";
+            type?: string;
+            size?: number;
+            text?: string;
+          }>,
+        ) => Promise<any>;
+        onStream: (callback: (data: any) => void) => () => void;
+        onComplete: (callback: (data: any) => void) => () => void;
+        onReasoningDone: (callback: (data: any) => void) => () => void;
+        onAnswerPass: (callback: (data: any) => void) => () => void;
+        onTyping: (callback: (data: any) => void) => () => void;
+        onToolStatus: (callback: (data: any) => void) => () => void;
+        abort: (chatId: string) => Promise<void>;
+        isStreaming: (chatId: string) => Promise<boolean>;
+        clearAllLocks: () => Promise<{ cleared: number }>;
+        getRecent: (limit?: number) => Promise<any[]>;
+        onAskUser: (callback: (data: any) => void) => () => void;
+        answerUser: (chatId: string, answer: string) => void;
+        setOverrides: (
+          chatId: string,
+          overrides: any,
+        ) => Promise<{ success: boolean }>;
+        getOverrides: (chatId: string) => Promise<any>;
+        clearOverrides: (chatId: string) => Promise<{ success: boolean }>;
+        pickImages: () => Promise<Array<{ dataUrl: string; name: string }>>;
+        openDirectory: () => Promise<{
+          canceled: boolean;
+          filePaths: string[];
+        }>;
+        export: (
+          chatId: string,
+          format: "json" | "markdown" | "sharegpt",
+        ) => Promise<{ success: boolean; path?: string }>;
+        import: (modelPath?: string) => Promise<{
+          success: boolean;
+          chatId?: string;
+          title?: string;
+          messageCount?: number;
+        }>;
+        getProfiles: () => Promise<any[]>;
+        saveProfile: (
+          name: string,
+          overrides: any,
+          isDefault?: boolean,
+        ) => Promise<any>;
+        updateProfile: (
+          id: string,
+          name: string,
+          overrides: any,
+          isDefault?: boolean,
+        ) => Promise<any>;
+        deleteProfile: (id: string) => Promise<{ success: boolean }>;
+      };
+      cache: {
+        stats: (
+          endpoint?: { host: string; port: number },
+          sessionId?: string,
+        ) => Promise<any>;
+        entries: (
+          endpoint?: { host: string; port: number },
+          sessionId?: string,
+        ) => Promise<any>;
+        warm: (
+          prompts: string[],
+          endpoint?: { host: string; port: number },
+          sessionId?: string,
+        ) => Promise<any>;
+        clear: (
+          cacheType: string,
+          endpoint?: { host: string; port: number },
+          sessionId?: string,
+          expected?: { root: string; pid?: number },
+        ) => Promise<any>;
+      };
+      audio: {
+        transcribe: (opts: {
+          audioBase64: string;
+          model?: string;
+          language?: string;
+          endpoint?: { host: string; port: number };
+          sessionId?: string;
+        }) => Promise<{ text: string; language?: string; duration?: number }>;
+        speak: (opts: {
+          text: string;
+          model?: string;
+          voice?: string;
+          speed?: number;
+          endpoint?: { host: string; port: number };
+          sessionId?: string;
+        }) => Promise<string>;
+        voices: (opts: {
+          model?: string;
+          endpoint?: { host: string; port: number };
+          sessionId?: string;
+        }) => Promise<{ voices: string[] }>;
+      };
+      benchmark: {
+        run: (
+          sessionId: string,
+          endpoint: { host: string; port: number },
+          modelPath: string,
+          modelName?: string,
+          options?: {
+            flushCache?: boolean;
+            profileId?: "peak" | "representative";
+          },
+        ) => Promise<any>;
+        history: (modelPath?: string) => Promise<any[]>;
+        delete: (id: string) => Promise<{ success: boolean }>;
+        onProgress: (callback: (data: any) => void) => () => void;
+      };
+      embeddings: {
+        embed: (
+          texts: string[],
+          endpoint: { host: string; port: number },
+          model?: string,
+          sessionId?: string,
+        ) => Promise<any>;
+      };
+      performance: {
+        capabilities: (sessionId: string) => Promise<{ key: string; capabilities: unknown } | null>;
+        health: (endpoint: { host: string; port: number }) => Promise<any>;
+      };
+      engine: {
+        checkInstallation: () => Promise<{
+          installed: boolean;
+          path?: string;
+          version?: string;
+          method?: string;
+          bundled?: boolean;
+        }>;
+        detectInstallers: () => Promise<any[]>;
+        checkEngineVersion: () => Promise<{
+          current: string;
+          bundled: string;
+          needsUpdate: boolean;
+        }>;
+        installStreaming: (
+          method: "uv" | "pip" | "bundled-update",
+          action: "install" | "upgrade",
+          installerPath?: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        cancelInstall: () => Promise<void>;
+        onInstallLog: (callback: (data: any) => void) => () => void;
+        onInstallComplete: (callback: (data: any) => void) => () => void;
+      };
+      templates: {
+        list: () => Promise<
+          Array<{
+            id: string;
+            name: string;
+            content: string;
+            category: string;
+            isBuiltin: boolean;
+            createdAt: number;
+          }>
+        >;
+        save: (template: {
+          id: string;
+          name: string;
+          content: string;
+          category: string;
+        }) => Promise<{ success: boolean }>;
+        delete: (id: string) => Promise<{ success: boolean }>;
+      };
+      settings: {
+        get: (key: string) => Promise<string | null>;
+        has: (key: string) => Promise<boolean>;
+        set: (key: string, value: string) => Promise<{ success: boolean; value?: string }>;
+        delete: (key: string) => Promise<{ success: boolean }>;
+      };
+      app: {
+        getPowerMode: () => Promise<import('./shared/powerMode').PowerModeStatus>;
+        getVersion: () => Promise<string>;
+        onUpdateAvailable: (
+          callback: (data: {
+            currentVersion: string;
+            latestVersion: string;
+            url: string;
+            notes?: string;
+          }) => void,
+        ) => () => void;
+        onMtpComponentUpdateAvailable: (
+          callback: (data: {
+            repoId: string;
+            modelPath: string;
+            remoteFingerprint: string;
+          }) => void,
+        ) => () => void;
+        dismissMtpComponentUpdate: (
+          repoId: string,
+          remoteFingerprint: string,
+        ) => Promise<{ success: boolean }>;
+      };
+      gateway: {
+        getStatus: () => Promise<{
+          running: boolean;
+          port: number;
+          host?: string;
+          lanHost?: string;
+          displayHost?: string;
+          singleModelMode: boolean;
+        }>;
+        setPort: (port: number) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean }>;
+        setHostAndPort: (port: number, host: string) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean }>;
+        setSingleModelMode: (enabled: boolean) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean }>;
+        onSingleModelModeChanged: (
+          callback: (data: { singleModelMode: boolean }) => void,
+        ) => () => void;
+      };
+      developer: {
+        info: (
+          modelPath: string,
+        ) => Promise<{ success: boolean; output: string; error?: string }>;
+        doctor: (
+          modelPath: string,
+          options?: { noInference?: boolean },
+        ) => Promise<{ success: boolean; error?: string }>;
+        convert: (args: {
+          model: string;
+          output?: string;
+          bits: number;
+          groupSize: number;
+          mode?: string;
+          dtype?: string;
+          force?: boolean;
+          skipVerify?: boolean;
+          trustRemoteCode?: boolean;
+          jangProfile?: string;
+          jangMethod?: string;
+          calibrationMethod?: string;
+          imatrixPath?: string;
+          useAwq?: boolean;
+          awqAlpha?: number;
+        }) => Promise<{ success: boolean; error?: string }>;
+        cancelOp: () => Promise<{ success: boolean; error?: string }>;
+        isRunning: () => Promise<{ running: boolean }>;
+        getBufferedLogs: () => Promise<{
+          lines: string[];
+          running: boolean;
+          result: { success: boolean; cancelled?: boolean; error?: string } | null;
+          operation: { command: string; args: string[] } | null;
+        }>;
+        browseOutputDir: () => Promise<string | null>;
+        onLog: (callback: (data: { data: string }) => void) => () => void;
+        onComplete: (
+          callback: (data: {
+            success: boolean;
+            cancelled?: boolean;
+            error?: string;
+          }) => void,
+        ) => () => void;
+      };
+      image: {
+        getRuntimeSettings: (sessionId: string, adoptLegacy?: boolean) => Promise<import('./shared/imageRuntimeSettings').ImageRuntimeSettings>;
+        saveRuntimeSettings: (sessionId: string, settings: unknown) => Promise<void>;
+        inspectLocalModel: (path: string) => Promise<ReturnType<typeof import('./shared/imageLocalModel').inspectLocalImageModel>>;
+        createSession: (
+          modelName: string,
+          sessionType?: "generate" | "edit",
+        ) => Promise<{ success: boolean; session?: any; error?: string }>;
+        getSessions: () => Promise<any[]>;
+        getSession: (id: string) => Promise<any>;
+        deleteSession: (
+          id: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        getGenerations: (sessionId: string) => Promise<any[]>;
+        /** ms#61: delete a single image from the gallery. */
+        deleteGeneration: (
+          generationId: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        generate: (params: {
+          sessionId: string;
+          prompt: string;
+          negativePrompt?: string;
+          model: string;
+          width: number;
+          height: number;
+          steps: number;
+          guidance: number;
+          seed?: number;
+          count: number;
+          quantize?: number;
+          serverPort: number;
+        }) => Promise<{
+          success: boolean;
+          generations?: any[];
+          cancelled?: boolean;
+          error?: string;
+        }>;
+        edit: (params: {
+          sessionId: string;
+          prompt: string;
+          negativePrompt?: string;
+          model: string;
+          imageBase64: string;
+          maskBase64?: string;
+          width: number;
+          height: number;
+          steps: number;
+          guidance: number;
+          strength: number;
+          operation?: 'upscale';
+          resolution?: number | string;
+          softness?: number;
+          seed?: number;
+          serverPort: number;
+        }) => Promise<{
+          success: boolean;
+          generations?: any[];
+          cancelled?: boolean;
+          error?: string;
+        }>;
+        startServer: (
+          modelName: string,
+          quantize?: number,
+          imageMode?: "generate" | "edit",
+          serverSettings?: {
+            host?: string;
+            port?: number;
+            apiKey?: string;
+            logLevel?: string;
+          },
+          onProgress?: (event: import("./shared/imageServerStartProgress").ImageServerStartProgress) => void,
+        ) => Promise<{
+          success: boolean;
+          sessionId?: string;
+          port?: number;
+          error?: string;
+          /** Precision the server was configured with (a local bundle's own level wins over the request). */
+          quantize?: number;
+          modelId?: string;
+          imageMode?: "generate" | "edit";
+          /** Non-fatal advisory the renderer translates (image.server.warnings.<code>), e.g. a low-precision edit variant. */
+          warningCode?: string;
+          warningParams?: Record<string, string>;
+          /** Stable error identity the renderer translates (image.server.errors.<code>). */
+          errorCode?: string;
+          errorParams?: Record<string, string>;
+          /** True when the failure was detected before the running server was touched. */
+          serverKept?: boolean;
+        }>;
+        stopServer: () => Promise<{ success: boolean; error?: string }>;
+        getRunningServer: () => Promise<{
+          sessionId: string;
+          modelName: string;
+          modelPath?: string;
+          host: string;
+          port: number;
+          status: string;
+          quantize: number;
+          imageMode: "generate" | "edit";
+        } | null>;
+        getRunningServers: () => Promise<
+          Array<{
+            sessionId: string;
+            modelName: string;
+            modelPath?: string;
+            host: string;
+            port: number;
+            status: string;
+            quantize: number;
+            imageMode: "generate" | "edit";
+          }>
+        >;
+        readFile: (imagePath: string) => Promise<string | null>;
+        saveFile: (
+          imagePath: string,
+        ) => Promise<{ success: boolean; path?: string; error?: string }>;
+        cancelGeneration: () => Promise<{ success: boolean; error?: string }>;
+        isGenerating: () => Promise<{
+          progress: import('./shared/imageJobProgress').ImageJobProgress | null;
+          generating: boolean;
+          cancelling: boolean;
+          startTime: number | null;
+          sessionId: string | null;
+        }>;
+        getModelPaths: () => Promise<
+          Array<{
+            modelId: string;
+            quantize: number;
+            localPath: string;
+            repoId?: string;
+            downloadedAt: number;
+          }>
+        >;
+      };
+      tools: {
+        getCodingToolStatus: () => Promise<
+          Record<
+            string,
+            {
+              installed: boolean;
+              configured: boolean;
+              configPath: string;
+              entries: Array<{ label: string; baseUrl: string }>;
+            }
+          >
+        >;
+        installCodingTool: (
+          toolId: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        addCodingToolConfig: (
+          toolId: string,
+          baseUrl: string,
+          modelName: string,
+          port: number | null,
+        ) => Promise<{ success: boolean; error?: string }>;
+        removeCodingToolConfig: (
+          toolId: string,
+          label: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        getConfigSnippets: (
+          baseUrl: string,
+          modelName: string,
+        ) => Promise<
+          Record<
+            string,
+            {
+              filePath: string;
+              language: string;
+              snippet: string;
+              notes: string;
+            }
+          >
+        >;
+      };
+      modelSettings: {
+        get: (modelPath: string) => Promise<any>;
+        getAll: () => Promise<any[]>;
+        save: (
+          modelPath: string,
+          settings: any,
+        ) => Promise<{ success: boolean }>;
+        delete: (modelPath: string) => Promise<{ success: boolean }>;
+      };
+      sessions: {
+        list: () => Promise<any[]>;
+        availablePort: () => Promise<number>;
+        get: (id: string) => Promise<any>;
+        create: (modelPath: string, config: any) => Promise<any>;
+        createRemote: (params: {
+          remoteUrl: string;
+          remoteApiKey?: string;
+          remoteModel: string;
+          remoteOrganization?: string;
+        }) => Promise<any>;
+        start: (
+          sessionId: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        stop: (
+          sessionId: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        restart: (
+          sessionId: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        getLoadProgress: () => Promise<Record<string, any>>;
+        delete: (
+          sessionId: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        repointModelPath: (sessionId: string) => Promise<{
+          success: boolean;
+          canceled?: boolean;
+          error?: string;
+          session?: any;
+          oldModelPath?: string;
+          newModelPath?: string;
+          reboundChatCount?: number;
+        }>;
+        detect: () => Promise<any[]>;
+        update: (
+          sessionId: string,
+          config: any,
+        ) => Promise<{
+          success: boolean;
+          error?: string;
+          restartRequired?: boolean;
+          changedKeys?: string[];
+        }>;
+        getLogs: (sessionId: string) => Promise<string[]>;
+        clearLogs: (sessionId: string) => Promise<{ success: boolean }>;
+        browseMcpConfig: () => Promise<{
+          canceled: boolean;
+          filePath?: string;
+        }>;
+        importMcpConfig: (filePath?: string) => Promise<{
+          success: boolean;
+          canceled?: boolean;
+          error?: string;
+          managed?: boolean;
+          sourcePath?: string;
+          importedPath?: string;
+          serverCount?: number;
+          servers: any[];
+          redactedConfig?: any;
+        }>;
+        validateMcpConfig: (filePath: string) => Promise<{
+          success: boolean;
+          error?: string;
+          serverCount?: number;
+          servers: any[];
+          redactedConfig?: any;
+        }>;
+        mcpStatus: (sessionId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          tools: any[];
+          servers: any[];
+          count?: number;
+        }>;
+        softSleep: (
+          sessionId: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        deepSleep: (
+          sessionId: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        wake: (
+          sessionId: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        touch: (sessionId: string) => Promise<{ success: boolean }>;
+        onStarting: (callback: (data: any) => void) => () => void;
+        onReady: (callback: (data: any) => void) => () => void;
+        onStopped: (callback: (data: any) => void) => () => void;
+        onError: (callback: (data: any) => void) => () => void;
+        onHealth: (callback: (data: any) => void) => () => void;
+        memoryWarnings: () => Promise<import('./shared/metalWiredLimit').MetalMemoryNotice[]>;
+        dismissMemoryWarning: (id: string, forModel: boolean) => Promise<void>;
+        copyMemoryWarningCommand: (id: string) => Promise<void>;
+        onMemoryWarnings: (callback: (data: import('./shared/metalWiredLimit').MetalMemoryNotice[]) => void) => () => void;
+        onLog: (callback: (data: any) => void) => () => void;
+        onCreated: (callback: (data: any) => void) => () => void;
+        onDeleted: (callback: (data: any) => void) => () => void;
+        onUpdated: (callback: (data: any) => void) => () => void;
+        onStandby: (callback: (data: any) => void) => () => void;
+        onLoadProgress: (
+          callback: (data: {
+            sessionId: string;
+            label: string;
+            labelKey?: string;
+            progress: number;
+          }) => void,
+        ) => () => void;
+      };
+    };
+  }
+}

@@ -1,0 +1,114 @@
+export interface ChatSettingsCompatibilityOverrides {
+  enableThinking?: boolean
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  builtinToolsEnabled?: boolean
+}
+
+export interface ChatSettingsCompatibilityInput {
+  messageCount: number
+  savedChatModelPath?: string
+  currentModelPath?: string
+  overrides: ChatSettingsCompatibilityOverrides
+  reasoningParser?: string
+  toolParser?: string
+  detectedFamily?: string
+  supportedReasoningEfforts?: Array<'low' | 'medium' | 'high' | 'xhigh' | 'max'>
+  isRemote?: boolean
+}
+
+function basename(path?: string): string {
+  if (!path) return 'unknown model'
+  return path.replace(/\/+$/, '').split('/').pop() || path
+}
+
+function samePath(a?: string, b?: string): boolean {
+  if (!a || !b) return true
+  return a.replace(/\/+$/, '') === b.replace(/\/+$/, '')
+}
+
+function parserUsesEffortLevels(
+  parser?: string,
+  detectedFamily?: string,
+  supportedReasoningEfforts?: Array<'low' | 'medium' | 'high' | 'xhigh' | 'max'>,
+): boolean {
+  if (supportedReasoningEfforts !== undefined) return supportedReasoningEfforts.length > 0
+  if (detectedFamily === 'hy3') return true
+  return parser === 'openai_gptoss' || parser === 'mistral'
+}
+
+function parserAcceptsEffort(
+  effort: string,
+  parser?: string,
+  detectedFamily?: string,
+  supportedReasoningEfforts?: Array<'low' | 'medium' | 'high' | 'xhigh' | 'max'>,
+): boolean {
+  if (supportedReasoningEfforts !== undefined) {
+    return supportedReasoningEfforts.includes(effort as 'low' | 'medium' | 'high' | 'xhigh' | 'max')
+  }
+  if (detectedFamily === 'hy3') {
+    return effort === 'low' || effort === 'high'
+  }
+  if (parser === 'mistral') {
+    return effort === 'high'
+  }
+  return true
+}
+
+export function buildChatSettingsCompatibilityWarnings(input: ChatSettingsCompatibilityInput): string[] {
+  const {
+    messageCount,
+    savedChatModelPath,
+    currentModelPath,
+    overrides,
+    reasoningParser,
+    toolParser,
+    detectedFamily,
+    supportedReasoningEfforts,
+  } = input
+  if (messageCount <= 0) return []
+
+  const warnings: string[] = []
+
+  if (!samePath(savedChatModelPath, currentModelPath)) {
+    warnings.push(
+      `This chat was started on ${basename(savedChatModelPath)} but is now attached to ${basename(currentModelPath)}. Review saved per-chat settings before continuing.`,
+    )
+  }
+
+  if (!input.isRemote && overrides.enableThinking === true && !reasoningParser) {
+    warnings.push('Saved Thinking On cannot take effect because this model has no detected reasoning parser.')
+  }
+
+  if (overrides.reasoningEffort) {
+    if (!input.isRemote && !reasoningParser) {
+      warnings.push(
+        `Saved reasoning effort "${overrides.reasoningEffort}" cannot take effect because this model has no detected reasoning parser.`,
+      )
+    } else if (!parserAcceptsEffort(
+      overrides.reasoningEffort,
+      reasoningParser,
+      detectedFamily,
+      supportedReasoningEfforts,
+    )) {
+      const modelName = detectedFamily === 'deepseek-v4'
+        ? 'this DSV4 bundle'
+        : detectedFamily === 'hy3'
+          ? 'Hy3'
+          : reasoningParser === 'mistral'
+            ? 'Mistral'
+            : reasoningParser
+      const choices = supportedReasoningEfforts && supportedReasoningEfforts.length > 0
+        ? `Auto or ${supportedReasoningEfforts.map(level => level[0].toUpperCase() + level.slice(1)).join('/')}`
+        : 'Auto or High'
+      warnings.push(`Saved reasoning effort "${overrides.reasoningEffort}" is not supported by ${modelName}. Use ${choices}.`)
+    } else if (!input.isRemote && !parserUsesEffortLevels(reasoningParser, detectedFamily, supportedReasoningEfforts)) {
+      warnings.push(`Saved reasoning effort "${overrides.reasoningEffort}" is not used by ${reasoningParser}. Reset the chat setting or switch to Auto.`)
+    }
+  }
+
+  if (!input.isRemote && overrides.builtinToolsEnabled === true && !toolParser) {
+    warnings.push('Built-in tools are enabled, but this model has no detected tool parser. Tool calls may not round-trip.')
+  }
+
+  return warnings
+}

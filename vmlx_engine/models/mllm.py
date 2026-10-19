@@ -1,0 +1,8334 @@
+# SPDX-License-Identifier: Apache-2.0
+"""
+MLX Multimodal Language Model (MLLM) wrapper.
+
+This module provides a wrapper around mlx-vlm for multimodal inference,
+supporting vision, audio, and video understanding on Apple Silicon.
+
+Features:
+- OpenAI-compatible API format for images and video
+- Smart video frame extraction with configurable FPS
+- Base64 and URL image support
+- Streaming generation
+- MLLM KV cache for repeated image/video+prompt combinations
+"""
+
+import atexit
+import base64
+import importlib
+import importlib.machinery
+import json
+import logging
+import math
+import os
+import sys
+import tempfile
+import threading
+import types
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Iterator
+from urllib.parse import urlparse
+
+import numpy as np
+import requests
+
+from vmlx_engine.mlx_memory import clear_mlx_memory_cache
+from vmlx_engine.mllm_cache import MLLMPrefixCacheManager
+from vmlx_engine.errors import UnsupportedMediaModalityError
+
+logger = logging.getLogger(__name__)
+
+
+_VLM_STREAM = None
+_VLM_STREAM_OWNER: int | None = None
+
+
+def _register_local_mlx_vlm_runtime_if_needed(model_path: str | Path) -> None:
+    """Register vMLX-owned mlx-vlm model classes before stock mlx-vlm import.
+
+    Some locally converted bundles use architectures that are not yet shipped
+    by upstream mlx-vlm. Stock `mlx_vlm.utils.load()` resolves the model class
+    from `config.json["model_type"]` before weights are inspected, so local
+    adapters must be registered at the MLLM load boundary. This is not a
+    monkey-patch of an instantiated model; it supplies the missing model module
+    that mlx-vlm's normal loader contract already expects.
+    """
+    try:
+        cfg_path = Path(model_path) / "config.json"
+        if not cfg_path.exists():
+            return
+        cfg = json.loads(cfg_path.read_text())
+    except Exception:
+        return
+
+    model_type = str(cfg.get("model_type", "")).lower()
+    if model_type == "zaya1_vl":
+        from ..models.zaya1_vl import register_mlx_vlm_zaya1_vl
+
+        register_mlx_vlm_zaya1_vl()
+    if model_type == "step3p7":
+        _register_step3p7_mlx_vlm_runtime()
+    if model_type == "mimo_v2":
+        from .mimo_v26_contract import read_mimo_v26_contract, mimo_v26_media_enabled
+        contract = read_mimo_v26_contract(model_path)
+        if contract is not None:
+            if not mimo_v26_media_enabled(contract):
+                raise ValueError("MiMo-V2.6 mixed-format bundles must not load through the legacy V2.5 media adapter")
+            return
+        _register_mimo_v2_mlx_vlm_runtime()
+    if model_type == "qwen4_exp" or str(
+        (cfg.get("text_config") or {}).get("model_type") or ""
+    ).lower() == "qwen4_exp_text":
+        from .qwen4_exp.register import register_qwen4_exp_runtime
+
+        register_qwen4_exp_runtime()
+    if model_type == "glm5_next":
+        from .glm5_next.register import register_glm5_next_vlm_runtime
+
+        register_glm5_next_vlm_runtime()
+    if model_type == "minicpmv4_7":
+        from .minicpmv4_7.register import register_minicpmv4_7_runtime
+
+        register_minicpmv4_7_runtime()
+
+
+def _register_step3p7_mlx_vlm_runtime() -> None:
+    module_name = "mlx_vlm.models.step3p7"
+    processor_module_name = f"{module_name}.processing_step3"
+    if module_name in sys.modules and processor_module_name in sys.modules:
+        return
+
+    source_runtime = importlib.import_module("vmlx_engine.models.step3p7_mlx_vlm")
+    module = types.ModuleType(module_name)
+    for name in (
+        "Model",
+        "ModelConfig",
+        "TextConfig",
+        "VisionConfig",
+        "ProjectorConfig",
+        "LanguageModel",
+        "VisionModel",
+        "Step3p7Projector",
+        "Step3VisionProcessor",
+        "Step3VLProcessor",
+    ):
+        setattr(module, name, getattr(source_runtime, name))
+    module.__file__ = getattr(source_runtime, "__file__", module_name)
+    module.__package__ = module_name
+    module.__path__ = []
+    module.__spec__ = importlib.machinery.ModuleSpec(
+        module_name,
+        loader=None,
+        origin=module.__file__,
+        is_package=True,
+    )
+    sys.modules[module_name] = module
+
+    processor_module = types.ModuleType(processor_module_name)
+    processor_module.Step3VisionProcessor = source_runtime.Step3VisionProcessor
+    processor_module.Step3VLProcessor = source_runtime.Step3VLProcessor
+    processor_module.__file__ = getattr(source_runtime, "__file__", processor_module_name)
+    processor_module.__package__ = module_name
+    processor_module.__spec__ = importlib.machinery.ModuleSpec(
+        processor_module_name,
+        loader=None,
+        origin=processor_module.__file__,
+        is_package=False,
+    )
+    sys.modules[processor_module_name] = processor_module
+
+
+def _install_mimo_v2_compiled_router_if_missing(text_runtime: Any) -> bool:
+    """Install the MiMo single-token compiled router when jang-tools is stale.
+
+    Newer `jang_tools.mimo_v2.mlx_model` ships this optimization natively.
+    vMLX still has to tolerate older bundled environments because the app
+    resolves MiMo through the bundled Python package at runtime. This patch is
+    deliberately narrow: it only replaces the router's `__call__`, keeps the
+    model's selected experts/weights semantics unchanged, and falls back to the
+    original implementation for non-decode/batched shapes or compile failures.
+    """
+
+    if os.environ.get("VMLINUX_DISABLE_MIMO_V2_COMPILED_ROUTER") == "1":
+        logger.info("MiMo-V2 compiled decode router patch disabled by environment")
+        return False
+
+    if hasattr(text_runtime, "run_compiled_mimo_decode_router"):
+        return False
+
+    gate_cls = getattr(text_runtime, "MiMoV2MoEGate", None)
+    if gate_cls is None or getattr(gate_cls, "_vmlx_compiled_router_patched", False):
+        return False
+
+    try:
+        import mlx.core as mx
+    except Exception:
+        return False
+
+    original_call = gate_cls.__call__
+    router_cache: dict[tuple[int, bool, int], Any] = {}
+
+    def _compiled_router(top_k: int, norm_topk_prob: bool, routed_scaling: float):
+        scaling_milli = int(round(float(routed_scaling) * 1000.0))
+        key = (int(top_k), bool(norm_topk_prob), scaling_milli)
+        cached = router_cache.get(key)
+        if cached is not None:
+            return cached
+
+        def _router(x_fp32, weight_fp32, bias_fp32):
+            logits = x_fp32 @ weight_fp32.T
+            scores = mx.sigmoid(logits)
+            corrected = scores + bias_fp32.reshape(1, -1)
+            inds = mx.argpartition(-corrected, kth=top_k - 1, axis=-1)[..., :top_k]
+            weights = mx.take_along_axis(scores, inds, axis=-1)
+            if norm_topk_prob:
+                weights = weights / (mx.sum(weights, axis=-1, keepdims=True) + 1e-20)
+            return inds, weights * (float(scaling_milli) * 0.001)
+
+        compiled = mx.compile(_router)
+        router_cache[key] = compiled
+        return compiled
+
+    def _vmlx_compiled_router_call(self, x):
+        try:
+            if int(x.shape[0]) != 1:
+                return original_call(self, x)
+            x_fp32 = x.astype(mx.float32)
+            weight_source_id = id(self.weight)
+            weight_fp32 = getattr(self, "_vmlx_gate_weight_fp32", None)
+            if (
+                weight_fp32 is None
+                or getattr(self, "_vmlx_gate_weight_source_id", None) != weight_source_id
+            ):
+                weight_fp32 = self.weight.astype(mx.float32)
+                self._vmlx_gate_weight_fp32 = weight_fp32
+                self._vmlx_gate_weight_source_id = weight_source_id
+            bias_source_id = id(self.e_score_correction_bias)
+            bias_fp32 = getattr(self, "_vmlx_gate_bias_fp32", None)
+            if (
+                bias_fp32 is None
+                or getattr(self, "_vmlx_gate_bias_source_id", None) != bias_source_id
+            ):
+                bias_fp32 = self.e_score_correction_bias.astype(mx.float32)
+                self._vmlx_gate_bias_fp32 = bias_fp32
+                self._vmlx_gate_bias_source_id = bias_source_id
+            router = _compiled_router(
+                int(self.top_k),
+                bool(self.norm_topk_prob),
+                float(self.routed_scaling),
+            )
+            topk_indices, topk_weights = router(
+                x_fp32,
+                weight_fp32,
+                bias_fp32,
+            )
+            return topk_indices, topk_weights.astype(x.dtype)
+        except Exception:
+            return original_call(self, x)
+
+    gate_cls._vmlx_original_call = original_call
+    gate_cls.__call__ = _vmlx_compiled_router_call
+    gate_cls._vmlx_compiled_router_patched = True
+    logger.info("Installed vMLX fallback compiled MiMo-V2 decode router")
+    return True
+
+
+def _install_mimo_v2_affine_switchglu_decode_fast_path() -> bool:
+    """Install an affine QuantizedSwitchLinear decode fast path for MiMo.
+
+    Stock `SwitchGLU.__call__` runs routed gate/up/down through three separate
+    `QuantizedSwitchLinear` module calls. On MiMo-V2 decode that is 47 MoE
+    layers * 3 gather_qmm dispatches per token, which matches the observed
+    ~600 ms/token even when the actual model graph is quantized. This path
+    keeps the same MLX affine `gather_qmm` math, but compiles the decode-shape
+    gate/up/SwiGLU/down sequence as one callable per shape.
+    """
+
+    if os.environ.get("VMLINUX_DISABLE_MIMO_V2_SWITCHGLU_FAST_PATH") == "1":
+        logger.info("MiMo-V2 SwitchGLU decode fast path disabled by environment")
+        return False
+
+    try:
+        from mlx_lm.models.switch_layers import SwitchGLU
+        import mlx.core as mx
+    except Exception:
+        return False
+
+    try:
+        from jang_tools.turboquant.tq_kernel import TurboQuantSwitchLinear
+        from jang_tools.turboquant.fused_gate_up_kernel import make_fused_gate_up_swiglu_decode
+        from jang_tools.turboquant.gather_tq_kernel import make_gather_tq_decode_per_row
+        from jang_tools.turboquant.hadamard_kernel import hadamard_rotate_metal
+    except Exception:
+        TurboQuantSwitchLinear = None
+        make_fused_gate_up_swiglu_decode = None
+        make_gather_tq_decode_per_row = None
+        hadamard_rotate_metal = None
+
+    if getattr(SwitchGLU, "_vmlx_mimo_affine_decode_fast_path", False):
+        return False
+
+    original_call = SwitchGLU.__call__
+    compiled: dict[tuple[Any, ...], Any] = {}
+    tq_compiled: dict[tuple[Any, ...], Any] = {}
+
+    def _record_fallback(reason: str) -> None:
+        try:
+            reasons = SwitchGLU._vmlx_mimo_affine_decode_fallback_reasons
+            reasons[reason] = int(reasons.get(reason, 0)) + 1
+        except Exception:
+            pass
+
+    def _compiled_for(gp, up, dp, k: int):
+        key = (
+            int(gp.input_dims),
+            int(gp.output_dims),
+            int(getattr(gp, "bits", 0) or 0),
+            int(getattr(gp, "group_size", 0) or 0),
+            str(getattr(gp, "mode", "affine")),
+            int(getattr(up, "bits", 0) or 0),
+            int(getattr(up, "group_size", 0) or 0),
+            str(getattr(up, "mode", "affine")),
+            int(getattr(dp, "bits", 0) or 0),
+            int(getattr(dp, "group_size", 0) or 0),
+            str(getattr(dp, "mode", "affine")),
+            int(k),
+        )
+        fn = compiled.get(key)
+        if fn is not None:
+            return fn
+
+        def _mlp(
+            x_flat,
+            indices_flat,
+            gate_w,
+            gate_s,
+            gate_b,
+            up_w,
+            up_s,
+            up_b,
+            down_w,
+            down_s,
+            down_b,
+        ):
+            x_exp = mx.expand_dims(x_flat, (-2, -3))
+            idx = indices_flat.reshape(1, -1)
+            x_up = mx.gather_qmm(
+                x_exp,
+                up_w,
+                up_s,
+                up_b,
+                rhs_indices=idx,
+                transpose=True,
+                group_size=up.group_size,
+                bits=up.bits,
+                mode=up.mode,
+                sorted_indices=False,
+            )
+            x_gate = mx.gather_qmm(
+                x_exp,
+                gate_w,
+                gate_s,
+                gate_b,
+                rhs_indices=idx,
+                transpose=True,
+                group_size=gp.group_size,
+                bits=gp.bits,
+                mode=gp.mode,
+                sorted_indices=False,
+            )
+            x_act = (x_gate * mx.sigmoid(x_gate)) * x_up
+            x_out = mx.gather_qmm(
+                x_act,
+                down_w,
+                down_s,
+                down_b,
+                rhs_indices=idx,
+                transpose=True,
+                group_size=dp.group_size,
+                bits=dp.bits,
+                mode=dp.mode,
+                sorted_indices=False,
+            )
+            return x_out.squeeze(-2)
+
+        fn = mx.compile(_mlp)
+        compiled[key] = fn
+        return fn
+
+    def _compiled_tq_for(gp, up, dp, k: int):
+        key = (
+            int(gp.in_features),
+            int(gp.out_features),
+            int(getattr(gp, "bits", 0) or 0),
+            int(getattr(up, "bits", 0) or 0),
+            int(getattr(dp, "bits", 0) or 0),
+            int(k),
+        )
+        fn = tq_compiled.get(key)
+        if fn is not None:
+            return fn
+
+        fused_gate_up = make_fused_gate_up_swiglu_decode(
+            gp.in_features,
+            gp.out_features,
+            gp.bits,
+            k,
+            swiglu_limit=0.0,
+        )
+        gather_down = make_gather_tq_decode_per_row(
+            gp.out_features,
+            gp.in_features,
+            dp.bits,
+            k,
+        )
+
+        def _mlp(
+            x_flat,
+            indices_flat,
+            gate_packed,
+            gate_norms,
+            up_packed,
+            up_norms,
+            down_packed,
+            down_norms,
+            gate_codebook,
+            down_codebook,
+            gate_signs,
+            down_signs,
+        ):
+            x_rot = hadamard_rotate_metal(x_flat, gate_signs)
+            x_act = fused_gate_up(
+                x_rot,
+                gate_packed,
+                gate_norms,
+                up_packed,
+                up_norms,
+                gate_codebook,
+                indices_flat,
+            )
+            x_act_rot = hadamard_rotate_metal(x_act, down_signs)
+            return gather_down(
+                x_act_rot,
+                down_packed,
+                down_norms,
+                down_codebook,
+                indices_flat,
+            )
+
+        fn = mx.compile(_mlp)
+        tq_compiled[key] = fn
+        return fn
+
+    def _fast_switchglu_call(self, x, indices):
+        gp = getattr(self, "gate_proj", None)
+        up = getattr(self, "up_proj", None)
+        dp = getattr(self, "down_proj", None)
+        if (
+            TurboQuantSwitchLinear is not None
+            and isinstance(gp, TurboQuantSwitchLinear)
+            and isinstance(up, TurboQuantSwitchLinear)
+            and isinstance(dp, TurboQuantSwitchLinear)
+        ):
+            if getattr(self, "training", False):
+                _record_fallback("tq_training_enabled")
+                return original_call(self, x, indices)
+            if getattr(indices, "ndim", 0) < 1 or int(getattr(indices, "size", 0) or 0) >= 64:
+                _record_fallback("tq_prefill_or_large_indices")
+                return original_call(self, x, indices)
+            x_sq = x
+            while getattr(x_sq, "ndim", 0) > 2 and x_sq.shape[-2] == 1:
+                x_sq = x_sq.squeeze(-2)
+            x_flat = x_sq.reshape(-1, gp.in_features)
+            if int(x_flat.shape[0]) != 1:
+                _record_fallback("tq_batched_or_prefill_x")
+                return original_call(self, x, indices)
+            k = int(indices.shape[-1]) if getattr(indices, "shape", ()) else 1
+            if k <= 0:
+                _record_fallback("tq_empty_indices")
+                return original_call(self, x, indices)
+            fn = _compiled_tq_for(gp, up, dp, k)
+            try:
+                out = fn(
+                    x_flat.astype(mx.float32),
+                    indices.reshape(-1).astype(mx.uint32),
+                    gp.packed,
+                    gp.norms,
+                    up.packed,
+                    up.norms,
+                    dp.packed,
+                    dp.norms,
+                    gp.codebook,
+                    dp.codebook,
+                    gp.signs,
+                    dp.signs,
+                )
+            except Exception:
+                _record_fallback("tq_compiled_fast_path_error")
+                logger.exception("MiMo-V2 TurboQuant SwitchGLU decode fast path failed; falling back")
+                return original_call(self, x, indices)
+            try:
+                calls = int(getattr(SwitchGLU, "_vmlx_mimo_tq_decode_fast_calls", 0)) + 1
+                SwitchGLU._vmlx_mimo_tq_decode_fast_calls = calls
+                if calls in {1, 64, 512, 4096}:
+                    logger.info(
+                        "MiMo-V2 TurboQuant SwitchGLU decode fast path active: calls=%d compiled_shapes=%d",
+                        calls,
+                        len(tq_compiled),
+                    )
+            except Exception:
+                pass
+            if out.dtype != x.dtype:
+                out = out.astype(x.dtype)
+            return out.reshape(*indices.shape[:-1], k, gp.in_features)
+
+        required_attrs = ("weight", "scales", "group_size", "bits", "mode")
+        if not all(all(hasattr(module, attr) for attr in required_attrs) for module in (gp, up, dp)):
+            _record_fallback("missing_affine_quant_attrs")
+            return original_call(self, x, indices)
+        if getattr(self, "training", False):
+            _record_fallback("training_enabled")
+            return original_call(self, x, indices)
+        if getattr(indices, "ndim", 0) < 1 or int(getattr(indices, "size", 0) or 0) >= 64:
+            _record_fallback("prefill_or_large_indices")
+            return original_call(self, x, indices)
+
+        x_sq = x
+        while getattr(x_sq, "ndim", 0) > 2 and x_sq.shape[-2] == 1:
+            x_sq = x_sq.squeeze(-2)
+        x_flat = x_sq.reshape(-1, gp.input_dims)
+        if int(x_flat.shape[0]) != 1:
+            _record_fallback("batched_or_prefill_x")
+            return original_call(self, x, indices)
+        k = int(indices.shape[-1]) if getattr(indices, "shape", ()) else 1
+        if k <= 0:
+            _record_fallback("empty_indices")
+            return original_call(self, x, indices)
+
+        fn = _compiled_for(gp, up, dp, k)
+        try:
+            out = fn(
+                x_flat.astype(mx.float32),
+                indices.reshape(-1).astype(mx.uint32),
+                gp["weight"],
+                gp["scales"],
+                gp.get("biases"),
+                up["weight"],
+                up["scales"],
+                up.get("biases"),
+                dp["weight"],
+                dp["scales"],
+                dp.get("biases"),
+            )
+        except Exception:
+            _record_fallback("compiled_fast_path_error")
+            logger.exception("MiMo-V2 affine SwitchGLU decode fast path failed; falling back")
+            return original_call(self, x, indices)
+        try:
+            calls = int(getattr(SwitchGLU, "_vmlx_mimo_affine_decode_fast_calls", 0)) + 1
+            SwitchGLU._vmlx_mimo_affine_decode_fast_calls = calls
+            if calls in {1, 64, 512, 4096}:
+                logger.info(
+                    "MiMo-V2 affine SwitchGLU decode fast path active: calls=%d compiled_shapes=%d",
+                    calls,
+                    len(compiled),
+                )
+        except Exception:
+            pass
+        if out.dtype != x.dtype:
+            out = out.astype(x.dtype)
+        return out.reshape(*indices.shape[:-1], k, gp.input_dims)
+
+    SwitchGLU._vmlx_mimo_original_affine_decode_call = original_call
+    SwitchGLU._vmlx_mimo_affine_decode_fast_calls = 0
+    SwitchGLU._vmlx_mimo_tq_decode_fast_calls = 0
+    SwitchGLU._vmlx_mimo_affine_decode_fallback_reasons = {}
+    SwitchGLU.__call__ = _fast_switchglu_call
+    SwitchGLU._vmlx_mimo_affine_decode_fast_path = True
+    logger.info("Installed vMLX MiMo-V2 affine SwitchGLU decode fast path")
+    return True
+
+
+def _is_mimo_v2_runtime_object_or_name(model: Any, model_name: Any = None) -> bool:
+    """Return true when an MLLM-loaded object is the MiMo-V2 runtime.
+
+    MiMo-V2 has an asymmetric native SWA cache contract. The generic
+    TurboQuant-KV auto path flattens all layers into TurboQuantKVCache and
+    breaks both speed and correctness for this architecture, so the MLLM load
+    call site must skip it before invoking the generic tokenizer helper.
+    """
+
+    if "mimo" in str(model_name or "").lower():
+        return True
+
+    seen: set[int] = set()
+    stack = [model]
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+
+        if str(getattr(current, "model_type", "") or "").lower() == "mimo_v2":
+            return True
+
+        for attr in ("config", "args", "text_config"):
+            value = getattr(current, attr, None)
+            if isinstance(value, dict):
+                if str(value.get("model_type", "") or "").lower() == "mimo_v2":
+                    return True
+                if str(value.get("architectures", "") or "").lower().find("mimo") >= 0:
+                    return True
+            elif value is not None:
+                if str(getattr(value, "model_type", "") or "").lower() == "mimo_v2":
+                    return True
+                stack.append(value)
+
+        for attr in ("inner", "language_model", "model"):
+            value = getattr(current, attr, None)
+            if value is not None:
+                stack.append(value)
+
+    return False
+
+
+def _quantize_mimo_v2_runtime_modules(root: Any, filtered: dict, quantization: dict) -> int:
+    """Quantize MiMo-V2 modules that live inside plain Python layer lists.
+
+    `jang_tools.mimo_v2` stores decoder layers in `model.layers`, a normal
+    Python list. MLX `nn.quantize(root, ...)` does not descend through that
+    list from the text model root, so the attention projections and SwitchGLU
+    expert projections stay unquantized unless vMLX walks each layer directly.
+    """
+
+    import mlx.nn as nn
+
+    quantized_paths: set[str] = set()
+
+    def params_for(path: str, module: Any):
+        if not path or not hasattr(module, "to_quantized"):
+            return False
+        override = quantization.get(path)
+        if isinstance(override, dict):
+            quantized_paths.add(path)
+            return dict(override)
+        if f"{path}.scales" in filtered:
+            quantized_paths.add(path)
+            return True
+        return False
+
+    def quantize_module(module: Any, prefix: str = "") -> None:
+        def class_predicate(path, child):
+            full_path = f"{prefix}.{path}" if prefix and path else (prefix or path)
+            return params_for(full_path, child)
+
+        nn.quantize(
+            module,
+            group_size=quantization.get("group_size"),
+            bits=quantization.get("bits"),
+            mode=quantization.get("mode", "affine"),
+            class_predicate=class_predicate,
+        )
+
+    def _infer_affine_params(path: str, module: Any) -> dict[str, Any]:
+        override = quantization.get(path)
+        if isinstance(override, dict):
+            return dict(override)
+        group_size = int(quantization.get("group_size") or 64)
+        bits = int(quantization.get("bits") or 8)
+        weight = filtered.get(f"{path}.weight")
+        scales = filtered.get(f"{path}.scales")
+        module_weight = getattr(module, "weight", None)
+        try:
+            in_features = int(module_weight.shape[-1])
+            scale_cols = int(scales.shape[-1])
+            packed_cols = int(weight.shape[-1])
+            if scale_cols > 0:
+                inferred_group = in_features // scale_cols
+                if inferred_group > 0:
+                    group_size = inferred_group
+                    inferred_bits = int(round(32 * packed_cols / max(in_features, 1)))
+                    if inferred_bits in {2, 3, 4, 5, 6, 8}:
+                        bits = inferred_bits
+        except Exception:
+            pass
+        return {
+            "group_size": group_size,
+            "bits": bits,
+            "mode": quantization.get("mode", "affine"),
+        }
+
+    def quantize_known_affine_path(owner: Any, attr: str, path: str) -> None:
+        module = getattr(owner, attr, None)
+        if module is None or not hasattr(module, "to_quantized"):
+            return
+        if f"{path}.weight" not in filtered or f"{path}.scales" not in filtered:
+            return
+        params = _infer_affine_params(path, module)
+        setattr(owner, attr, module.to_quantized(**params))
+        quantized_paths.add(path)
+
+    backbone = getattr(root, "model", None)
+    layers = getattr(backbone, "layers", None)
+    if isinstance(layers, list):
+        for idx, layer in enumerate(layers):
+            quantize_module(layer, f"model.layers.{idx}")
+            self_attn = getattr(layer, "self_attn", None)
+            if self_attn is not None:
+                # MiMo JANG_2L stores qkv_proj as MLX affine packed
+                # uint32/scales/biases. The module lives under a normal Python
+                # list in jang_tools, and some MLX quantize traversals miss it,
+                # leaving a plain Linear with packed-width weights such as
+                # [13568, 1024]. That crashes prefill against hidden size 4096.
+                # Patch it from the artifact sidecars before load_weights so
+                # the real affine QuantizedLinear receives the packed tensors.
+                for qkv_path in (
+                    f"model.layers.{idx}.self_attn.qkv_proj",
+                    f"language_model.model.layers.{idx}.self_attn.qkv_proj",
+                ):
+                    before = len(quantized_paths)
+                    quantize_known_affine_path(self_attn, "qkv_proj", qkv_path)
+                    if len(quantized_paths) != before:
+                        break
+
+    # Quantize root-level leaves such as lm_head. Decoder layers are already
+    # handled above because they are not visible from root.leaf_modules().
+    quantize_module(root)
+    return len(quantized_paths)
+
+
+def _quantize_mimo_v2_passthrough_decode_hotspots(root: Any, quantization: dict) -> int:
+    """Runtime-quantize MiMo decode-hot passthrough weights missing sidecars.
+
+    The MiMo JANG contract requires `lm_head` and embeddings to be 8-bit affine,
+    but some local bundles preserved them as bf16 without `.scales/.biases`.
+    `lm_head` is a 152k-vocab projection paid every decode token, so leaving it
+    bf16 makes the server appear to decode at ~1 tok/s even when the routed MoE
+    path is quantized. This converts only known MiMo hotspots after weights are
+    loaded, never generic model layers.
+    """
+
+    count = 0
+    group_size = int(quantization.get("group_size") or 64)
+    bits = int(quantization.get("bits") or 8)
+    mode = str(quantization.get("mode") or "affine")
+
+    lm_head = getattr(root, "lm_head", None)
+    if lm_head is not None and hasattr(lm_head, "to_quantized"):
+        root.lm_head = lm_head.to_quantized(group_size=group_size, bits=bits, mode=mode)
+        count += 1
+
+    backbone = getattr(root, "model", None)
+    embed_tokens = getattr(backbone, "embed_tokens", None)
+    if embed_tokens is not None and hasattr(embed_tokens, "to_quantized"):
+        backbone.embed_tokens = embed_tokens.to_quantized(
+            group_size=group_size,
+            bits=bits,
+            mode=mode,
+        )
+        count += 1
+
+    return count
+
+
+def _upgrade_mimo_v2_loaded_qkv_affine_modules(root: Any, quantization: dict) -> int:
+    """Upgrade loaded MiMo qkv packed-affine tensors inside Python layer lists.
+
+    MiMo stores decoder layers in a normal Python list, so generic
+    ``named_modules`` post-load repair does not reliably see qkv modules. If an
+    affine JANG bundle loaded packed uint32 qkv tensors into a plain Linear, the
+    first prefill crashes with hidden size 4096 vs packed width 1024. Walk the
+    list directly and splice in QuantizedLinear modules from the loaded sidecar
+    shapes.
+    """
+
+    import mlx.core as mx
+    import mlx.nn as nn
+
+    count = 0
+    default_bits = int(quantization.get("bits") or 8)
+    default_group_size = int(quantization.get("group_size") or 64)
+    default_mode = str(quantization.get("mode") or "affine")
+
+    backbone = getattr(root, "model", None)
+    layers = getattr(backbone, "layers", None)
+    if not isinstance(layers, list):
+        return 0
+
+    for layer in layers:
+        self_attn = getattr(layer, "self_attn", None)
+        module = getattr(self_attn, "qkv_proj", None)
+        if self_attn is None or module is None:
+            continue
+        if isinstance(module, nn.QuantizedLinear):
+            continue
+        w = getattr(module, "weight", None)
+        s = getattr(module, "scales", None)
+        if w is None or s is None:
+            continue
+        if getattr(w, "dtype", None) != mx.uint32:
+            continue
+
+        try:
+            packed_cols = int(w.shape[-1])
+            scale_cols = int(s.shape[-1])
+            inferred = None
+            for bits in (8, 6, 4, 3, 2):
+                real_cols = packed_cols * 32 // bits
+                if scale_cols > 0 and real_cols % scale_cols == 0:
+                    group_size = real_cols // scale_cols
+                    if group_size in (32, 64, 128):
+                        inferred = (bits, group_size, real_cols)
+                        break
+            if inferred is None:
+                bits = default_bits
+                group_size = default_group_size
+                real_cols = packed_cols * 32 // bits
+            else:
+                bits, group_size, real_cols = inferred
+            qmod = nn.QuantizedLinear(
+                input_dims=real_cols,
+                output_dims=int(w.shape[0]),
+                bias=False,
+                group_size=group_size,
+                bits=bits,
+                mode=default_mode,
+            )
+            qmod.weight = w
+            qmod.scales = s
+            b = getattr(module, "biases", None)
+            if b is not None:
+                qmod.biases = b
+            self_attn.qkv_proj = qmod
+            count += 1
+        except Exception:
+            logger.exception("MiMo-V2 qkv packed affine upgrade failed")
+    return count
+
+
+def _install_mimo_v2_pending_qkv_affine_modules(
+    root: Any,
+    pending: dict[str, dict[str, Any]],
+    quantization: dict,
+) -> int:
+    """Install qkv QuantizedLinear modules once split shard sidecars complete."""
+
+    import re
+    import mlx.nn as nn
+
+    default_bits = int(quantization.get("bits") or 8)
+    default_group_size = int(quantization.get("group_size") or 64)
+    default_mode = str(quantization.get("mode") or "affine")
+    backbone = getattr(root, "model", None)
+    layers = getattr(backbone, "layers", None)
+    if not isinstance(layers, list):
+        return 0
+
+    count = 0
+    for base, parts in list(pending.items()):
+        if "weight" not in parts or "scales" not in parts:
+            continue
+        match = re.match(r"^model\.layers\.(\d+)\.self_attn\.qkv_proj$", base)
+        if not match:
+            continue
+        layer_idx = int(match.group(1))
+        if layer_idx < 0 or layer_idx >= len(layers):
+            continue
+        self_attn = getattr(layers[layer_idx], "self_attn", None)
+        module = getattr(self_attn, "qkv_proj", None)
+        if self_attn is None or module is None or isinstance(module, nn.QuantizedLinear):
+            continue
+        weight = parts["weight"]
+        scales = parts["scales"]
+        try:
+            packed_cols = int(weight.shape[-1])
+            scale_cols = int(scales.shape[-1])
+            inferred = None
+            for bits in (8, 6, 4, 3, 2):
+                real_cols = packed_cols * 32 // bits
+                if scale_cols > 0 and real_cols % scale_cols == 0:
+                    group_size = real_cols // scale_cols
+                    if group_size in (32, 64, 128):
+                        inferred = (bits, group_size, real_cols)
+                        break
+            if inferred is None:
+                bits = default_bits
+                group_size = default_group_size
+                real_cols = packed_cols * 32 // bits
+            else:
+                bits, group_size, real_cols = inferred
+            qmod = nn.QuantizedLinear(
+                input_dims=real_cols,
+                output_dims=int(weight.shape[0]),
+                bias=False,
+                group_size=group_size,
+                bits=bits,
+                mode=default_mode,
+            )
+            qmod.weight = weight
+            qmod.scales = scales
+            if parts.get("biases") is not None:
+                qmod.biases = parts["biases"]
+            self_attn.qkv_proj = qmod
+            count += 1
+        except Exception:
+            logger.exception("MiMo-V2 pending qkv affine install failed for %s", base)
+    return count
+
+
+def _install_mimo_v2_pending_dense_mlp_affine_modules(
+    root: Any,
+    pending: dict[str, dict[str, Any]],
+    quantization: dict,
+) -> int:
+    """Install dense MiMo MLP QuantizedLinear modules from split shard sidecars."""
+
+    import re
+    import mlx.nn as nn
+
+    default_bits = int(quantization.get("bits") or 8)
+    default_group_size = int(quantization.get("group_size") or 64)
+    default_mode = str(quantization.get("mode") or "affine")
+    backbone = getattr(root, "model", None)
+    layers = getattr(backbone, "layers", None)
+    if not isinstance(layers, list):
+        return 0
+
+    count = 0
+    for base, parts in list(pending.items()):
+        if "weight" not in parts or "scales" not in parts:
+            continue
+        match = re.match(
+            r"^model\.layers\.(\d+)\.mlp\.(gate_proj|up_proj|down_proj)$",
+            base,
+        )
+        if not match:
+            continue
+        layer_idx = int(match.group(1))
+        attr = match.group(2)
+        if layer_idx < 0 or layer_idx >= len(layers):
+            continue
+        mlp = getattr(layers[layer_idx], "mlp", None)
+        module = getattr(mlp, attr, None)
+        if mlp is None or module is None or isinstance(module, nn.QuantizedLinear):
+            continue
+        weight = parts["weight"]
+        scales = parts["scales"]
+        try:
+            packed_cols = int(weight.shape[-1])
+            scale_cols = int(scales.shape[-1])
+            inferred = None
+            for bits in (8, 6, 4, 3, 2):
+                real_cols = packed_cols * 32 // bits
+                if scale_cols > 0 and real_cols % scale_cols == 0:
+                    group_size = real_cols // scale_cols
+                    if group_size in (32, 64, 128):
+                        inferred = (bits, group_size, real_cols)
+                        break
+            if inferred is None:
+                bits = default_bits
+                group_size = default_group_size
+                real_cols = packed_cols * 32 // bits
+            else:
+                bits, group_size, real_cols = inferred
+            qmod = nn.QuantizedLinear(
+                input_dims=real_cols,
+                output_dims=int(weight.shape[0]),
+                bias=False,
+                group_size=group_size,
+                bits=bits,
+                mode=default_mode,
+            )
+            qmod.weight = weight
+            qmod.scales = scales
+            if parts.get("biases") is not None:
+                qmod.biases = parts["biases"]
+            setattr(mlp, attr, qmod)
+            count += 1
+        except Exception:
+            logger.exception(
+                "MiMo-V2 pending dense MLP affine install failed for %s",
+                base,
+            )
+    return count
+
+
+def _install_mimo_v2_rotating_cache_keep_patch_if_needed(text_runtime: Any) -> bool:
+    """Patch stale MiMo SWA cache construction to match full-forward windows.
+
+    The bundled MiMo text runtime builds SWA layers with
+    `RotatingKVCache(max_size=sliding_window, keep=4)`. That preserves the
+    first four prompt tokens during incremental decode, but MiMo full-forward
+    uses a plain sliding-window mask without a keep prefix. Live required-tool
+    probes showed the mismatch directly:
+
+    - full forward after `<parameter=value>blue` ranks `-cat` first;
+    - incremental decode with `keep=4` ranks newline/punctuation first;
+    - incremental decode with `keep=0` ranks `-cat` first.
+
+    This patch changes only the MiMo cache constructor. It does not synthesize
+    tool calls or alter model weights/logits outside the cache layout.
+    """
+
+    model_cls = getattr(text_runtime, "Model", None)
+    rotating_cls = getattr(text_runtime, "RotatingKVCache", None)
+    kv_cls = getattr(text_runtime, "KVCache", None)
+    if (
+        model_cls is None
+        or rotating_cls is None
+        or kv_cls is None
+        or getattr(model_cls, "_vmlx_mimo_keep0_cache_patched", False)
+    ):
+        return False
+
+    original_make_cache = model_cls.make_cache
+
+    def _vmlx_mimo_keep0_make_cache(self):
+        caches = []
+        for layer in self.model.layers:
+            if getattr(layer, "is_swa", False):
+                caches.append(
+                    rotating_cls(max_size=self.args.sliding_window, keep=0)
+                )
+            else:
+                caches.append(kv_cls())
+        return caches
+
+    model_cls._vmlx_original_make_cache = original_make_cache
+    model_cls.make_cache = _vmlx_mimo_keep0_make_cache
+    model_cls._vmlx_mimo_keep0_cache_patched = True
+    logger.info("Installed vMLX MiMo-V2 keep=0 rotating-cache patch")
+    return True
+
+
+def _register_mimo_v2_mlx_vlm_runtime() -> None:
+    import mlx.core as mx
+
+    module_name = "mlx_vlm.models.mimo_v2"
+    existing_module = sys.modules.get(module_name)
+    if existing_module is not None and getattr(
+        existing_module, "_vmlx_mimo_v2_runtime_registered", False
+    ):
+        return
+
+    text_runtime = importlib.import_module("jang_tools.mimo_v2.mlx_model")
+    _install_mimo_v2_compiled_router_if_missing(text_runtime)
+    _install_mimo_v2_affine_switchglu_decode_fast_path()
+    _install_mimo_v2_rotating_cache_keep_patch_if_needed(text_runtime)
+
+    import mlx.nn as nn
+
+    TextConfig = getattr(text_runtime, "ModelArgs")
+    TextModel = getattr(text_runtime, "Model")
+
+    _INPUTS_EMBEDS_UNSET = object()
+
+    def _mimo_v2_get_module(root, dotted):
+        cur = root
+        for part in dotted.split("."):
+            cur = cur[int(part)] if part.isdigit() else getattr(cur, part)
+        return cur
+
+    def _mimo_v2_set_module(root, dotted, new_module):
+        parts = dotted.split(".")
+        cur = root
+        for part in parts[:-1]:
+            cur = cur[int(part)] if part.isdigit() else getattr(cur, part)
+        last = parts[-1]
+        if last.isdigit():
+            cur[int(last)] = new_module
+        else:
+            setattr(cur, last, new_module)
+
+    def _mimo_v2_assign_weight(root, dotted, value):
+        if dotted == "visual.patch_embed.proj.weight" and len(value.shape) > 2:
+            value = mx.reshape(value, (value.shape[0], -1))
+        if (
+            dotted.startswith("visual.blocks.")
+            and dotted.endswith(".attn.qkv.weight")
+            and len(value.shape) == 2
+        ):
+            attn_path = dotted[: -len(".qkv.weight")]
+            attn = _mimo_v2_get_module(root, attn_path)
+            denom = int(attn.num_heads) + 2 * int(attn.num_kv_heads)
+            if denom > 0 and int(value.shape[0]) % denom == 0:
+                inferred_head_dim = int(value.shape[0]) // denom
+                attn.head_dim = inferred_head_dim
+                attn.scaling = inferred_head_dim**-0.5
+                try:
+                    visual = _mimo_v2_get_module(root, "visual")
+                    visual.vision_head_dim = inferred_head_dim
+                except Exception:
+                    pass
+        parts = dotted.split(".")
+        cur = root
+        for part in parts[:-1]:
+            cur = cur[int(part)] if part.isdigit() else getattr(cur, part)
+        last = parts[-1]
+        if last.isdigit():
+            cur[int(last)] = value
+        else:
+            setattr(cur, last, value)
+
+    def _install_mimo_v2_prestacked_jangtq_modules(model, weights, *, seed=42):
+        """Bind prestacked MiMo JANGTQ tensors to TurboQuant switch modules.
+
+        The promoted MiMo-V2.5-JANGTQ_2 bundle stores routed experts directly as
+        ``model.layers.N.mlp.switch_mlp.{proj}.tq_{packed,norms,bits}``.
+        ``mlx_vlm.load`` calls this shim's ``load_weights`` path, which otherwise
+        rejects those keys as unknown parameters. Do not silence strict loading:
+        replace the corresponding SwitchLinear with TurboQuantSwitchLinear and
+        assign the actual packed/norm tensors from the artifact.
+        """
+        tq_groups = {}
+        for key, value in weights.items():
+            if key.endswith(".tq_packed"):
+                tq_groups.setdefault(key[: -len(".tq_packed")], {})["packed"] = value
+            elif key.endswith(".tq_norms"):
+                tq_groups.setdefault(key[: -len(".tq_norms")], {})["norms"] = value
+            elif key.endswith(".tq_bits"):
+                tq_groups.setdefault(key[: -len(".tq_bits")], {})["bits"] = value
+
+        if not tq_groups:
+            return 0
+
+        from jang_tools.turboquant.tq_kernel import TurboQuantSwitchLinear
+
+        installed = 0
+        for base, parts in sorted(tq_groups.items()):
+            if ".switch_mlp." not in base:
+                continue
+            missing = {"packed", "norms", "bits"} - set(parts)
+            if missing:
+                raise RuntimeError(
+                    f"MiMo-V2 prestacked JANGTQ group {base} missing {sorted(missing)}"
+                )
+
+            packed = parts["packed"]
+            norms = parts["norms"]
+            bits_tensor = parts["bits"]
+            try:
+                bits = int(bits_tensor[0].item())
+            except Exception:
+                bits = int(bits_tensor.item())
+            if bits <= 0 or 32 % bits != 0:
+                raise RuntimeError(f"MiMo-V2 prestacked JANGTQ group {base} has bad bits={bits}")
+            if len(packed.shape) != 3 or len(norms.shape) != 2:
+                raise RuntimeError(
+                    f"MiMo-V2 prestacked JANGTQ group {base} has bad shapes: "
+                    f"packed={packed.shape}, norms={norms.shape}"
+                )
+            if packed.shape[:2] != norms.shape:
+                raise RuntimeError(
+                    f"MiMo-V2 prestacked JANGTQ group {base} shape mismatch: "
+                    f"packed={packed.shape}, norms={norms.shape}"
+                )
+
+            # Fail loudly if the artifact names a module that the MiMo runtime
+            # does not expose. This distinguishes runtime incompatibility from
+            # corruption instead of silently dropping expert weights.
+            _mimo_v2_get_module(model, base)
+
+            num_experts, out_features, packed_cols = packed.shape
+            in_features = packed_cols * (32 // bits)
+            tq_module = TurboQuantSwitchLinear(
+                in_features=in_features,
+                out_features=out_features,
+                num_experts=num_experts,
+                bits=bits,
+                bias=False,
+                seed=seed,
+            )
+            tq_module.packed = packed
+            tq_module.norms = norms
+            _mimo_v2_set_module(model, base, tq_module)
+            installed += 1
+
+        return installed
+
+    class _MiMoV2CausalLMOutput:
+        def __init__(self, logits):
+            self.logits = logits
+            self.cross_attention_states = None
+            self.encoder_outputs = None
+
+    class _MiMoV2LanguageModelCompat(nn.Module):
+        """Adapt jang_tools' mlx-lm MiMo model to mlx-vlm's language-model API."""
+
+        def __init__(self, inner):
+            super().__init__()
+            self.inner = inner
+
+        @property
+        def model(self):
+            return self.inner.model
+
+        @property
+        def layers(self):
+            return self.inner.layers
+
+        def make_cache(self):
+            return self.inner.make_cache()
+
+        def sanitize(self, weights):
+            return self.inner.sanitize(weights)
+
+        def load_weights(self, weights, strict=True):
+            return self.inner.load_weights(weights, strict=strict)
+
+        def __call__(
+            self,
+            input_ids=None,
+            *,
+            inputs_embeds=_INPUTS_EMBEDS_UNSET,
+            cache=None,
+            mask=None,
+            **kwargs,
+        ):
+            mllm_style_call = inputs_embeds is not _INPUTS_EMBEDS_UNSET
+            if mllm_style_call:
+                try:
+                    logits = self.inner(
+                        input_ids,
+                        inputs_embeds=inputs_embeds,
+                        cache=cache,
+                        mask=mask,
+                        **kwargs,
+                    )
+                except TypeError as exc:
+                    if "inputs_embeds" not in str(exc):
+                        raise
+                    if inputs_embeds is None:
+                        logits = self.inner(input_ids, cache=cache, mask=mask, **kwargs)
+                    else:
+                        logits = self.inner.model(
+                            input_ids=None,
+                            inputs_embeds=inputs_embeds,
+                            cache=cache,
+                            mask=mask,
+                            **kwargs,
+                        )
+                        logits = self.inner.lm_head(logits)
+                if hasattr(logits, "logits"):
+                    return logits
+                return _MiMoV2CausalLMOutput(logits)
+            return self.inner(input_ids, cache=cache, mask=mask, **kwargs)
+
+    class _MiMoV2MediaConfig:
+        """Preserve MiMo media metadata until the real media forward is wired.
+
+        The earlier placeholder configs threw away `vision_config`,
+        `audio_config`, and `processor_config` even though the local JANG
+        bundles carry the exact ViT/audio/tokenizer contract. Keeping these
+        fields on the runtime config is a required intermediate step for real
+        VL/audio/video wiring: load/forward code can now consume the model-owned
+        shapes, token ids, pixel/frame limits, and timing parameters instead of
+        guessing or hard-coding them.
+        """
+
+        default_model_type = "mimo_v2_media"
+
+        def __init__(self, **params):
+            self.raw_config = dict(params)
+            self.model_type = str(
+                params.get("model_type") or self.default_model_type
+            )
+            for key, value in params.items():
+                setattr(self, key, value)
+
+        @classmethod
+        def from_dict(cls, params):
+            return cls(**dict(params or {}))
+
+        def to_dict(self):
+            return dict(self.raw_config)
+
+    class VisionConfig(_MiMoV2MediaConfig):
+        default_model_type = "mimo_v2_vision"
+
+    class AudioConfig(_MiMoV2MediaConfig):
+        default_model_type = "mimo_v2_audio"
+
+    class ModelConfig:
+        def __init__(
+            self,
+            text_config=None,
+            vision_config=None,
+            audio_config=None,
+            processor_config=None,
+            model_type: str = "mimo_v2",
+            eos_token_id=None,
+            **kwargs,
+        ):
+            self.model_type = model_type
+            self.text_config = text_config
+            self.vision_config = vision_config or VisionConfig()
+            self.audio_config = audio_config or AudioConfig()
+            self.processor_config = dict(processor_config or {})
+            self.eos_token_id = eos_token_id
+            self.image_token_id = kwargs.get("image_token_id")
+            self.video_token_id = kwargs.get("video_token_id")
+            self.audio_token_id = kwargs.get("audio_token_id")
+            self.vision_start_token_id = kwargs.get("vision_start_token_id")
+            self.vision_end_token_id = kwargs.get("vision_end_token_id")
+            self.video_start_token_id = kwargs.get("video_start_token_id")
+            self.video_end_token_id = kwargs.get("video_end_token_id")
+            self.audio_start_token_id = kwargs.get("audio_start_token_id")
+            self.audio_end_token_id = kwargs.get("audio_end_token_id")
+            self.media_token_ids = {
+                key: value
+                for key, value in {
+                    "image": self.image_token_id,
+                    "video": self.video_token_id,
+                    "audio": self.audio_token_id,
+                    "vision_start": self.vision_start_token_id,
+                    "vision_end": self.vision_end_token_id,
+                    "video_start": self.video_start_token_id,
+                    "video_end": self.video_end_token_id,
+                    "audio_start": self.audio_start_token_id,
+                    "audio_end": self.audio_end_token_id,
+                }.items()
+                if value is not None
+            }
+            self.media_runtime_status = kwargs.get(
+                "multimodal_status",
+                "weights_preserved_text_runtime",
+            )
+            preserved_modalities = kwargs.get("preserved_modalities")
+            self.preserved_modalities = list(
+                preserved_modalities
+                if preserved_modalities is not None
+                else ["vision", "image", "video", "audio"]
+            )
+            unwired_modalities = kwargs.get("unwired_modalities")
+            if unwired_modalities is None:
+                status = str(self.media_runtime_status or "").lower()
+                unwired_modalities = (
+                    []
+                    if status in {"media_runtime_enabled", "runtime_enabled", "wired"}
+                    else ["vision", "image", "video", "audio"]
+                )
+            self.unwired_modalities = list(unwired_modalities)
+
+        @property
+        def media_runtime_wired(self) -> bool:
+            status = str(self.media_runtime_status or "").lower()
+            if status in {
+                "",
+                "weights_preserved_text_runtime",
+                "text_runtime",
+                "text_only",
+                "unwired",
+                "preserved_disabled",
+            }:
+                return False
+            return not bool(self.unwired_modalities)
+
+        @classmethod
+        def from_dict(cls, params):
+            merged_text = dict(params)
+            if isinstance(params.get("text_config"), dict):
+                merged_text.update(params["text_config"])
+            params["text_config"] = merged_text
+            quantization = params.get("quantization")
+            if isinstance(quantization, dict):
+                for key, value in list(quantization.items()):
+                    if (
+                        isinstance(value, dict)
+                        and key.startswith(("model.", "lm_head"))
+                        and not key.startswith("language_model.")
+                    ):
+                        quantization.setdefault(f"language_model.{key}", value)
+            return cls(
+                text_config=TextConfig.from_dict(merged_text),
+                vision_config=VisionConfig.from_dict(params.get("vision_config") or {}),
+                audio_config=AudioConfig.from_dict(params.get("audio_config") or {}),
+                processor_config=params.get("processor_config") or {},
+                model_type=str(params.get("model_type") or "mimo_v2"),
+                eos_token_id=params.get("eos_token_id"),
+                image_token_id=params.get("image_token_id")
+                or (params.get("processor_config") or {}).get("image_token_id"),
+                video_token_id=params.get("video_token_id")
+                or (params.get("processor_config") or {}).get("video_token_id"),
+                audio_token_id=params.get("audio_token_id")
+                or (params.get("processor_config") or {}).get("audio_token_id"),
+                vision_start_token_id=params.get("vision_start_token_id")
+                or (params.get("processor_config") or {}).get("vision_start_token_id"),
+                vision_end_token_id=params.get("vision_end_token_id")
+                or (params.get("processor_config") or {}).get("vision_end_token_id"),
+                video_start_token_id=(params.get("processor_config") or {}).get("video_start_token_id"),
+                video_end_token_id=(params.get("processor_config") or {}).get("video_end_token_id"),
+                audio_start_token_id=(params.get("processor_config") or {}).get("audio_start_token_id"),
+                audio_end_token_id=(params.get("processor_config") or {}).get("audio_end_token_id"),
+                preserved_modalities=(
+                    (params.get("capabilities") or {}).get("preserved_modalities")
+                    or params.get("preserved_modalities")
+                ),
+                unwired_modalities=(
+                    (params.get("capabilities") or {}).get("unwired_modalities")
+                    or params.get("unwired_modalities")
+                ),
+                multimodal_status=(
+                    (params.get("capabilities") or {}).get("multimodal_status")
+                    or params.get("multimodal_status")
+                ),
+            )
+
+    class VisionModel(nn.Module):
+        def __init__(self, config=None):
+            super().__init__()
+            self.config = config or VisionConfig()
+            self.hidden_size = int(getattr(self.config, "hidden_size", 1280))
+            self.out_hidden_size = int(
+                getattr(self.config, "out_hidden_size", 4096)
+            )
+            self.patch_size = int(getattr(self.config, "patch_size", 16))
+            self.temporal_patch_size = int(
+                getattr(self.config, "temporal_patch_size", 2)
+            )
+            self.in_channels = int(
+                getattr(self.config, "in_channels", None)
+                or getattr(self.config, "in_chans", 3)
+            )
+            self.spatial_merge_size = int(
+                getattr(self.config, "spatial_merge_size", 2)
+            )
+            self.patch_embed = MiMoVisionPatchEmbed(
+                patch_size=self.patch_size,
+                temporal_patch_size=self.temporal_patch_size,
+                in_channels=self.in_channels,
+                embed_dim=self.hidden_size,
+            )
+            self.merger = MiMoVisionPatchMerger(
+                dim=self.out_hidden_size,
+                context_dim=self.hidden_size,
+                spatial_merge_size=self.spatial_merge_size,
+            )
+            depth = int(getattr(self.config, "depth", 0) or 0)
+            intermediate_size = int(
+                getattr(self.config, "intermediate_size", self.hidden_size * 4)
+            )
+            num_heads = int(getattr(self.config, "num_heads", 1) or 1)
+            num_kv_heads = int(
+                getattr(self.config, "num_key_value_heads", num_heads) or num_heads
+            )
+            head_dim = int(getattr(self.config, "qk_channels", 0) or 0)
+            if head_dim <= 0:
+                head_dim = max(1, self.hidden_size // max(1, num_heads))
+            self.vision_head_dim = head_dim
+            rms_norm_eps = float(getattr(self.config, "rms_norm_eps", 1e-6) or 1e-6)
+            hidden_act = str(getattr(self.config, "hidden_act", "silu") or "silu")
+            use_sink = bool(getattr(self.config, "use_sink", False))
+            window_size = int(getattr(self.config, "visual_token_window_size", -1) or -1)
+            self.fullatt_block_indexes = set(
+                int(i) for i in (getattr(self.config, "fullatt_block_indexes", []) or [])
+            )
+            self.vit_window_attn_types = list(
+                getattr(self.config, "vit_window_attn_types", None) or [-1] * depth
+            )
+            self.blocks = [
+                MiMoVisionBlock(
+                    dim=self.hidden_size,
+                    intermediate_dim=intermediate_size,
+                    num_heads=num_heads,
+                    num_kv_heads=num_kv_heads,
+                    head_dim=head_dim,
+                    hidden_act=hidden_act,
+                    rms_norm_eps=rms_norm_eps,
+                    use_sinks=use_sink and (i not in self.fullatt_block_indexes),
+                    window_size=window_size,
+                )
+                for i in range(depth)
+            ]
+
+        def embed_patches(self, pixel_values):
+            return self.patch_embed(pixel_values)
+
+        def merge_patches(self, hidden_states):
+            return self.merger(hidden_states)
+
+        def _grid_rows(self, grid_thw):
+            grid = mx.array(grid_thw)
+            if grid.ndim == 1:
+                grid = grid[None, :]
+            return [[int(v) for v in row] for row in grid.tolist()]
+
+        def apply_index(self, tensor, index):
+            tensor = mx.array(tensor)
+            index = mx.array(index)
+            unit = self.spatial_merge_size * self.spatial_merge_size
+            tail_shape = tuple(tensor.shape[1:])
+            grouped = mx.reshape(tensor, (-1, unit) + tail_shape)
+            selected = grouped[index]
+            return mx.reshape(selected, (-1,) + tail_shape)
+
+        def get_window_index_1d(self, grid_thw, col: bool = True):
+            window_index = []
+            window_index_id = 0
+            for grid_t, grid_h, grid_w in self._grid_rows(grid_thw):
+                llm_grid_h = grid_h // self.spatial_merge_size
+                llm_grid_w = grid_w // self.spatial_merge_size
+                index = mx.reshape(
+                    mx.arange(grid_t * llm_grid_h * llm_grid_w),
+                    (grid_t, llm_grid_h, llm_grid_w),
+                )
+                if col:
+                    index = mx.reshape(mx.transpose(index, (0, 2, 1)), (-1,))
+                else:
+                    index = mx.reshape(index, (-1,))
+                window_index.extend((index + window_index_id).tolist())
+                window_index_id += grid_t * llm_grid_h * llm_grid_w
+            return mx.array(window_index, dtype=mx.int32)
+
+        def rot_pos_emb(self, grid_thw):
+            pos_ids = []
+            max_grid_size = 1
+            for grid_t, grid_h, grid_w in self._grid_rows(grid_thw):
+                max_grid_size = max(max_grid_size, grid_h, grid_w)
+                hpos = mx.broadcast_to(mx.arange(grid_h)[:, None], (grid_h, grid_w))
+                hpos = mx.reshape(
+                    hpos,
+                    (
+                        grid_h // self.spatial_merge_size,
+                        self.spatial_merge_size,
+                        grid_w // self.spatial_merge_size,
+                        self.spatial_merge_size,
+                    ),
+                )
+                hpos = mx.reshape(mx.transpose(hpos, (0, 2, 1, 3)), (-1,))
+                wpos = mx.broadcast_to(mx.arange(grid_w)[None, :], (grid_h, grid_w))
+                wpos = mx.reshape(
+                    wpos,
+                    (
+                        grid_h // self.spatial_merge_size,
+                        self.spatial_merge_size,
+                        grid_w // self.spatial_merge_size,
+                        self.spatial_merge_size,
+                    ),
+                )
+                wpos = mx.reshape(mx.transpose(wpos, (0, 2, 1, 3)), (-1,))
+                pos = mx.stack([hpos, wpos], axis=-1)
+                if grid_t > 1:
+                    pos = mx.tile(pos, (grid_t, 1))
+                pos_ids.append(pos)
+            pos_ids = mx.concatenate(pos_ids, axis=0)
+
+            rotary_dim = max(2, self.vision_head_dim // 2)
+            if rotary_dim % 2:
+                rotary_dim += 1
+            inv_freq = 1.0 / (
+                10000.0 ** (mx.arange(0, rotary_dim, 2).astype(mx.float32) / rotary_dim)
+            )
+            seq = mx.arange(max_grid_size).astype(mx.float32)
+            rotary = seq[:, None] * inv_freq[None, :]
+            return mx.reshape(rotary[pos_ids], (pos_ids.shape[0], -1))
+
+        def run_blocks(self, hidden_states, grid_thw=None):
+            if grid_thw is None:
+                row_based_embeddings = None
+                col_based_embeddings = None
+                window_index_1d_col = None
+                reverse_window_index_1d_col = None
+            else:
+                emb = self.rot_pos_emb(grid_thw)
+                emb = mx.concatenate([emb, emb], axis=-1)
+                row_based_embeddings = (mx.cos(emb), mx.sin(emb))
+                window_index_1d_col = self.get_window_index_1d(grid_thw, col=True)
+                reverse_window_index_1d_col = mx.argsort(window_index_1d_col)
+                col_emb = self.apply_index(emb, window_index_1d_col)
+                col_based_embeddings = (mx.cos(col_emb), mx.sin(col_emb))
+
+            for i, block in enumerate(self.blocks):
+                window_attn_type = (
+                    self.vit_window_attn_types[i]
+                    if i < len(self.vit_window_attn_types)
+                    else -1
+                )
+                if (
+                    grid_thw is not None
+                    and window_attn_type == 1
+                    and (i == 0 or self.vit_window_attn_types[i - 1] != 1)
+                ):
+                    hidden_states = self.apply_index(hidden_states, window_index_1d_col)
+                if (
+                    grid_thw is not None
+                    and i > 0
+                    and window_attn_type != 1
+                    and self.vit_window_attn_types[i - 1] == 1
+                ):
+                    hidden_states = self.apply_index(
+                        hidden_states,
+                        reverse_window_index_1d_col,
+                    )
+                full_attn = i in self.fullatt_block_indexes
+                position_embeddings = (
+                    col_based_embeddings
+                    if grid_thw is not None and window_attn_type == 1
+                    else row_based_embeddings
+                )
+                hidden_states = block(
+                    hidden_states,
+                    full_attn=full_attn,
+                    position_embeddings=position_embeddings,
+                )
+            return hidden_states
+
+        def __call__(self, pixel_values=None, grid_thw=None, **kwargs):
+            if pixel_values is None or grid_thw is None:
+                raise UnsupportedMediaModalityError(
+                    "vision",
+                    "MiMo-V2.5 vision forward requires pixel_values and grid_thw.",
+                    family="mimo_v2",
+                )
+            x = self.embed_patches(pixel_values)
+            x = self.run_blocks(x, grid_thw=grid_thw)
+            return self.merge_patches(x)
+
+        def sanitize(self, weights):
+            return {
+                key: value
+                for key, value in weights.items()
+                if not (
+                    key.startswith("visual.")
+                    or key.startswith("vision_tower.")
+                    or key.startswith("audio_encoder.")
+                    or key.startswith("speech_embeddings.")
+                )
+            }
+
+    class AudioProjection(nn.Module):
+        def __init__(self, *, input_size: int, hidden_size: int, output_size: int):
+            super().__init__()
+            self.mlp = [
+                nn.Linear(input_size, hidden_size, bias=False),
+                MiMoVisionGELU(),
+                nn.Linear(hidden_size, output_size, bias=False),
+            ]
+
+        def __call__(self, x):
+            for layer in self.mlp:
+                x = layer(x)
+            return x
+
+    class MiMoAudioEuclideanCodebook(nn.Module):
+        """MiMo audio tokenizer nearest-codebook encoder.
+
+        Mirrors the official PyTorch `EuclideanCodebook.encode` path used by
+        `MiMoAudioTokenizer`: maximize `-(||x||^2 - 2*x@embed.T + ||embed||^2)`.
+        """
+
+        def __init__(self, embed):
+            super().__init__()
+            self.embed = mx.array(embed)
+
+        def encode(self, x):
+            x = mx.array(x)
+            original_shape = tuple(x.shape[:-1])
+            flat = mx.reshape(x, (-1, x.shape[-1])).astype(mx.float32)
+            embed = self.embed.astype(mx.float32)
+            dist = -(
+                mx.sum(flat * flat, axis=1, keepdims=True)
+                - 2 * (flat @ mx.transpose(embed))
+                + mx.sum(embed * embed, axis=1, keepdims=True).T
+            )
+            indices = mx.argmax(dist, axis=-1).astype(mx.int32)
+            return mx.reshape(indices, original_shape)
+
+        def decode(self, indices):
+            return self.embed[mx.array(indices).astype(mx.int32)]
+
+    class MiMoAudioResidualVectorQuantizer(nn.Module):
+        """Residual VQ used by the MiMo audio tokenizer encoder output."""
+
+        def __init__(self, codebook_embeds):
+            super().__init__()
+            self.codebooks = [MiMoAudioEuclideanCodebook(embed) for embed in codebook_embeds]
+
+        def encode(self, hidden_states, n_q: int | None = None, st: int = 0):
+            residual = mx.array(hidden_states)
+            n_q = len(self.codebooks) if n_q is None else int(n_q)
+            st = int(st or 0)
+            if st < 0 or n_q < st or n_q > len(self.codebooks):
+                raise ValueError(
+                    f"Invalid MiMo audio RVQ range: st={st}, n_q={n_q}, "
+                    f"codebooks={len(self.codebooks)}"
+                )
+            all_indices = []
+            for codebook in self.codebooks[st:n_q]:
+                indices = codebook.encode(residual)
+                quantized = codebook.decode(indices).astype(residual.dtype)
+                residual = residual - quantized
+                all_indices.append(indices)
+            if not all_indices:
+                return mx.zeros((0,) + tuple(residual.shape[:-1]), dtype=mx.int32)
+            return mx.stack(all_indices, axis=0)
+
+        def decode(self, codes, st: int = 0):
+            codes = mx.array(codes).astype(mx.int32)
+            if codes.ndim < 1:
+                raise ValueError("MiMo audio RVQ codes must include a quantizer axis")
+            st = int(st or 0)
+            if st < 0 or st + int(codes.shape[0]) > len(self.codebooks):
+                raise ValueError(
+                    f"Invalid MiMo audio RVQ decode range: st={st}, "
+                    f"codes={codes.shape[0]}, codebooks={len(self.codebooks)}"
+                )
+            out = None
+            for offset in range(int(codes.shape[0])):
+                decoded = self.codebooks[st + offset].decode(codes[offset])
+                out = decoded if out is None else out + decoded
+            return out
+
+    @dataclass
+    class MiMoAudioTokenizerConfig:
+        """MiMo audio-tokenizer config fields needed by the MLX runtime."""
+
+        max_audio_seconds: int = 300
+        stride_size: int = 2
+        avg_pooler: int = 2
+        d_model: int = 1024
+        scale_embedding: bool = False
+        kernel_size: int = 3
+        activation_function: str = "gelu"
+        encoder_layers: int = 24
+        encoder_skip_layer_id: int | None = 3
+        encoder_attention_heads: int = 16
+        encoder_ffn_dim: int = 4096
+        encoder_causal: bool = True
+        encoder_attn_window_size: list[int] = field(default_factory=lambda: [128, 0])
+        nfft: int = 960
+        n_mels: int = 128
+        sampling_rate: int = 24000
+        hop_length: int = 240
+        window_size: int = 960
+        num_quantizers: int = 20
+        codebook_size: list[int] = field(default_factory=list)
+        threshold_ema_dead_code: int = 2
+        position_embedding_type: str = "rope"
+        rope_theta: int = 10000
+        rope_type: str = "default"
+        ln_type: str = "LayerNorm"
+        hybrid_attention: bool = True
+        hybrid_block_size: int = 8
+        swa_per_block: int = 2
+
+        @classmethod
+        def from_dict(cls, data: dict[str, Any]):
+            params = {}
+            for field_name in cls.__dataclass_fields__:
+                if field_name in data:
+                    params[field_name] = data[field_name]
+            config = cls(**params)
+            if not config.codebook_size:
+                config.codebook_size = [1024] * int(config.num_quantizers)
+            return config
+
+        @classmethod
+        def from_bundle(cls, model_path: str | Path):
+            root = Path(model_path)
+            audio_dir = root if root.name == "audio_tokenizer" else root / "audio_tokenizer"
+            config_path = audio_dir / "config.json"
+            if not config_path.is_file():
+                raise FileNotFoundError(
+                    f"MiMo audio tokenizer config missing: {config_path}"
+                )
+            return cls.from_dict(json.loads(config_path.read_text(encoding="utf-8")))
+
+        def get_output_length(self, mel_len):
+            """Official Conv1d/stride output length before avg-pool downsample."""
+            mel = mx.array(mel_len).astype(mx.int32)
+            tgt_len = mel + 3 - int(self.kernel_size)
+            return ((tgt_len + 2 - int(self.kernel_size)) // int(self.stride_size)) + 1
+
+        def get_code_length(self, mel_len):
+            """Official tokenizer code length after optional avg-pool downsample."""
+            out = self.get_output_length(mel_len)
+            avg = int(self.avg_pooler or 1)
+            if avg == 1:
+                return out
+            return (out // avg) + ((out % avg) != 0).astype(mx.int32)
+
+    def plan_mimo_audio_mel_segments(
+        mels: list[Any],
+        *,
+        config: MiMoAudioTokenizerConfig | None = None,
+        segment_size: int = 6000,
+    ) -> dict[str, Any]:
+        """Build the official MiMo audio-tokenizer mel segmentation plan.
+
+        Mirrors `tokenize_audio_batch`: preserve the concatenated mel tensor,
+        record per-segment input lengths, and precompute per-input code lengths.
+        The encoder forward consumes this plan; this helper does not synthesize
+        codes and does not replace the missing 24-layer encoder.
+        """
+
+        if not mels:
+            return {
+                "input_features": mx.zeros((0, int((config or MiMoAudioTokenizerConfig()).n_mels))),
+                "input_lens": mx.zeros((0,), dtype=mx.int32),
+                "segments_per_mel": [],
+                "code_lengths": [],
+            }
+        config = config or MiMoAudioTokenizerConfig()
+        segment_size = int(segment_size)
+        if segment_size <= 0:
+            raise ValueError("MiMo audio segment_size must be positive")
+        arrays = [mx.array(mel) for mel in mels]
+        for idx, arr in enumerate(arrays):
+            if arr.ndim != 2:
+                raise ValueError(
+                    f"MiMo audio mel {idx} must be 2D [T, n_mels], got {arr.shape}"
+                )
+            if int(arr.shape[-1]) != int(config.n_mels):
+                raise ValueError(
+                    f"MiMo audio mel {idx} has n_mels={arr.shape[-1]}, "
+                    f"expected {config.n_mels}"
+                )
+        segments_per_mel: list[list[int]] = []
+        for arr in arrays:
+            length = int(arr.shape[0])
+            segments = [segment_size] * (length // segment_size)
+            if length % segment_size:
+                segments.append(length % segment_size)
+            if not segments:
+                segments.append(0)
+            segments_per_mel.append(segments)
+        input_lens = [length for segments in segments_per_mel for length in segments]
+        input_features = mx.concatenate(arrays, axis=0)
+        code_lengths = []
+        for segments in segments_per_mel:
+            seg_lengths = mx.array(segments, dtype=mx.int32)
+            code_lengths.append(int(mx.sum(config.get_code_length(seg_lengths)).item()))
+        return {
+            "input_features": input_features,
+            "input_lens": mx.array(input_lens, dtype=mx.int32),
+            "segments_per_mel": segments_per_mel,
+            "code_lengths": code_lengths,
+        }
+
+    def _mimo_audio_lengths_list(lengths) -> list[int]:
+        arr = mx.array(lengths).astype(mx.int32)
+        if arr.ndim == 0:
+            return [int(arr.item())]
+        return [int(x) for x in arr.tolist()]
+
+    def _mimo_audio_unpack_segments(features, lengths):
+        features = mx.array(features)
+        lens = _mimo_audio_lengths_list(lengths)
+        if not lens:
+            return mx.zeros((0, 0, int(features.shape[-1]) if features.ndim else 0))
+        max_len = max(lens)
+        rows = []
+        offset = 0
+        for length in lens:
+            row = features[offset : offset + length]
+            offset += length
+            if length < max_len:
+                pad = mx.zeros((max_len - length, features.shape[-1]), dtype=features.dtype)
+                row = mx.concatenate([row, pad], axis=0)
+            rows.append(row[None, :, :])
+        return mx.concatenate(rows, axis=0)
+
+    def _mimo_audio_pack_segments(hidden, lengths):
+        lens = _mimo_audio_lengths_list(lengths)
+        rows = []
+        for idx, length in enumerate(lens):
+            if length > 0:
+                rows.append(hidden[idx, :length, :])
+        if not rows:
+            return mx.zeros((0, hidden.shape[-1]), dtype=hidden.dtype)
+        return mx.concatenate(rows, axis=0)
+
+    def _mimo_audio_position_ids(lengths):
+        lens = _mimo_audio_lengths_list(lengths)
+        parts = [mx.arange(length, dtype=mx.float32) for length in lens if length > 0]
+        if not parts:
+            return mx.zeros((0,), dtype=mx.float32)
+        return mx.concatenate(parts, axis=0)
+
+    def _mimo_audio_rotate_half(x):
+        half = int(x.shape[-1]) // 2
+        first = x[..., :half]
+        second = x[..., half : half * 2]
+        rest = x[..., half * 2 :]
+        rotated = mx.concatenate([-second, first], axis=-1)
+        return mx.concatenate([rotated, rest], axis=-1) if rest.shape[-1] else rotated
+
+    def _mimo_audio_activation(name: str, x):
+        lowered = str(name or "gelu").lower()
+        if lowered == "silu":
+            return nn.silu(x)
+        return nn.gelu(x)
+
+    class MiMoAudioTokenizerAttention(nn.Module):
+        def __init__(self, config: MiMoAudioTokenizerConfig, window_size=None):
+            super().__init__()
+            self.embed_dim = int(config.d_model)
+            self.num_heads = int(config.encoder_attention_heads)
+            self.head_dim = self.embed_dim // max(1, self.num_heads)
+            self.scaling = self.head_dim**-0.5
+            self.window_size = tuple(window_size or [-1, -1])
+            self.causal = bool(config.encoder_causal)
+            self.rope_theta = float(config.rope_theta)
+            self.k_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=False)
+            self.v_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=True)
+            self.q_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=True)
+            self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=True)
+
+        def _apply_rope(self, q, k, lengths):
+            positions = _mimo_audio_position_ids(lengths)
+            if int(positions.shape[0]) == 0:
+                return q, k
+            inv_freq = 1.0 / (
+                self.rope_theta
+                ** (
+                    mx.arange(0, self.head_dim, 2).astype(mx.float32)
+                    / self.head_dim
+                )
+            )
+            freqs = positions[:, None] * inv_freq[None, :]
+            emb = mx.concatenate([freqs, freqs], axis=-1)
+            cos = emb[:, None, :].astype(q.dtype)
+            sin = emb[:, None, :].astype(q.dtype)
+            return (
+                q * cos + _mimo_audio_rotate_half(q) * sin,
+                k * cos + _mimo_audio_rotate_half(k) * sin,
+            )
+
+        def _mask(self, seq_len: int, dtype):
+            has_window = self.window_size and int(self.window_size[0]) > 0
+            if not self.causal and not has_window:
+                return None
+            row = mx.arange(seq_len)[:, None]
+            col = mx.arange(seq_len)[None, :]
+            mask = mx.zeros((seq_len, seq_len), dtype=dtype)
+            if self.causal:
+                mask = mx.where(col > row, mx.full((seq_len, seq_len), -mx.inf), mask)
+            if has_window:
+                mask = mx.where(
+                    mx.abs(row - col) > int(self.window_size[0]),
+                    mx.full((seq_len, seq_len), -mx.inf),
+                    mask,
+                )
+            return mask[None, None, :, :]
+
+        def __call__(self, hidden_states, lengths):
+            hidden_states = mx.array(hidden_states)
+            total_len = int(hidden_states.shape[0])
+            q = mx.reshape(self.q_proj(hidden_states), (total_len, self.num_heads, self.head_dim))
+            k = mx.reshape(self.k_proj(hidden_states), (total_len, self.num_heads, self.head_dim))
+            v = mx.reshape(self.v_proj(hidden_states), (total_len, self.num_heads, self.head_dim))
+            q, k = self._apply_rope(q, k, lengths)
+            outputs = []
+            offset = 0
+            for seq_len in _mimo_audio_lengths_list(lengths):
+                if seq_len <= 0:
+                    continue
+                q_seq = mx.transpose(q[offset : offset + seq_len], (1, 0, 2))[None, :, :, :]
+                k_seq = mx.transpose(k[offset : offset + seq_len], (1, 0, 2))[None, :, :, :]
+                v_seq = mx.transpose(v[offset : offset + seq_len], (1, 0, 2))[None, :, :, :]
+                attn = mx.fast.scaled_dot_product_attention(
+                    q_seq,
+                    k_seq,
+                    v_seq,
+                    scale=self.scaling,
+                    mask=self._mask(seq_len, q_seq.dtype),
+                )
+                outputs.append(mx.reshape(mx.transpose(attn[0], (1, 0, 2)), (seq_len, self.embed_dim)))
+                offset += seq_len
+            if not outputs:
+                return mx.zeros_like(hidden_states)
+            return self.out_proj(mx.concatenate(outputs, axis=0))
+
+    class MiMoAudioTokenizerLayer(nn.Module):
+        def __init__(self, config: MiMoAudioTokenizerConfig, window_size=None):
+            super().__init__()
+            self.self_attn = MiMoAudioTokenizerAttention(config, window_size=window_size)
+            self.self_attn_layer_norm = nn.LayerNorm(int(config.d_model))
+            self.fc1 = nn.Linear(int(config.d_model), int(config.encoder_ffn_dim), bias=True)
+            self.fc2 = nn.Linear(int(config.encoder_ffn_dim), int(config.d_model), bias=True)
+            self.final_layer_norm = nn.LayerNorm(int(config.d_model))
+            self.activation_function = str(config.activation_function or "gelu")
+
+        def __call__(self, hidden_states, lengths):
+            residual = hidden_states
+            hidden_states = self.self_attn_layer_norm(hidden_states)
+            hidden_states = self.self_attn(hidden_states, lengths)
+            hidden_states = residual + hidden_states
+            residual = hidden_states
+            hidden_states = self.final_layer_norm(hidden_states)
+            hidden_states = _mimo_audio_activation(
+                self.activation_function,
+                self.fc1(hidden_states),
+            )
+            hidden_states = self.fc2(hidden_states)
+            return residual + hidden_states
+
+    class MiMoAudioTokenizerEncoder(nn.Module):
+        def __init__(self, config: MiMoAudioTokenizerConfig):
+            super().__init__()
+            self.config = config
+            self.conv1 = nn.Conv1d(
+                int(config.n_mels),
+                int(config.d_model),
+                int(config.kernel_size),
+                padding=1,
+                bias=True,
+            )
+            self.conv2 = nn.Conv1d(
+                int(config.d_model),
+                int(config.d_model),
+                int(config.kernel_size),
+                stride=int(config.stride_size),
+                padding=1,
+                bias=True,
+            )
+            attn_windows = []
+            if bool(config.hybrid_attention):
+                for idx in range(int(config.encoder_layers)):
+                    if idx % int(config.swa_per_block) < int(config.swa_per_block) - 1:
+                        attn_windows.append(tuple(config.encoder_attn_window_size))
+                    else:
+                        attn_windows.append((-1, -1))
+            else:
+                attn_windows = [tuple(config.encoder_attn_window_size)] * int(config.encoder_layers)
+            self.layers = [
+                MiMoAudioTokenizerLayer(config, window_size=attn_windows[idx])
+                for idx in range(int(config.encoder_layers))
+            ]
+            self.layer_norm = nn.LayerNorm(int(config.d_model))
+            self.down_sample_layer = (
+                nn.Conv1d(
+                    int(config.d_model),
+                    int(config.d_model),
+                    int(config.avg_pooler),
+                    stride=int(config.avg_pooler),
+                    bias=False,
+                )
+                if int(config.avg_pooler or 1) != 1
+                else None
+            )
+            self.down_sample_norm = (
+                nn.LayerNorm(int(config.d_model))
+                if self.down_sample_layer is not None
+                else None
+            )
+            self.quantizer = MiMoAudioResidualVectorQuantizer(
+                [
+                    mx.zeros((int(size), int(config.d_model)), dtype=mx.float32)
+                    for size in list(config.codebook_size)[: int(config.num_quantizers)]
+                ]
+            )
+
+        def get_output_length(self, mel_len):
+            return self.config.get_output_length(mel_len)
+
+        def get_features(self, input_features, input_lens):
+            input_lens = mx.array(input_lens).astype(mx.int32)
+            output_length = self.get_output_length(input_lens)
+            hidden = _mimo_audio_unpack_segments(input_features, input_lens)
+            hidden = _mimo_audio_activation(self.config.activation_function, self.conv1(hidden))
+            hidden = _mimo_audio_activation(self.config.activation_function, self.conv2(hidden))
+            packed = _mimo_audio_pack_segments(hidden, output_length)
+            skip_hidden = None
+            for idx, layer in enumerate(self.layers):
+                packed = layer(packed, output_length)
+                if self.config.encoder_skip_layer_id is not None and idx == int(self.config.encoder_skip_layer_id) - 1:
+                    skip_hidden = packed
+            if skip_hidden is not None:
+                packed = packed + skip_hidden
+            packed = self.layer_norm(packed)
+            if self.down_sample_layer is not None:
+                dense = _mimo_audio_unpack_segments(packed, output_length)
+                avg = int(self.config.avg_pooler)
+                tgt_len = int(dense.shape[1])
+                if tgt_len % avg:
+                    pad_len = avg - (tgt_len % avg)
+                    dense = mx.concatenate(
+                        [
+                            dense,
+                            mx.zeros((dense.shape[0], pad_len, dense.shape[2]), dtype=dense.dtype),
+                        ],
+                        axis=1,
+                    )
+                dense = _mimo_audio_activation(
+                    self.config.activation_function,
+                    self.down_sample_layer(dense),
+                )
+                output_length = self.config.get_code_length(input_lens)
+                packed = _mimo_audio_pack_segments(dense, output_length)
+                packed = self.down_sample_norm(packed)
+            return packed, output_length
+
+        def encode(
+            self,
+            input_features,
+            input_lens=None,
+            output_length=None,
+            return_codes_only=False,
+            n_q=None,
+            use_quantizer=True,
+        ):
+            if input_lens is None:
+                raise ValueError("MiMo audio tokenizer encode requires input_lens")
+            hidden_states, output_length = self.get_features(input_features, input_lens)
+            codes = None
+            if use_quantizer and self.quantizer is not None:
+                codes = self.quantizer.encode(hidden_states.astype(mx.float32), n_q=n_q)
+                if return_codes_only:
+                    return codes, output_length
+                hidden_states = self.quantizer.decode(codes).astype(hidden_states.dtype)
+            return hidden_states, hidden_states, output_length, codes
+
+    class MiMoAudioTokenizer(nn.Module):
+        def __init__(self, config: MiMoAudioTokenizerConfig):
+            super().__init__()
+            self.config = config
+            self.sampling_rate = int(config.sampling_rate)
+            self.encoder = MiMoAudioTokenizerEncoder(config)
+            self.downsample_rate = int(config.hop_length * 2 * config.avg_pooler)
+
+        def get_output_length(self, mel_len):
+            return self.encoder.get_output_length(mel_len)
+
+        def encode(self, mels, input_lens, use_quantizer=True, return_codes_only=False, n_q=None):
+            return self.encoder.encode(
+                mels,
+                input_lens=input_lens,
+                use_quantizer=use_quantizer,
+                return_codes_only=return_codes_only,
+                n_q=n_q,
+            )
+
+        def encode_audio_to_codes(self, mels, *, segment_size: int = 6000, n_q=None):
+            plan = plan_mimo_audio_mel_segments(
+                mels,
+                config=self.config,
+                segment_size=segment_size,
+            )
+            if not plan["code_lengths"]:
+                return []
+            codes, _ = self.encode(
+                plan["input_features"],
+                input_lens=plan["input_lens"],
+                return_codes_only=True,
+                n_q=n_q,
+            )
+            codes = mx.transpose(codes, (1, 0)).astype(mx.int32)
+            result = []
+            offset = 0
+            for length in plan["code_lengths"]:
+                result.append(codes[offset : offset + int(length)])
+                offset += int(length)
+            return result
+
+    def load_mimo_audio_rvq_from_bundle(model_path: str | Path):
+        """Load MiMo audio-tokenizer RVQ codebooks from a model bundle.
+
+        This is the narrow, model-owned bridge from the preserved
+        ``audio_tokenizer/model.safetensors`` sidecar into the MLX residual VQ
+        runtime above. It intentionally stops at codebook loading: waveform/mel
+        frontend and the 24-layer audio-tokenizer encoder are separate runtime
+        components and must not be reported as implemented by this helper.
+        """
+
+        root = Path(model_path)
+        audio_dir = root if root.name == "audio_tokenizer" else root / "audio_tokenizer"
+        config_path = audio_dir / "config.json"
+        weights_path = audio_dir / "model.safetensors"
+        if not config_path.is_file():
+            raise FileNotFoundError(f"MiMo audio tokenizer config missing: {config_path}")
+        if not weights_path.is_file():
+            raise FileNotFoundError(f"MiMo audio tokenizer weights missing: {weights_path}")
+
+        cfg = json.loads(config_path.read_text(encoding="utf-8"))
+        try:
+            num_quantizers = int(cfg["num_quantizers"])
+        except Exception as exc:
+            raise ValueError("MiMo audio tokenizer config missing num_quantizers") from exc
+        codebook_size = cfg.get("codebook_size")
+        if not isinstance(codebook_size, list) or len(codebook_size) < num_quantizers:
+            raise ValueError(
+                "MiMo audio tokenizer config codebook_size must list every quantizer"
+            )
+
+        try:
+            from safetensors.torch import load_file as _torch_load_file
+
+            raw_tensors = _torch_load_file(str(weights_path), device="cpu")
+
+            def _load_tensor(key: str):
+                if key not in raw_tensors:
+                    raise KeyError(key)
+                return mx.array(raw_tensors[key].float().cpu().numpy())
+
+        except ImportError:
+            from safetensors.numpy import load_file as _np_load_file
+
+            raw_tensors = _np_load_file(str(weights_path))
+
+            def _load_tensor(key: str):
+                if key not in raw_tensors:
+                    raise KeyError(key)
+                return mx.array(raw_tensors[key])
+
+        codebooks = []
+        missing = []
+        for idx in range(num_quantizers):
+            key = f"encoder.quantizer.vq.layers.{idx}._codebook.embed"
+            try:
+                embed = _load_tensor(key)
+            except KeyError:
+                missing.append(key)
+                continue
+            expected_rows = int(codebook_size[idx])
+            if int(embed.shape[0]) != expected_rows:
+                raise ValueError(
+                    f"MiMo audio tokenizer codebook {idx} shape mismatch: "
+                    f"expected {expected_rows} rows, got {embed.shape[0]}"
+                )
+            codebooks.append(embed)
+        if missing:
+            preview = ", ".join(missing[:3])
+            if len(missing) > 3:
+                preview += f", ... ({len(missing)} missing)"
+            raise KeyError(f"MiMo audio tokenizer codebook weights missing: {preview}")
+        return MiMoAudioResidualVectorQuantizer(codebooks)
+
+    def load_mimo_audio_tokenizer_from_bundle(model_path: str | Path):
+        """Load executable MiMo audio tokenizer from ``audio_tokenizer/model.safetensors``."""
+
+        root = Path(model_path)
+        audio_dir = root if root.name == "audio_tokenizer" else root / "audio_tokenizer"
+        config = MiMoAudioTokenizerConfig.from_bundle(audio_dir)
+        tokenizer = MiMoAudioTokenizer(config)
+        weights_path = audio_dir / "model.safetensors"
+        if not weights_path.is_file():
+            raise FileNotFoundError(f"MiMo audio tokenizer weights missing: {weights_path}")
+
+        try:
+            from safetensors.torch import load_file as _torch_load_file
+
+            raw_tensors = _torch_load_file(str(weights_path), device="cpu")
+            items = [
+                (key, mx.array(value.float().cpu().numpy()))
+                for key, value in raw_tensors.items()
+                if "encoder.quantizer.vq.layers." not in key
+            ]
+        except ImportError:
+            from safetensors.numpy import load_file as _np_load_file
+
+            raw_tensors = _np_load_file(str(weights_path))
+            items = [
+                (key, mx.array(value))
+                for key, value in raw_tensors.items()
+                if "encoder.quantizer.vq.layers." not in key
+            ]
+
+        converted = []
+        for key, value in items:
+            if key in {
+                "encoder.conv1.weight",
+                "encoder.conv2.weight",
+                "encoder.down_sample_layer.0.weight",
+            } and value.ndim == 3:
+                value = mx.transpose(value, (0, 2, 1))
+            if key.startswith("encoder.down_sample_layer.0."):
+                key = key.replace("encoder.down_sample_layer.0.", "encoder.down_sample_layer.", 1)
+            converted.append((key, value))
+        tokenizer.load_weights(converted, strict=False)
+        tokenizer.encoder.quantizer = load_mimo_audio_rvq_from_bundle(audio_dir)
+        return tokenizer
+
+    def _parse_mimo_v2_int_list(value, length: int):
+        if isinstance(value, str) and "-" in value:
+            return [int(v) for v in value.split("-")]
+        if isinstance(value, (list, tuple)):
+            values = [int(v) for v in value]
+            return values if len(values) == length else (values * length)[:length]
+        return [int(value)] * length
+
+    def _pad_and_group_mimo_v2_audio_codes(audio_codes, audio_channels: int, group_size: int):
+        audio_codes = mx.array(audio_codes).astype(mx.int32)
+        if audio_codes.ndim == 3:
+            if int(audio_codes.shape[1]) != group_size:
+                raise ValueError(
+                    "MiMo-V2 grouped audio_codes group size mismatch: "
+                    f"{audio_codes.shape[1]} != {group_size}"
+                )
+            return audio_codes[:, :, :audio_channels]
+        if audio_codes.ndim != 2:
+            raise ValueError(
+                "MiMo-V2 audio_codes must be rank-2 [T, C] or rank-3 [G, group, C]; "
+                f"got shape {audio_codes.shape}"
+            )
+        if int(audio_codes.shape[0]) <= 0:
+            raise ValueError("MiMo-V2 audio_codes must contain at least one timestep")
+        audio_codes = audio_codes[:, :audio_channels]
+        t = int(audio_codes.shape[0])
+        padded_t = ((t + group_size - 1) // group_size) * group_size
+        if padded_t > t:
+            pad = mx.broadcast_to(audio_codes[-1:, :], (padded_t - t, audio_codes.shape[1]))
+            audio_codes = mx.concatenate([audio_codes, pad], axis=0)
+        return mx.reshape(audio_codes, (padded_t // group_size, group_size, audio_codes.shape[1]))
+
+    class MiMoAudioLocalMLP(nn.Module):
+        def __init__(self, *, hidden_size: int, intermediate_size: int):
+            super().__init__()
+            self.gate_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+            self.up_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+            self.down_proj = nn.Linear(intermediate_size, hidden_size, bias=False)
+
+        def __call__(self, x):
+            return self.down_proj(nn.silu(self.gate_proj(x)) * self.up_proj(x))
+
+    class MiMoAudioLocalAttention(nn.Module):
+        def __init__(
+            self,
+            *,
+            hidden_size: int,
+            num_heads: int,
+            head_dim: int,
+            rope_theta: float,
+            partial_rotary_factor: float,
+        ):
+            super().__init__()
+            self.hidden_size = hidden_size
+            self.num_heads = num_heads
+            self.head_dim = head_dim
+            self.scaling = head_dim**-0.5
+            self.rope_theta = float(rope_theta)
+            self.rotary_dim = int(head_dim * float(partial_rotary_factor))
+            self.rotary_dim = max(0, min(head_dim, self.rotary_dim))
+            if self.rotary_dim % 2:
+                self.rotary_dim -= 1
+            self.q_proj = nn.Linear(hidden_size, num_heads * head_dim, bias=True)
+            self.k_proj = nn.Linear(hidden_size, num_heads * head_dim, bias=True)
+            self.v_proj = nn.Linear(hidden_size, num_heads * head_dim, bias=True)
+            self.o_proj = nn.Linear(num_heads * head_dim, hidden_size, bias=False)
+
+        def _rotate_half(self, x):
+            half = int(x.shape[-1]) // 2
+            first = x[..., :half]
+            second = x[..., half : half * 2]
+            rest = x[..., half * 2 :]
+            rotated = mx.concatenate([-second, first], axis=-1)
+            return mx.concatenate([rotated, rest], axis=-1) if rest.shape[-1] else rotated
+
+        def _apply_rope(self, q, k):
+            if self.rotary_dim <= 0:
+                return q, k
+            seq_len = int(q.shape[-2])
+            inv_freq = 1.0 / (
+                self.rope_theta
+                ** (
+                    mx.arange(0, self.rotary_dim, 2).astype(mx.float32)
+                    / self.rotary_dim
+                )
+            )
+            pos = mx.arange(seq_len).astype(mx.float32)
+            freqs = pos[:, None] * inv_freq[None, :]
+            emb = mx.concatenate([freqs, freqs], axis=-1)
+            cos = mx.cos(emb)[None, None, :, :].astype(q.dtype)
+            sin = mx.sin(emb)[None, None, :, :].astype(q.dtype)
+            q_rope = q[..., : self.rotary_dim]
+            k_rope = k[..., : self.rotary_dim]
+            q = mx.concatenate(
+                [
+                    q_rope * cos + self._rotate_half(q_rope) * sin,
+                    q[..., self.rotary_dim :],
+                ],
+                axis=-1,
+            )
+            k = mx.concatenate(
+                [
+                    k_rope * cos + self._rotate_half(k_rope) * sin,
+                    k[..., self.rotary_dim :],
+                ],
+                axis=-1,
+            )
+            return q, k
+
+        def __call__(self, hidden_states, *, is_causal: bool = False):
+            hidden_states = mx.array(hidden_states)
+            batch, seq_len, _ = hidden_states.shape
+            q = mx.reshape(
+                self.q_proj(hidden_states),
+                (batch, seq_len, self.num_heads, self.head_dim),
+            )
+            k = mx.reshape(
+                self.k_proj(hidden_states),
+                (batch, seq_len, self.num_heads, self.head_dim),
+            )
+            v = mx.reshape(
+                self.v_proj(hidden_states),
+                (batch, seq_len, self.num_heads, self.head_dim),
+            )
+            q = mx.transpose(q, (0, 2, 1, 3))
+            k = mx.transpose(k, (0, 2, 1, 3))
+            v = mx.transpose(v, (0, 2, 1, 3))
+            q, k = self._apply_rope(q, k)
+            mask = None
+            if is_causal:
+                row = mx.arange(seq_len)[:, None]
+                col = mx.arange(seq_len)[None, :]
+                mask = mx.where(
+                    col > row,
+                    mx.full((seq_len, seq_len), -mx.inf),
+                    mx.zeros((seq_len, seq_len)),
+                )[None, None, :, :]
+            attn = mx.fast.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                scale=self.scaling,
+                mask=mask,
+            )
+            attn = mx.reshape(
+                mx.transpose(attn, (0, 2, 1, 3)),
+                (batch, seq_len, self.num_heads * self.head_dim),
+            )
+            return self.o_proj(attn)
+
+    class MiMoAudioLocalBlock(nn.Module):
+        def __init__(self, config):
+            super().__init__()
+            hidden_size = int(getattr(config, "input_local_dim", 1024) or 1024)
+            num_heads = int(getattr(config, "input_local_attn_heads", 16) or 16)
+            head_dim = int(getattr(config, "input_local_head_dim", 0) or 0)
+            if head_dim <= 0:
+                head_dim = max(1, hidden_size // max(1, num_heads))
+            intermediate_size = int(
+                getattr(config, "input_local_intermediate_size", hidden_size * 4)
+                or hidden_size * 4
+            )
+            self.self_attn = MiMoAudioLocalAttention(
+                hidden_size=hidden_size,
+                num_heads=num_heads,
+                head_dim=head_dim,
+                rope_theta=float(getattr(config, "rope_theta", 640000.0) or 640000.0),
+                partial_rotary_factor=float(
+                    getattr(config, "partial_rotary_factor", 1.0) or 1.0
+                ),
+            )
+            self.mlp = MiMoAudioLocalMLP(
+                hidden_size=hidden_size,
+                intermediate_size=intermediate_size,
+            )
+            self.input_layernorm = nn.RMSNorm(hidden_size, eps=1e-6)
+            self.post_attention_layernorm = nn.RMSNorm(hidden_size, eps=1e-6)
+
+        def __call__(self, hidden_states, *, is_causal: bool = False):
+            hidden_states = hidden_states + self.self_attn(
+                self.input_layernorm(hidden_states),
+                is_causal=is_causal,
+            )
+            hidden_states = hidden_states + self.mlp(
+                self.post_attention_layernorm(hidden_states)
+            )
+            return hidden_states
+
+    class MiMoAudioLocalTransformer(nn.Module):
+        def __init__(self, config):
+            super().__init__()
+            hidden_size = int(getattr(config, "input_local_dim", 1024) or 1024)
+            layers = int(getattr(config, "input_local_layers", 6) or 6)
+            self.layers = [MiMoAudioLocalBlock(config) for _ in range(layers)]
+            self.norm = nn.RMSNorm(hidden_size, eps=1e-6)
+            self.input_full_attention = bool(
+                getattr(config, "input_full_attention", True)
+            )
+
+        def __call__(self, inputs_embeds):
+            hidden_states = mx.array(inputs_embeds)
+            is_causal = not self.input_full_attention
+            for layer in self.layers:
+                hidden_states = layer(hidden_states, is_causal=is_causal)
+            return self.norm(hidden_states)
+
+    class AudioModel(nn.Module):
+        def __init__(self, config=None):
+            super().__init__()
+            self.config = config or AudioConfig()
+            self.audio_channels = int(getattr(self.config, "audio_channels", 20) or 20)
+            self.group_size = int(getattr(self.config, "group_size", 6) or 6)
+            self.input_local_dim = int(
+                getattr(self.config, "input_local_dim", None)
+                or getattr(self.config, "hidden_size", 0)
+                or 1280
+            )
+            self.out_hidden_size = int(
+                getattr(self.config, "out_hidden_size", None) or 4096
+            )
+            self.input_full_attention = bool(
+                getattr(self.config, "input_full_attention", True)
+            )
+            self.input_local_transformer = MiMoAudioLocalTransformer(self.config)
+            proj_in = self.input_local_dim * self.group_size
+            projection_layers = int(getattr(self.config, "projection_layers", 2) or 2)
+            if projection_layers == 1:
+                self.projection = nn.Linear(proj_in, self.out_hidden_size, bias=False)
+            else:
+                self.projection = AudioProjection(
+                    input_size=proj_in,
+                    hidden_size=proj_in * 4,
+                    output_size=self.out_hidden_size,
+                )
+
+        def project_local_audio(self, audio_hidden):
+            audio_hidden = mx.array(audio_hidden)
+            if audio_hidden.ndim == 3:
+                if int(audio_hidden.shape[1]) != self.group_size:
+                    raise ValueError(
+                        "MiMo-V2 audio local hidden group size mismatch: "
+                        f"{audio_hidden.shape[1]} != {self.group_size}"
+                    )
+                audio_hidden = mx.reshape(audio_hidden, (audio_hidden.shape[0], -1))
+            if audio_hidden.ndim != 2:
+                raise ValueError(
+                    "MiMo-V2 audio projection expects rank-2 or rank-3 audio hidden "
+                    f"states; got shape {audio_hidden.shape}"
+                )
+            expected = self.input_local_dim * self.group_size
+            if int(audio_hidden.shape[-1]) != expected:
+                raise ValueError(
+                    f"MiMo-V2 audio projection expected hidden size {expected}; "
+                    f"got {audio_hidden.shape[-1]}"
+                )
+            return self.projection(audio_hidden)
+
+        def _apply_speech_embeddings(self, audio_codes, speech_embeddings):
+            if speech_embeddings is None:
+                raise UnsupportedMediaModalityError(
+                    "audio",
+                    "MiMo-V2.5 audio_codes require speech_embeddings weights.",
+                    family="mimo_v2",
+                )
+            grouped = _pad_and_group_mimo_v2_audio_codes(
+                audio_codes,
+                self.audio_channels,
+                self.group_size,
+            )
+            if int(grouped.shape[-1]) < self.audio_channels:
+                raise ValueError(
+                    "MiMo-V2 audio_codes channel count mismatch: "
+                    f"{grouped.shape[-1]} < {self.audio_channels}"
+                )
+            out = mx.zeros(
+                (grouped.shape[0], self.group_size, self.input_local_dim),
+                dtype=speech_embeddings[0].weight.dtype,
+            )
+            if len(speech_embeddings) < self.audio_channels:
+                raise ValueError(
+                    "MiMo-V2 speech embedding count mismatch: "
+                    f"{len(speech_embeddings)} < {self.audio_channels}"
+                )
+            for idx in range(self.audio_channels):
+                out = out + speech_embeddings[idx](grouped[:, :, idx])
+            return out
+
+        def process_audio_codes(self, audio_codes, speech_embeddings):
+            audio_embs = self._apply_speech_embeddings(audio_codes, speech_embeddings)
+            audio_hidden = self.input_local_transformer(audio_embs)
+            return self.project_local_audio(audio_hidden)
+
+        def __call__(
+            self,
+            speech_embeddings=None,
+            audio_codes=None,
+            audio_embeds=None,
+            audio_hidden=None,
+        ):
+            if audio_embeds is not None:
+                audio_embeds = mx.array(audio_embeds)
+                if audio_embeds.ndim != 2:
+                    raise ValueError(
+                        "MiMo-V2 audio_embeds must be rank-2 [N, H]; "
+                        f"got shape {audio_embeds.shape}"
+                    )
+                if int(audio_embeds.shape[-1]) == self.out_hidden_size:
+                    return audio_embeds
+                return self.project_local_audio(audio_embeds)
+            if audio_hidden is not None:
+                return self.project_local_audio(audio_hidden)
+            if audio_codes is not None:
+                return self.process_audio_codes(audio_codes, speech_embeddings)
+            raise ValueError(
+                "MiMo-V2 audio encoder requires audio_codes, audio_embeds, or audio_hidden"
+            )
+
+    class MiMoVisionPatchEmbed(nn.Module):
+        def __init__(
+            self,
+            *,
+            patch_size: int = 16,
+            temporal_patch_size: int = 2,
+            in_channels: int = 3,
+            embed_dim: int = 1280,
+        ):
+            super().__init__()
+            self.patch_size = patch_size
+            self.temporal_patch_size = temporal_patch_size
+            self.in_channels = in_channels
+            self.embed_dim = embed_dim
+            self.proj = nn.Linear(
+                in_channels * temporal_patch_size * patch_size * patch_size,
+                embed_dim,
+                bias=False,
+            )
+
+        def __call__(self, hidden_states):
+            hidden_states = mx.array(hidden_states)
+            flat_patch_width = (
+                self.in_channels
+                * self.temporal_patch_size
+                * self.patch_size
+                * self.patch_size
+            )
+            if hidden_states.shape[-1] == flat_patch_width:
+                return self.proj(hidden_states)
+            expected = (
+                -1,
+                self.in_channels,
+                self.temporal_patch_size,
+                self.patch_size,
+                self.patch_size,
+            )
+            try:
+                patches = mx.reshape(hidden_states, expected)
+            except Exception as exc:
+                raise ValueError(
+                    "MiMo-V2 vision patch embedding expected flattened patches "
+                    f"of width {flat_patch_width} or reshapeable raw patches; "
+                    f"got shape {hidden_states.shape}"
+                ) from exc
+            return self.proj(mx.reshape(patches, (patches.shape[0], flat_patch_width)))
+
+    class MiMoVisionPatchMerger(nn.Module):
+        def __init__(self, *, dim: int, context_dim: int, spatial_merge_size: int = 2):
+            super().__init__()
+            self.dim = dim
+            self.context_dim = context_dim
+            self.spatial_merge_size = spatial_merge_size
+            self.hidden_size = context_dim * (spatial_merge_size**2)
+            self.ln_q = nn.LayerNorm(context_dim, eps=1e-6)
+            self.mlp = [
+                nn.Linear(self.hidden_size, self.hidden_size),
+                MiMoVisionGELU(),
+                nn.Linear(self.hidden_size, dim),
+            ]
+
+        def __call__(self, x):
+            x = mx.array(x)
+            if x.ndim != 2 or int(x.shape[-1]) != self.context_dim:
+                raise ValueError(
+                    "MiMo-V2 vision merger expects rank-2 patch states with "
+                    f"hidden size {self.context_dim}; got shape {x.shape}"
+                )
+            if int(x.shape[0]) % int(self.spatial_merge_size**2) != 0:
+                raise ValueError(
+                    "MiMo-V2 vision merger patch count must be divisible by "
+                    f"{self.spatial_merge_size**2}; got {x.shape[0]}"
+                )
+            x = self.ln_q(x)
+            x = mx.reshape(x, (-1, self.hidden_size))
+            for layer in self.mlp:
+                x = layer(x)
+            return x
+
+    class MiMoVisionGELU(nn.Module):
+        def __call__(self, x):
+            return nn.gelu(x)
+
+    class MiMoVisionSwiGLUMLP(nn.Module):
+        def __init__(self, *, dim: int, intermediate_dim: int, hidden_act: str = "silu"):
+            super().__init__()
+            self.gate_proj = nn.Linear(dim, intermediate_dim)
+            self.up_proj = nn.Linear(dim, intermediate_dim)
+            self.down_proj = nn.Linear(intermediate_dim, dim)
+            self.hidden_act = hidden_act
+
+        def _activate(self, x):
+            if self.hidden_act in {"gelu", "gelu_pytorch_tanh"}:
+                return nn.gelu(x)
+            return x * mx.sigmoid(x)
+
+        def __call__(self, x):
+            return self.down_proj(self._activate(self.gate_proj(x)) * self.up_proj(x))
+
+    class MiMoVisionAttention(nn.Module):
+        def __init__(
+            self,
+            *,
+            dim: int,
+            num_heads: int,
+            num_kv_heads: int,
+            head_dim: int,
+            use_sinks: bool = False,
+            window_size: int = -1,
+        ):
+            super().__init__()
+            self.dim = dim
+            self.num_heads = num_heads
+            self.num_kv_heads = num_kv_heads
+            self.head_dim = head_dim
+            self.num_kv_groups = max(1, num_heads // max(1, num_kv_heads))
+            self.scaling = head_dim**-0.5
+            self.window_size = int(window_size)
+            qkv_dim = (num_heads + 2 * num_kv_heads) * head_dim
+            self.qkv = nn.Linear(dim, qkv_dim)
+            self.proj = nn.Linear(num_heads * head_dim, dim)
+            self.sinks = mx.zeros((num_heads,)) if use_sinks else None
+
+        def _window_mask(self, seq_len: int):
+            if self.window_size <= 0:
+                return None
+            row_idx = mx.arange(seq_len)[:, None]
+            col_idx = mx.arange(seq_len)[None, :]
+            mask = mx.where(
+                mx.abs(row_idx - col_idx) > self.window_size,
+                mx.full((seq_len, seq_len), -mx.inf),
+                mx.zeros((seq_len, seq_len)),
+            )
+            return mask[None, None, :, :]
+
+        def _rotate_half(self, x):
+            half = int(x.shape[-1]) // 2
+            first = x[..., :half]
+            second = x[..., half : half * 2]
+            rest = x[..., half * 2 :]
+            rotated = mx.concatenate([-second, first], axis=-1)
+            return mx.concatenate([rotated, rest], axis=-1) if rest.shape[-1] else rotated
+
+        def _apply_rotary(self, q, k, position_embeddings):
+            if position_embeddings is None:
+                return q, k
+            cos, sin = position_embeddings
+            rope_dim = min(int(cos.shape[-1]), int(q.shape[-1]))
+            cos = cos[:, :rope_dim][None, None, :, :]
+            sin = sin[:, :rope_dim][None, None, :, :]
+            q_rope = q[..., :rope_dim]
+            k_rope = k[..., :rope_dim]
+            q = mx.concatenate(
+                [q_rope * cos + self._rotate_half(q_rope) * sin, q[..., rope_dim:]],
+                axis=-1,
+            )
+            k = mx.concatenate(
+                [k_rope * cos + self._rotate_half(k_rope) * sin, k[..., rope_dim:]],
+                axis=-1,
+            )
+            return q, k
+
+        def __call__(
+            self,
+            hidden_states,
+            full_attn: bool = False,
+            position_embeddings=None,
+        ):
+            hidden_states = mx.array(hidden_states)
+            if hidden_states.ndim != 2 or int(hidden_states.shape[-1]) != self.dim:
+                raise ValueError(
+                    "MiMo-V2 vision attention expects rank-2 hidden states with "
+                    f"hidden size {self.dim}; got shape {hidden_states.shape}"
+                )
+            seq_len = int(hidden_states.shape[0])
+            qkv = self.qkv(hidden_states)
+            q_dim = self.num_heads * self.head_dim
+            kv_dim = self.num_kv_heads * self.head_dim
+            q = mx.reshape(qkv[:, :q_dim], (seq_len, self.num_heads, self.head_dim))
+            k = mx.reshape(
+                qkv[:, q_dim : q_dim + kv_dim],
+                (seq_len, self.num_kv_heads, self.head_dim),
+            )
+            v = mx.reshape(qkv[:, q_dim + kv_dim :], (seq_len, self.num_kv_heads, self.head_dim))
+            q = mx.transpose(q[None, :, :, :], (0, 2, 1, 3))
+            k = mx.transpose(k[None, :, :, :], (0, 2, 1, 3))
+            v = mx.transpose(v[None, :, :, :], (0, 2, 1, 3))
+            q, k = self._apply_rotary(q, k, position_embeddings)
+            if self.num_kv_groups > 1:
+                k = mx.repeat(k, self.num_kv_groups, axis=1)
+                v = mx.repeat(v, self.num_kv_groups, axis=1)
+            mask = None if full_attn else self._window_mask(seq_len)
+            if self.sinks is not None:
+                sink_bias = mx.zeros((1, self.num_heads, seq_len, seq_len))
+                sink_bias = sink_bias + self.sinks[None, :, None, None] * (
+                    mx.arange(seq_len)[None, None, None, :] == 0
+                )
+                mask = sink_bias if mask is None else mask + sink_bias
+            attn_output = mx.fast.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                scale=self.scaling,
+                mask=mask,
+            )
+            attn_output = mx.reshape(
+                mx.transpose(attn_output, (0, 2, 1, 3)),
+                (seq_len, self.num_heads * self.head_dim),
+            )
+            return self.proj(attn_output)
+
+    class MiMoVisionBlock(nn.Module):
+        def __init__(
+            self,
+            *,
+            dim: int,
+            intermediate_dim: int,
+            num_heads: int,
+            num_kv_heads: int,
+            head_dim: int,
+            hidden_act: str = "silu",
+            rms_norm_eps: float = 1e-6,
+            use_sinks: bool = False,
+            window_size: int = -1,
+        ):
+            super().__init__()
+            self.norm1 = nn.RMSNorm(dim, eps=rms_norm_eps)
+            self.norm2 = nn.RMSNorm(dim, eps=rms_norm_eps)
+            self.attn = MiMoVisionAttention(
+                dim=dim,
+                num_heads=num_heads,
+                num_kv_heads=num_kv_heads,
+                head_dim=head_dim,
+                use_sinks=use_sinks,
+                window_size=window_size,
+            )
+            self.mlp = MiMoVisionSwiGLUMLP(
+                dim=dim,
+                intermediate_dim=intermediate_dim,
+                hidden_act=hidden_act,
+            )
+
+        def __call__(
+            self,
+            hidden_states,
+            full_attn: bool = False,
+            position_embeddings=None,
+        ):
+            hidden_states = hidden_states + self.attn(
+                self.norm1(hidden_states),
+                full_attn=full_attn,
+                position_embeddings=position_embeddings,
+            )
+            return hidden_states + self.mlp(self.norm2(hidden_states))
+
+    def _mimo_v2_flatten_modal_embeds(modal_embeds):
+        arr = mx.array(modal_embeds)
+        if arr.ndim == 1:
+            arr = arr[None, :]
+        elif arr.ndim == 3:
+            arr = mx.reshape(arr, (-1, arr.shape[-1]))
+        elif arr.ndim != 2:
+            raise ValueError(
+                f"MiMo-V2 modal embeddings must be rank 1, 2, or 3; got shape {arr.shape}"
+            )
+        return arr
+
+    def _mimo_v2_replace_modal_embeddings(
+        *,
+        input_ids,
+        inputs_embeds,
+        token_id,
+        modal_embeds,
+        modality: str,
+    ):
+        if modal_embeds is None:
+            return inputs_embeds
+        if token_id is None:
+            raise ValueError(f"MiMo-V2 {modality} token id is missing from config")
+
+        ids = mx.array(input_ids)
+        embeds = mx.array(inputs_embeds)
+        if ids.ndim == 1:
+            ids = ids[None, :]
+        if embeds.ndim == 2:
+            embeds = embeds[None, :, :]
+        if ids.ndim != 2 or embeds.ndim != 3:
+            raise ValueError(
+                f"MiMo-V2 {modality} splice expects input_ids rank 1/2 and "
+                f"inputs_embeds rank 2/3; got {ids.shape} and {embeds.shape}"
+            )
+        if ids.shape[0] != embeds.shape[0] or ids.shape[1] != embeds.shape[1]:
+            raise ValueError(
+                f"MiMo-V2 {modality} splice shape mismatch: input_ids {ids.shape}, "
+                f"inputs_embeds {embeds.shape}"
+            )
+
+        flat_modal = _mimo_v2_flatten_modal_embeds(modal_embeds)
+        hidden = embeds.shape[-1]
+        if flat_modal.shape[-1] != hidden:
+            raise ValueError(
+                f"MiMo-V2 {modality} embedding hidden size mismatch: "
+                f"{flat_modal.shape[-1]} != {hidden}"
+            )
+
+        ids_py = ids.tolist()
+        positions: list[tuple[int, int]] = []
+        for batch_idx, row in enumerate(ids_py):
+            for token_idx, value in enumerate(row):
+                if int(value) == int(token_id):
+                    positions.append((batch_idx, token_idx))
+
+        if len(positions) != flat_modal.shape[0]:
+            raise ValueError(
+                f"MiMo-V2 {modality} token count {len(positions)} does not match "
+                f"provided embeddings {flat_modal.shape[0]}"
+            )
+        if not positions:
+            return embeds
+
+        modal_index = 0
+        batch_rows = []
+        for batch_idx, row in enumerate(ids_py):
+            row_parts = []
+            last = 0
+            row_positions = [pos for b, pos in positions if b == batch_idx]
+            for pos in row_positions:
+                if pos > last:
+                    row_parts.append(embeds[batch_idx : batch_idx + 1, last:pos, :])
+                row_parts.append(flat_modal[modal_index : modal_index + 1][None, :, :])
+                modal_index += 1
+                last = pos + 1
+            if last < len(row):
+                row_parts.append(embeds[batch_idx : batch_idx + 1, last:, :])
+            batch_rows.append(mx.concatenate(row_parts, axis=1))
+        return mx.concatenate(batch_rows, axis=0)
+
+    class Model(nn.Module):
+        def __init__(self, config: ModelConfig):
+            super().__init__()
+            self.config = config
+            self.language_model = _MiMoV2LanguageModelCompat(TextModel(config.text_config))
+            self._mimo_v2_quantized_for_load = False
+            self._mimo_v2_pending_qkv_affine: dict[str, dict[str, Any]] = {}
+            self._mimo_v2_media_weights: dict[str, Any] = {}
+            self._mimo_v2_media_weight_counts = {
+                "visual": 0,
+                "audio_encoder": 0,
+                "speech_embeddings": 0,
+            }
+            self._mimo_v2_bind_media_weights = bool(
+                getattr(config, "media_runtime_wired", False)
+                and (
+                    isinstance(getattr(config, "vision_config", None), VisionConfig)
+                    or isinstance(getattr(config, "audio_config", None), AudioConfig)
+                )
+            )
+            self.visual = (
+                VisionModel(config.vision_config)
+                if self._mimo_v2_bind_media_weights
+                else None
+            )
+            self.audio_encoder = (
+                AudioModel(config.audio_config)
+                if self._mimo_v2_bind_media_weights
+                else None
+            )
+            self.speech_embeddings = (
+                [
+                    nn.Embedding(vocab_size, self.audio_encoder.input_local_dim)
+                    for vocab_size in _parse_mimo_v2_int_list(
+                        getattr(config.audio_config, "speech_vocab_size", 1280),
+                        self.audio_encoder.audio_channels,
+                    )
+                ]
+                if self._mimo_v2_bind_media_weights and self.audio_encoder is not None
+                else None
+            )
+
+        @property
+        def layers(self):
+            return self.language_model.layers
+
+        def get_input_embeddings(
+            self,
+            input_ids=None,
+            pixel_values=None,
+            image_grid_thw=None,
+            image_embeds=None,
+            video_pixel_values=None,
+            video_grid_thw=None,
+            video_embeds=None,
+            audio_codes=None,
+            audio_embeds=None,
+            **kwargs,
+        ):
+            from mlx_vlm.models.base import InputEmbeddingsFeatures
+
+            if pixel_values is not None:
+                if self.visual is None:
+                    raise UnsupportedMediaModalityError(
+                        "vision",
+                        "MiMo-V2.5 JANG_2L vision weights are preserved, but this "
+                        "bundle is configured for text-only runtime.",
+                        family="mimo_v2",
+                    )
+                if image_grid_thw is None:
+                    image_grid_thw = kwargs.get("grid_thw")
+                if image_grid_thw is None:
+                    raise ValueError("MiMo-V2 image requests require image_grid_thw")
+                image_embeds = self.visual(
+                    pixel_values=pixel_values,
+                    grid_thw=image_grid_thw,
+                )
+            if video_pixel_values is not None:
+                if self.visual is None:
+                    raise UnsupportedMediaModalityError(
+                        "video",
+                        "MiMo-V2.5 JANG_2L video weights are preserved, but this "
+                        "bundle is configured for text-only runtime.",
+                        family="mimo_v2",
+                    )
+                if video_grid_thw is None:
+                    raise ValueError("MiMo-V2 video requests require video_grid_thw")
+                video_embeds = self.visual(
+                    pixel_values=video_pixel_values,
+                    grid_thw=video_grid_thw,
+                )
+            if audio_codes is not None:
+                if self.audio_encoder is None or self.speech_embeddings is None:
+                    raise UnsupportedMediaModalityError(
+                        "audio",
+                        "MiMo-V2.5 JANG_2L audio code runtime requires media-enabled metadata.",
+                        family="mimo_v2",
+                    )
+                audio_embeds = self.audio_encoder(
+                    speech_embeddings=self.speech_embeddings,
+                    audio_codes=audio_codes,
+                )
+            if audio_embeds is not None:
+                audio_arr = mx.array(audio_embeds)
+                if (
+                    self.audio_encoder is not None
+                    and audio_arr.ndim == 2
+                    and int(audio_arr.shape[-1])
+                    != int(getattr(self.config.text_config, "hidden_size", 4096))
+                ):
+                    audio_embeds = self.audio_encoder(audio_embeds=audio_arr)
+                else:
+                    audio_embeds = audio_arr
+            if input_ids is None:
+                raise ValueError("MiMo-V2 get_input_embeddings requires input_ids")
+            inputs_embeds = self.language_model.model.embed_tokens(input_ids)
+            if image_embeds is not None:
+                inputs_embeds = _mimo_v2_replace_modal_embeddings(
+                    input_ids=input_ids,
+                    inputs_embeds=inputs_embeds,
+                    token_id=getattr(self.config, "image_token_id", None),
+                    modal_embeds=image_embeds,
+                    modality="image",
+                )
+            if video_embeds is not None:
+                inputs_embeds = _mimo_v2_replace_modal_embeddings(
+                    input_ids=input_ids,
+                    inputs_embeds=inputs_embeds,
+                    token_id=getattr(self.config, "video_token_id", None),
+                    modal_embeds=video_embeds,
+                    modality="video",
+                )
+            if audio_embeds is not None:
+                inputs_embeds = _mimo_v2_replace_modal_embeddings(
+                    input_ids=input_ids,
+                    inputs_embeds=inputs_embeds,
+                    token_id=getattr(self.config, "audio_token_id", None),
+                    modal_embeds=audio_embeds,
+                    modality="audio",
+                )
+            return InputEmbeddingsFeatures(
+                inputs_embeds=inputs_embeds
+            )
+
+        def __call__(
+            self,
+            input_ids,
+            pixel_values=None,
+            image_grid_thw=None,
+            image_embeds=None,
+            video_pixel_values=None,
+            video_grid_thw=None,
+            video_embeds=None,
+            audio_codes=None,
+            audio_embeds=None,
+            inputs_embeds=_INPUTS_EMBEDS_UNSET,
+            mask=None,
+            cache=None,
+            **kwargs,
+        ):
+            if pixel_values is not None:
+                inputs_embeds = self.get_input_embeddings(
+                    input_ids=input_ids,
+                    pixel_values=pixel_values,
+                    image_grid_thw=image_grid_thw,
+                ).inputs_embeds
+                input_ids = None
+            if any(
+                item is not None
+                for item in (
+                    image_embeds,
+                    video_pixel_values,
+                    video_embeds,
+                    audio_codes,
+                    audio_embeds,
+                )
+            ):
+                inputs_embeds = self.get_input_embeddings(
+                    input_ids=input_ids,
+                    image_embeds=image_embeds,
+                    video_pixel_values=video_pixel_values,
+                    video_grid_thw=video_grid_thw,
+                    video_embeds=video_embeds,
+                    audio_codes=audio_codes,
+                    audio_embeds=audio_embeds,
+                ).inputs_embeds
+                input_ids = None
+            if inputs_embeds is not _INPUTS_EMBEDS_UNSET:
+                return self.language_model(
+                    input_ids,
+                    inputs_embeds=inputs_embeds,
+                    cache=cache,
+                    mask=mask,
+                    **kwargs,
+                )
+            return self.language_model(input_ids, cache=cache, mask=mask, **kwargs)
+
+        def _bind_mimo_v2_media_weight(self, key, value):
+            """Bind preserved MiMo media tensors when media runtime is enabled.
+
+            Current text-only JANG_2L/JANGTQ_2 bundles intentionally advertise
+            `weights_preserved_text_runtime`, so they should not retain the
+            visual/audio tensor payload in memory. A future media-enabled MiMo
+            config must not silently drop those tensors: this store is the
+            load_weights boundary that real visual/audio modules consume before
+            the forward bridge can be considered wired.
+            """
+
+            if key.startswith("visual."):
+                group = "visual"
+            elif key.startswith("audio_encoder."):
+                group = "audio_encoder"
+            elif key.startswith("speech_embeddings."):
+                group = "speech_embeddings"
+            else:
+                return False
+            if not self._mimo_v2_bind_media_weights:
+                return True
+            self._mimo_v2_media_weights[key] = value
+            self._mimo_v2_media_weight_counts[group] += 1
+            return True
+
+        def _apply_mimo_v2_media_weights(self):
+            if not self._mimo_v2_bind_media_weights or not self._mimo_v2_media_weights:
+                return 0
+            assigned = 0
+            failures = []
+            for key, value in self._mimo_v2_media_weights.items():
+                try:
+                    _mimo_v2_assign_weight(self, key, value)
+                    assigned += 1
+                except Exception as exc:
+                    failures.append(f"{key}: {type(exc).__name__}: {exc}")
+            if failures:
+                preview = "; ".join(failures[:8])
+                raise RuntimeError(
+                    "MiMo-V2 media-enabled load could not bind preserved media "
+                    f"weights ({len(failures)} failures): {preview}"
+                )
+            return assigned
+
+        def load_weights(self, weights, strict=True):
+            filtered = {}
+            for key, value in weights:
+                if key.startswith("model.mtp."):
+                    continue
+                if key.startswith(("visual.", "audio_encoder.", "speech_embeddings.")):
+                    self._bind_mimo_v2_media_weight(key, value)
+                    continue
+                filtered[key] = value
+            if self._mimo_v2_bind_media_weights and any(
+                self._mimo_v2_media_weight_counts.values()
+            ):
+                logger.info(
+                    "MiMo-V2 load bound preserved media weights: visual=%d audio_encoder=%d speech_embeddings=%d",
+                    self._mimo_v2_media_weight_counts["visual"],
+                    self._mimo_v2_media_weight_counts["audio_encoder"],
+                    self._mimo_v2_media_weight_counts["speech_embeddings"],
+                )
+                assigned_media = self._apply_mimo_v2_media_weights()
+                logger.info(
+                    "MiMo-V2 load assigned %d preserved media tensors to runtime modules",
+                    assigned_media,
+                )
+
+            if hasattr(self.language_model, "sanitize"):
+                filtered = self.language_model.sanitize(filtered)
+
+            for key, value in filtered.items():
+                if not (
+                    ".self_attn.qkv_proj." in key
+                    or ".mlp.gate_proj." in key
+                    or ".mlp.up_proj." in key
+                    or ".mlp.down_proj." in key
+                ):
+                    continue
+                for suffix in ("weight", "scales", "biases"):
+                    marker = f".{suffix}"
+                    if key.endswith(marker):
+                        base = key[: -len(marker)]
+                        self._mimo_v2_pending_qkv_affine.setdefault(base, {})[
+                            suffix
+                        ] = value
+                        break
+
+            quantization = getattr(self.config.text_config, "quantization", None)
+            if isinstance(quantization, dict) and not self._mimo_v2_quantized_for_load:
+                quantized_count = _quantize_mimo_v2_runtime_modules(
+                    self.language_model.inner,
+                    filtered,
+                    quantization,
+                )
+                logger.info("MiMo-V2 load quantized %d runtime modules", quantized_count)
+                self._mimo_v2_quantized_for_load = True
+
+            tq_count = _install_mimo_v2_prestacked_jangtq_modules(
+                self.language_model.inner,
+                filtered,
+                seed=int(getattr(self.config.text_config, "mxtq_seed", 42) or 42),
+            )
+            if tq_count:
+                logger.info(
+                    "MiMo-V2 load installed %d prestacked JANGTQ routed modules",
+                    tq_count,
+                )
+                strict_load_weights = {}
+                for key, value in filtered.items():
+                    if key.endswith(".tq_packed"):
+                        strict_load_weights[f"{key[: -len('.tq_packed')]}.packed"] = value
+                    elif key.endswith(".tq_norms"):
+                        strict_load_weights[f"{key[: -len('.tq_norms')]}.norms"] = value
+                    elif (
+                        key.endswith(".tq_bits")
+                        or key.startswith("codebook.")
+                        or key.startswith("signs.")
+                    ):
+                        continue
+                    else:
+                        strict_load_weights[key] = value
+                filtered = strict_load_weights
+
+            result = self.language_model.load_weights(list(filtered.items()), strict=strict)
+            if isinstance(quantization, dict):
+                try:
+                    from vmlx_engine.utils.jang_loader import (
+                        _upgrade_modules_with_uint32_weights,
+                    )
+
+                    upgraded_count = _upgrade_modules_with_uint32_weights(
+                        self.language_model.inner,
+                        default_bits=int(quantization.get("bits") or 8),
+                        default_group_size=int(quantization.get("group_size") or 64),
+                        default_mode=str(quantization.get("mode") or "affine"),
+                    )
+                    if upgraded_count:
+                        logger.info(
+                            "MiMo-V2 load upgraded %d packed affine runtime modules after load",
+                            upgraded_count,
+                        )
+                except Exception:
+                    logger.exception("MiMo-V2 post-load packed affine upgrade failed")
+                pending_qkv_count = _install_mimo_v2_pending_qkv_affine_modules(
+                    self.language_model.inner,
+                    self._mimo_v2_pending_qkv_affine,
+                    quantization,
+                )
+                if pending_qkv_count:
+                    logger.info(
+                        "MiMo-V2 load installed %d split-shard affine qkv modules",
+                        pending_qkv_count,
+                    )
+                pending_mlp_count = _install_mimo_v2_pending_dense_mlp_affine_modules(
+                    self.language_model.inner,
+                    self._mimo_v2_pending_qkv_affine,
+                    quantization,
+                )
+                if pending_mlp_count:
+                    logger.info(
+                        "MiMo-V2 load installed %d split-shard affine dense MLP modules",
+                        pending_mlp_count,
+                    )
+                qkv_upgrade_count = _upgrade_mimo_v2_loaded_qkv_affine_modules(
+                    self.language_model.inner,
+                    quantization,
+                )
+                if qkv_upgrade_count:
+                    logger.info(
+                        "MiMo-V2 load upgraded %d packed affine qkv modules after load",
+                        qkv_upgrade_count,
+                    )
+                hotspot_count = _quantize_mimo_v2_passthrough_decode_hotspots(
+                    self.language_model.inner,
+                    quantization,
+                )
+                if hotspot_count:
+                    logger.info(
+                        "MiMo-V2 load runtime-quantized %d passthrough decode hotspot modules",
+                        hotspot_count,
+                    )
+            return result
+
+        def sanitize(self, weights):
+            media_weights = {
+                key: value
+                for key, value in weights.items()
+                if key.startswith(("visual.", "audio_encoder.", "speech_embeddings."))
+            }
+            text_weights = {
+                key: value
+                for key, value in weights.items()
+                if key not in media_weights
+            }
+            sanitized = self.language_model.sanitize(text_weights)
+            sanitized.update(media_weights)
+            return sanitized
+
+    module = types.ModuleType(module_name)
+    module.Model = Model
+    module.ModelConfig = ModelConfig
+    module.TextConfig = TextConfig
+    module.VisionConfig = VisionConfig
+    module.AudioConfig = AudioConfig
+    module.LanguageModel = TextModel
+    module.VisionModel = VisionModel
+    module.MiMoVisionPatchEmbed = MiMoVisionPatchEmbed
+    module.MiMoVisionPatchMerger = MiMoVisionPatchMerger
+    module.MiMoVisionBlock = MiMoVisionBlock
+    module.AudioModel = AudioModel
+    module.MiMoAudioTokenizerConfig = MiMoAudioTokenizerConfig
+    module.MiMoAudioTokenizer = MiMoAudioTokenizer
+    module.MiMoAudioTokenizerEncoder = MiMoAudioTokenizerEncoder
+    module.MiMoAudioEuclideanCodebook = MiMoAudioEuclideanCodebook
+    module.MiMoAudioResidualVectorQuantizer = MiMoAudioResidualVectorQuantizer
+    module.load_mimo_audio_rvq_from_bundle = load_mimo_audio_rvq_from_bundle
+    module.load_mimo_audio_tokenizer_from_bundle = load_mimo_audio_tokenizer_from_bundle
+    module.plan_mimo_audio_mel_segments = plan_mimo_audio_mel_segments
+    module._vmlx_mimo_v2_runtime_registered = True
+    module.__file__ = getattr(text_runtime, "__file__", module_name)
+    sys.modules[module_name] = module
+
+
+def _vlm_stream():
+    """Create one stream for simple mlx-vlm generation paths.
+
+    The batched VLM scheduler already pins MLX work to a dedicated stream.
+    SimpleEngine's direct `mlx_vlm.stream_generate` path must do the same or
+    JANGTQ/VL kernels can later materialize on a thread with no MLX stream.
+    """
+    global _VLM_STREAM, _VLM_STREAM_OWNER
+    owner = threading.get_ident()
+    if _VLM_STREAM is None or _VLM_STREAM_OWNER != owner:
+        try:
+            import mlx.core as mx
+
+            _VLM_STREAM = mx.new_stream(mx.default_device())
+            _VLM_STREAM_OWNER = owner
+        except Exception:
+            try:
+                import mlx.core as mx
+
+                _VLM_STREAM = mx.default_stream(mx.default_device())
+                _VLM_STREAM_OWNER = owner
+            except Exception:
+                _VLM_STREAM = False
+                _VLM_STREAM_OWNER = owner
+    stream = None if _VLM_STREAM is False else _VLM_STREAM
+    if stream is not None:
+        # mlx-vlm also owns a module-global generation stream.  The module
+        # survives SimpleEngine teardown while its worker does not, so a later
+        # direct engine can otherwise synchronize a handle created on the old
+        # thread.  Rebind it whenever this worker establishes ownership.
+        try:
+            _mvg = importlib.import_module("mlx_vlm.generate")
+
+            if getattr(_mvg, "generation_stream", None) is not stream:
+                _mvg.generation_stream = stream
+        except Exception:
+            pass
+    return stream
+
+
+def reset_vlm_stream() -> None:
+    """Clear the direct mlx-vlm stream handle after model teardown.
+
+    ``_VLM_STREAM`` is owned by the worker thread that first runs direct
+    ``mlx_vlm.stream_generate``. Deep sleep, wake, model switch, and direct
+    SimpleEngine teardown can replace that worker; retaining the old stream
+    lets a later request enter ``mx.stream(old_stream)`` from a different
+    thread and raises ``RuntimeError: There is no Stream(gpu, N) in current
+    thread``.
+    """
+    global _VLM_STREAM, _VLM_STREAM_OWNER
+    _VLM_STREAM = None
+    _VLM_STREAM_OWNER = None
+
+
+def _set_vlm_inference_mode(model: Any) -> None:
+    """Put mlx-vlm model copies in eval mode so inference kernels stay enabled."""
+    seen: set[int] = set()
+    stack = [
+        model,
+        getattr(model, "language_model", None),
+        getattr(model, "model", None),
+    ]
+    while stack:
+        candidate = stack.pop()
+        if candidate is None or id(candidate) in seen:
+            continue
+        seen.add(id(candidate))
+        eval_fn = getattr(candidate, "eval", None)
+        if callable(eval_fn):
+            try:
+                eval_fn()
+            except Exception:
+                pass
+        if hasattr(candidate, "training"):
+            try:
+                setattr(candidate, "training", False)
+            except Exception:
+                pass
+        children_fn = getattr(candidate, "children", None)
+        if callable(children_fn):
+            try:
+                children = children_fn()
+                if isinstance(children, dict):
+                    stack.extend(children.values())
+                else:
+                    stack.extend(children)
+            except Exception:
+                pass
+        for attr in ("inner", "language_model", "model", "layers"):
+            value = getattr(candidate, attr, None)
+            if isinstance(value, dict):
+                stack.extend(value.values())
+            elif isinstance(value, (list, tuple)):
+                stack.extend(value)
+            elif value is not None:
+                stack.append(value)
+
+
+class _dspark_media_cleared:
+    """Clears a DSpark target's per-request media plan when generation ends (finished, failed or abandoned), so the
+    next request never inherits another request's embeddings or rope delta."""
+
+    def __init__(self, target):
+        self.target = target
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.target.set_media()
+        return False
+
+
+class _MaybeVLMStream:
+    __slots__ = ("_cm",)
+
+    def __init__(self):
+        self._cm = None
+        stream = _vlm_stream()
+        if stream is not None:
+            try:
+                import mlx.core as mx
+
+                self._cm = mx.stream(stream)
+            except Exception:
+                self._cm = None
+
+    def __enter__(self):
+        if self._cm is not None:
+            self._cm.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        if self._cm is not None:
+            return self._cm.__exit__(*exc)
+        return False
+
+
+def _prompt_cache_state_from_entry(cache_entry: Any) -> Any | None:
+    """Build mlx-vlm PromptCacheState from a vMLX MLLM prefix entry."""
+    if cache_entry is None:
+        return None
+    kv_cache = getattr(cache_entry, "kv_cache", None)
+    token_ids = getattr(cache_entry, "token_ids", None)
+    if kv_cache is None or not token_ids:
+        return None
+    # Legacy MLLMPrefixCacheManager.store_cache() writes dummy all-zero token IDs
+    # when the caller only knows a token count. mlx-vlm PromptCacheState uses
+    # token_ids as the authoritative trim boundary, so dummy IDs would turn a
+    # stale cache into a fake prefix hit.
+    if all(token_id == 0 for token_id in token_ids):
+        return None
+    if len(token_ids) <= 1:
+        return None
+    restore_token_ids = list(token_ids[:-1])
+    restore_len = len(restore_token_ids)
+    try:
+        kv_cache = _copy_prompt_cache_to_prompt_boundary(kv_cache, restore_len)
+    except Exception:
+        return None
+    if not kv_cache:
+        return None
+    try:
+        from mlx_vlm.generate import PromptCacheState
+    except Exception:
+        return None
+
+    state = PromptCacheState()
+    try:
+        from ..utils.mlx_vlm_compat import _vmlx_wrap_rank3_prompt_cache_for_mlx_vlm
+
+        kv_cache = _vmlx_wrap_rank3_prompt_cache_for_mlx_vlm(kv_cache)
+    except Exception:
+        pass
+    state.cache = kv_cache
+    state.token_ids = restore_token_ids
+    return state
+
+
+def _media_expanded_token_ids_for_cache(
+    model: Any,
+    processor: Any,
+    prompt: str,
+    *,
+    images: list[Any] | None = None,
+    audio: list[Any] | None = None,
+    video: list[Any] | None = None,
+    resize_shape: Any = None,
+) -> list[int] | None:
+    """Return mlx-vlm's media-expanded input IDs for VLM prefix-cache keys."""
+    if not images and not audio and not video:
+        return None
+    try:
+        from mlx_vlm.generate import normalize_resize_shape, prepare_inputs
+    except Exception:
+        return None
+    try:
+        config = getattr(model, "config", None)
+        model_type = str(getattr(config, "model_type", "") or "")
+        image_token_index = getattr(config, "image_token_index", None)
+        add_special_tokens = (
+            getattr(processor, "chat_template", None) is None
+            if model_type in {"gemma3", "gemma3n", "gemma4"}
+            else True
+        )
+        inputs = prepare_inputs(
+            processor,
+            images=images if images else None,
+            audio=audio if audio else None,
+            videos=video if video else None,
+            prompts=prompt,
+            image_token_index=image_token_index,
+            resize_shape=normalize_resize_shape(resize_shape),
+            add_special_tokens=add_special_tokens,
+        )
+        input_ids = inputs.get("input_ids", None)
+        if input_ids is None:
+            return None
+        return [int(x) for x in input_ids.flatten().tolist()]
+    except Exception as exc:
+        logger.debug("Media-expanded VLM cache tokenization failed: %s", exc)
+        return None
+
+
+def _supports_simple_media_prompt_cache(model: Any) -> bool:
+    """Whether simple mlx-vlm media PromptCacheState restore is safe."""
+    language_model = getattr(model, "language_model", None)
+    inner_model = getattr(language_model, "model", None)
+    layers = getattr(inner_model, "layers", None)
+    if not layers:
+        return True
+    for layer in layers:
+        if hasattr(layer, "linear_attn") or hasattr(layer, "mamba") or hasattr(layer, "ssm"):
+            return False
+    return True
+
+
+def _copy_prompt_cache_to_prompt_boundary(
+    prompt_cache: list[Any], prompt_tokens_count: int
+) -> list[Any]:
+    """Copy an mlx-vlm prompt cache and trim generated-token tails."""
+    import copy
+
+    import mlx.core as mx
+
+    cache_to_store = []
+    prompt_tokens_count = max(int(prompt_tokens_count or 0), 0)
+    for layer_cache in prompt_cache:
+        new_cache = copy.copy(layer_cache)
+        if hasattr(layer_cache, "_idx") and hasattr(layer_cache, "max_size"):
+            # A rotating buffer's tensor length is not its absolute position.
+            # Once it has evicted history, copying its current ring cannot
+            # reconstruct an earlier prompt boundary. Keep that request cold
+            # rather than publish a corrupted prefix as a successful hit.
+            offset = int(layer_cache.offset)
+            rollback = max(0, offset - prompt_tokens_count)
+            if rollback and not layer_cache.is_trimmable():
+                raise ValueError("Cannot restore rotating cache after history eviction")
+            if layer_cache.keys is not None:
+                new_cache.keys = mx.array(layer_cache.keys)
+                new_cache.values = mx.array(layer_cache.values)
+            if rollback:
+                new_cache.trim(rollback)
+            cache_to_store.append(new_cache)
+            continue
+        copied = False
+        if hasattr(layer_cache, "state"):
+            state = layer_cache.state
+            if state is not None and len(state) >= 2 and state[0] is not None:
+                keys = mx.array(state[0])
+                values = mx.array(state[1])
+                cache_axis = 2 if len(keys.shape) >= 4 else 1 if len(keys.shape) == 3 else None
+                cache_len = keys.shape[cache_axis] if cache_axis is not None else None
+                target_len = prompt_tokens_count
+                if cache_len is not None:
+                    target_len = min(prompt_tokens_count, cache_len)
+                    if cache_len > target_len:
+                        if cache_axis == 2:
+                            keys = keys[:, :, :target_len, :]
+                            values = values[:, :, :target_len, :]
+                        else:
+                            keys = keys[:, :target_len, :]
+                            values = values[:, :target_len, :]
+                new_cache.keys = keys
+                new_cache.values = values
+                if len(state) >= 3:
+                    offset = state[2]
+                    new_cache.offset = target_len if offset is None else min(offset, target_len)
+                elif hasattr(layer_cache, "offset"):
+                    offset = layer_cache.offset
+                    new_cache.offset = target_len if offset is None else min(offset, target_len)
+                copied = True
+        if not copied:
+            keys = getattr(layer_cache, "keys", None)
+            values = getattr(layer_cache, "values", None)
+            if keys is not None and values is not None:
+                keys = mx.array(keys)
+                values = mx.array(values)
+                cache_axis = 2 if len(keys.shape) >= 4 else 1 if len(keys.shape) == 3 else None
+                cache_len = keys.shape[cache_axis] if cache_axis is not None else None
+                target_len = prompt_tokens_count
+                if cache_len is not None:
+                    target_len = min(prompt_tokens_count, cache_len)
+                    if cache_len > target_len:
+                        if cache_axis == 2:
+                            keys = keys[:, :, :target_len, :]
+                            values = values[:, :, :target_len, :]
+                        else:
+                            keys = keys[:, :target_len, :]
+                            values = values[:, :target_len, :]
+                new_cache.keys = keys
+                new_cache.values = values
+                if hasattr(layer_cache, "offset"):
+                    offset = layer_cache.offset
+                    new_cache.offset = target_len if offset is None else min(offset, target_len)
+        cache_to_store.append(new_cache)
+    return cache_to_store
+
+
+class TempFileManager:
+    """Thread-safe manager for tracking and cleaning up temporary files."""
+
+    def __init__(self):
+        self._files: set[str] = set()
+        self._lock = threading.Lock()
+        atexit.register(self.cleanup_all)
+
+    def register(self, path: str) -> str:
+        """Register a temp file for tracking. Returns the path for convenience."""
+        with self._lock:
+            self._files.add(path)
+        return path
+
+    def cleanup(self, path: str) -> bool:
+        """Clean up a specific temp file. Returns True if successful."""
+        try:
+            if os.path.exists(path):
+                os.unlink(path)
+                with self._lock:
+                    self._files.discard(path)
+                logger.debug(f"Cleaned up temp file: {path}")
+                return True
+        except OSError as e:
+            logger.warning(f"Failed to clean up temp file {path}: {e}")
+        return False
+
+    def cleanup_all(self) -> int:
+        """Clean up all tracked temp files. Returns count of cleaned files."""
+        with self._lock:
+            files_to_clean = list(self._files)
+            self._files.clear()
+
+        cleaned = 0
+        for path in files_to_clean:
+            try:
+                if os.path.exists(path):
+                    os.unlink(path)
+                    cleaned += 1
+            except OSError:
+                pass
+
+        # Do not log from atexit cleanup: logging streams may already be closed
+        # by pytest or the app shutdown path, which makes logging print noisy
+        # "I/O operation on closed file" diagnostics despite successful cleanup.
+        return cleaned
+
+
+# Global temp file manager
+_temp_manager = TempFileManager()
+
+
+
+# Video processing constants
+FRAME_FACTOR = 2  # Frames must be divisible by this
+DEFAULT_FPS = 2.0  # Default frames per second for video
+MIN_FRAMES = 4
+MAX_FRAMES = 128  # Practical limit for most MLLMs
+IMAGE_FACTOR = 28  # For smart resize
+
+# Security: File size limits (in bytes)
+MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20 MB max for images
+MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500 MB max for videos
+MAX_AUDIO_SIZE = 50 * 1024 * 1024  # 50 MB max for audio
+MAX_BASE64_IMAGE_LENGTH = 30 * 1024 * 1024  # 30 MB base64 string (~22 MB decoded)
+MAX_BASE64_VIDEO_LENGTH = 700 * 1024 * 1024  # 700 MB base64 string (~500 MB decoded)
+MAX_BASE64_AUDIO_LENGTH = 70 * 1024 * 1024  # 70 MB base64 string (~50 MB decoded)
+
+
+class FileSizeExceededError(Exception):
+    """Raised when a downloaded file exceeds the size limit."""
+
+    pass
+
+
+@dataclass
+class MultimodalInput:
+    """Input for multimodal generation."""
+
+    prompt: str
+    images: list[str] = field(default_factory=list)  # Paths, URLs, or base64
+    videos: list[str] = field(default_factory=list)  # Paths
+    audio: list[str] = field(default_factory=list)  # Paths
+
+
+@dataclass
+class MLLMOutput:
+    """Output from multimodal language model."""
+
+    text: str
+    finish_reason: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_tokens: int = 0
+    cache_detail: str = ""
+    # Request-owned background SSD write; consumed by SimpleEngine only at
+    # the terminal boundary, after delivering the final content delta.
+    persistence_future: Any = None
+    # Engine-measured prefill {tokens, seconds, scope} -> usage.vmlx_prefill
+    # (the UI's pp/s). SimpleEngine paths previously never set it.
+    prefill_usage: Any = None
+    # Speculative-decoding stats of the finished request (DFlash2 lanes):
+    # surfaced as /health.last_request.speculative for the Perf panel.
+    spec_stats: Any = None
+    # Cumulative generated IDs, supplied only by qualified terminal paths.
+    # Empty means unavailable; never infer them from decoded text.
+    tokens: list[int] = field(default_factory=list)
+
+
+def is_base64_image(s: str) -> bool:
+    """Check if string is base64-encoded image data."""
+    return s.startswith("data:image/") or (
+        len(s) > 100 and not s.startswith(("http://", "https://", "/"))
+    )
+
+
+def is_url(s: str) -> bool:
+    """Check if string is a URL."""
+    return s.startswith(("http://", "https://"))
+
+
+def is_base64_video(s: str) -> bool:
+    """Check if string is base64-encoded video data."""
+    return s.startswith("data:video/")
+
+
+def is_base64_audio(s: str) -> bool:
+    """Check if string is base64-encoded audio data."""
+    return s.startswith("data:audio/")
+
+
+def decode_base64_image(
+    base64_string: str, max_length: int = MAX_BASE64_IMAGE_LENGTH
+) -> bytes:
+    """
+    Decode base64 image to bytes.
+
+    Args:
+        base64_string: Base64 encoded image (optionally with data URL prefix)
+        max_length: Maximum allowed length of base64 string
+
+    Returns:
+        Decoded image bytes
+
+    Raises:
+        FileSizeExceededError: If base64 string exceeds max_length
+    """
+    if len(base64_string) > max_length:
+        raise FileSizeExceededError(
+            f"Base64 image data exceeds maximum size: {len(base64_string) / 1024 / 1024:.1f} MB > "
+            f"{max_length / 1024 / 1024:.1f} MB limit"
+        )
+
+    # Handle data URL format: data:image/jpeg;base64,/9j/4AAQ...
+    if base64_string.startswith("data:"):
+        # Extract the base64 part after the comma
+        _, data = base64_string.split(",", 1)
+        return base64.b64decode(data)
+    return base64.b64decode(base64_string)
+
+
+def download_image(url: str, timeout: int = 30, max_size: int = MAX_IMAGE_SIZE) -> str:
+    """
+    Download image from URL and return local path.
+
+    Args:
+        url: Image URL
+        timeout: Download timeout in seconds
+        max_size: Maximum allowed file size in bytes
+
+    Returns:
+        Local file path to downloaded image
+
+    Raises:
+        FileSizeExceededError: If image exceeds max_size
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+    }
+
+    # First, make a HEAD request to check Content-Length
+    try:
+        head_response = requests.head(
+            url, timeout=timeout, headers=headers, allow_redirects=True, verify=True
+        )
+        content_length = head_response.headers.get("content-length")
+        if content_length and int(content_length) > max_size:
+            raise FileSizeExceededError(
+                f"Image at {url} exceeds maximum size: {int(content_length) / 1024 / 1024:.1f} MB > "
+                f"{max_size / 1024 / 1024:.1f} MB limit"
+            )
+    except requests.RequestException:
+        # HEAD request failed, proceed with GET and check during download
+        pass
+
+    response = requests.get(
+        url, timeout=timeout, headers=headers, stream=True, verify=True
+    )
+    response.raise_for_status()
+
+    # Check Content-Length header from GET response
+    content_length = response.headers.get("content-length")
+    if content_length and int(content_length) > max_size:
+        raise FileSizeExceededError(
+            f"Image at {url} exceeds maximum size: {int(content_length) / 1024 / 1024:.1f} MB > "
+            f"{max_size / 1024 / 1024:.1f} MB limit"
+        )
+
+    # Determine extension from content type or URL
+    content_type = response.headers.get("content-type", "")
+    if "jpeg" in content_type or "jpg" in content_type:
+        ext = ".jpg"
+    elif "png" in content_type:
+        ext = ".png"
+    elif "gif" in content_type:
+        ext = ".gif"
+    elif "webp" in content_type:
+        ext = ".webp"
+    else:
+        # Try to get from URL
+        path = urlparse(url).path
+        ext = Path(path).suffix or ".jpg"
+
+    # Save to temp file with size checking during download
+    temp_file = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    downloaded_size = 0
+    try:
+        for chunk in response.iter_content(chunk_size=8192):
+            downloaded_size += len(chunk)
+            if downloaded_size > max_size:
+                temp_file.close()
+                os.unlink(temp_file.name)
+                raise FileSizeExceededError(
+                    f"Image at {url} exceeds maximum size during download: "
+                    f"{downloaded_size / 1024 / 1024:.1f} MB > {max_size / 1024 / 1024:.1f} MB limit"
+                )
+            temp_file.write(chunk)
+        temp_file.close()
+    except FileSizeExceededError:
+        raise
+    except Exception:
+        temp_file.close()
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
+        raise
+
+    return _temp_manager.register(temp_file.name)
+
+
+def download_video(url: str, timeout: int = 120, max_size: int = MAX_VIDEO_SIZE) -> str:
+    """
+    Download video from URL and return local path.
+
+    Args:
+        url: Video URL (http/https)
+        timeout: Download timeout in seconds (default 120s for larger videos)
+        max_size: Maximum allowed file size in bytes
+
+    Returns:
+        Local file path to downloaded video
+
+    Raises:
+        FileSizeExceededError: If video exceeds max_size
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+    }
+
+    logger.info(f"Downloading video from: {url}")
+
+    # First, make a HEAD request to check Content-Length
+    try:
+        head_response = requests.head(
+            url, timeout=timeout, headers=headers, allow_redirects=True, verify=True
+        )
+        content_length = head_response.headers.get("content-length")
+        if content_length and int(content_length) > max_size:
+            raise FileSizeExceededError(
+                f"Video at {url} exceeds maximum size: {int(content_length) / 1024 / 1024:.1f} MB > "
+                f"{max_size / 1024 / 1024:.1f} MB limit"
+            )
+    except requests.RequestException:
+        # HEAD request failed, proceed with GET and check during download
+        pass
+
+    response = requests.get(
+        url, timeout=timeout, headers=headers, stream=True, verify=True
+    )
+    response.raise_for_status()
+
+    # Check Content-Length header from GET response
+    content_length = response.headers.get("content-length")
+    if content_length and int(content_length) > max_size:
+        raise FileSizeExceededError(
+            f"Video at {url} exceeds maximum size: {int(content_length) / 1024 / 1024:.1f} MB > "
+            f"{max_size / 1024 / 1024:.1f} MB limit"
+        )
+
+    # Determine extension from content type or URL
+    content_type = response.headers.get("content-type", "")
+    if "mp4" in content_type:
+        ext = ".mp4"
+    elif "webm" in content_type:
+        ext = ".webm"
+    elif "avi" in content_type:
+        ext = ".avi"
+    elif "mov" in content_type or "quicktime" in content_type:
+        ext = ".mov"
+    elif "mkv" in content_type:
+        ext = ".mkv"
+    else:
+        # Try to get from URL
+        path = urlparse(url).path
+        ext = Path(path).suffix or ".mp4"
+
+    # Save to temp file (stream for larger files) with size checking
+    temp_file = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    downloaded_size = 0
+    try:
+        for chunk in response.iter_content(chunk_size=8192):
+            downloaded_size += len(chunk)
+            if downloaded_size > max_size:
+                temp_file.close()
+                os.unlink(temp_file.name)
+                raise FileSizeExceededError(
+                    f"Video at {url} exceeds maximum size during download: "
+                    f"{downloaded_size / 1024 / 1024:.1f} MB > {max_size / 1024 / 1024:.1f} MB limit"
+                )
+            temp_file.write(chunk)
+        temp_file.close()
+    except FileSizeExceededError:
+        raise
+    except Exception:
+        temp_file.close()
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
+        raise
+
+    file_size = Path(temp_file.name).stat().st_size
+    logger.info(
+        f"Video downloaded: {temp_file.name} ({file_size / 1024 / 1024:.1f} MB)"
+    )
+
+    return _temp_manager.register(temp_file.name)
+
+
+def decode_base64_video(
+    base64_string: str, max_length: int = MAX_BASE64_VIDEO_LENGTH
+) -> str:
+    """
+    Decode base64 video to temp file and return path.
+
+    Supports format: data:video/mp4;base64,AAAA...
+
+    Args:
+        base64_string: Base64-encoded video with data URL prefix
+        max_length: Maximum allowed length of base64 string
+
+    Returns:
+        Local file path to decoded video
+
+    Raises:
+        FileSizeExceededError: If base64 string exceeds max_length
+    """
+    if len(base64_string) > max_length:
+        raise FileSizeExceededError(
+            f"Base64 video data exceeds maximum size: {len(base64_string) / 1024 / 1024:.1f} MB > "
+            f"{max_length / 1024 / 1024:.1f} MB limit"
+        )
+
+    # Extract format and data
+    if base64_string.startswith("data:video/"):
+        # Format: data:video/mp4;base64,AAAA...
+        header, data = base64_string.split(",", 1)
+        # Extract extension from header (e.g., "data:video/mp4;base64" -> "mp4")
+        format_part = header.split(";")[0]  # "data:video/mp4"
+        ext = "." + format_part.split("/")[-1]  # ".mp4"
+    else:
+        # Assume mp4 if no header
+        data = base64_string
+        ext = ".mp4"
+
+    # Decode, save, and register for cleanup
+    video_bytes = base64.b64decode(data)
+    temp_file = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    temp_file.write(video_bytes)
+    temp_file.close()
+
+    logger.info(
+        f"Base64 video decoded: {temp_file.name} ({len(video_bytes) / 1024 / 1024:.1f} MB)"
+    )
+
+    return _temp_manager.register(temp_file.name)
+
+
+def decode_base64_audio(
+    base64_string: str,
+    *,
+    default_format: str = "wav",
+    max_length: int = MAX_BASE64_AUDIO_LENGTH,
+) -> str:
+    """Decode base64 audio to a temp file and return its path."""
+    if len(base64_string) > max_length:
+        raise FileSizeExceededError(
+            f"Base64 audio data exceeds maximum size: {len(base64_string) / 1024 / 1024:.1f} MB > "
+            f"{max_length / 1024 / 1024:.1f} MB limit"
+        )
+    ext = "." + (default_format or "wav").lower().lstrip(".")
+    if base64_string.startswith("data:audio/"):
+        header, data = base64_string.split(",", 1)
+        format_part = header.split(";", 1)[0]
+        fmt = format_part.split("/", 1)[-1]
+        if fmt:
+            ext = "." + fmt.lower().replace("x-wav", "wav")
+    else:
+        data = base64_string
+    audio_bytes = base64.b64decode(data)
+    if len(audio_bytes) > MAX_AUDIO_SIZE:
+        raise FileSizeExceededError(
+            f"Audio data exceeds maximum size: {len(audio_bytes) / 1024 / 1024:.1f} MB > "
+            f"{MAX_AUDIO_SIZE / 1024 / 1024:.1f} MB limit"
+        )
+    temp_file = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    temp_file.write(audio_bytes)
+    temp_file.close()
+    logger.info(
+        f"Base64 audio decoded: {temp_file.name} ({len(audio_bytes) / 1024 / 1024:.1f} MB)"
+    )
+    return _temp_manager.register(temp_file.name)
+
+
+def process_audio_input(audio: str | dict) -> str:
+    """Process audio input in OpenAI/data-url/path/URL formats."""
+    if isinstance(audio, dict):
+        src = audio.get("input_audio") or audio.get("audio") or audio.get("audio_url") or audio
+        if isinstance(src, dict):
+            if src.get("data"):
+                return decode_base64_audio(
+                    str(src["data"]),
+                    default_format=str(src.get("format") or "wav"),
+                )
+            audio = src.get("url") or src.get("path") or ""
+        else:
+            audio = str(src or "")
+    audio = str(audio or "")
+    if not audio:
+        raise ValueError("Empty audio input")
+    if is_base64_audio(audio):
+        return decode_base64_audio(audio)
+    return audio
+
+
+def process_video_input(video: str | dict) -> str:
+    """
+    Process video input in various formats and return local path.
+
+    Supports:
+    - Local file path
+    - URL (http/https)
+    - Base64 encoded string (data:video/mp4;base64,...)
+    - OpenAI format dict: {"url": "..."} or {"url": "data:video/...;base64,..."}
+
+    Args:
+        video: Video input in any supported format
+
+    Returns:
+        Local file path to video
+    """
+    # Handle dict format (OpenAI style)
+    if isinstance(video, dict):
+        url = video.get("url", video.get("video_url", ""))
+        if isinstance(url, dict):
+            url = url.get("url", "")
+        video = url
+
+    if not video:
+        raise ValueError("Empty video input")
+
+    # Check URL/data-URL formats before filesystem probing. Long data URLs can
+    # exceed platform filename limits if passed through Path.exists().
+    if is_base64_video(video):
+        return decode_base64_video(video)
+
+    if is_url(video):
+        return download_video(video)
+
+    # Check if it's a local file
+    try:
+        if Path(video).exists():
+            return video
+    except OSError:
+        pass
+
+    raise ValueError(f"Cannot process video: {video[:50]}...")
+
+
+def _normalize_tool_calls_for_template(tool_calls: Any) -> list[dict] | None:
+    """Return OpenAI tool calls as plain mappings with dict arguments."""
+    if not tool_calls:
+        return None
+    normalized: list[dict] = []
+    for tool_call in tool_calls:
+        if hasattr(tool_call, "model_dump"):
+            call = tool_call.model_dump(exclude_none=True)
+        elif hasattr(tool_call, "dict"):
+            call = tool_call.dict()
+            call = {k: v for k, v in call.items() if v is not None}
+        elif isinstance(tool_call, dict):
+            call = dict(tool_call)
+        else:
+            continue
+
+        fn = call.get("function")
+        if hasattr(fn, "model_dump"):
+            fn = fn.model_dump(exclude_none=True)
+        elif hasattr(fn, "dict"):
+            fn = fn.dict()
+            fn = {k: v for k, v in fn.items() if v is not None}
+        elif isinstance(fn, dict):
+            fn = dict(fn)
+        else:
+            fn = {}
+
+        args = fn.get("arguments")
+        if isinstance(args, str):
+            try:
+                parsed = json.loads(args)
+                fn["arguments"] = parsed if isinstance(parsed, dict) else {}
+            except (json.JSONDecodeError, TypeError):
+                fn["arguments"] = {}
+        elif args is None:
+            fn["arguments"] = {}
+
+        call["function"] = fn
+        normalized.append(call)
+
+    return normalized or None
+
+
+# Cache for base64 images to avoid re-saving the same image
+# OrderedDict for LRU eviction with bounded size
+from collections import OrderedDict
+
+_base64_image_cache: OrderedDict[str, str] = OrderedDict()  # hash -> temp file path
+_BASE64_IMAGE_CACHE_MAX_SIZE = 100
+
+
+def save_base64_image(base64_string: str) -> str:
+    """Save base64 image to temp file and return path. Caches identical images."""
+    import hashlib
+
+    # Hash the full base64 string to avoid collisions
+    image_hash = hashlib.sha256(base64_string.encode()).hexdigest()
+
+    # Return cached path if available and file still exists
+    if image_hash in _base64_image_cache:
+        cached_path = _base64_image_cache[image_hash]
+        if Path(cached_path).exists():
+            _base64_image_cache.move_to_end(image_hash)  # LRU: mark as recently used
+            return cached_path
+        else:
+            # File was cleaned up, remove stale entry
+            del _base64_image_cache[image_hash]
+
+    image_bytes = decode_base64_image(base64_string)
+
+    # Detect format from magic bytes
+    if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+        ext = ".png"
+    elif image_bytes[:2] == b"\xff\xd8":
+        ext = ".jpg"
+    elif image_bytes[:6] in (b"GIF87a", b"GIF89a"):
+        ext = ".gif"
+    elif image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+        ext = ".webp"
+    else:
+        ext = ".jpg"  # Default
+
+    temp_file = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    temp_file.write(image_bytes)
+    temp_file.close()
+
+    path = _temp_manager.register(temp_file.name)
+    _base64_image_cache[image_hash] = path
+
+    # Evict oldest entries if cache exceeds size limit
+    # M5: Also delete the temp file on eviction (not just the cache entry)
+    while len(_base64_image_cache) > _BASE64_IMAGE_CACHE_MAX_SIZE:
+        _, evicted_path = _base64_image_cache.popitem(last=False)
+        _temp_manager.cleanup(evicted_path)
+
+    return path
+
+
+def process_image_input(image: str | dict) -> str:
+    """
+    Process image input in various formats and return local path.
+
+    Supports:
+    - Local file path
+    - URL (http/https)
+    - Base64 encoded string
+    - OpenAI format dict: {"url": "..."} or {"url": "data:image/...;base64,..."}
+    """
+    # Handle dict format (OpenAI style)
+    if isinstance(image, dict):
+        url = image.get("url", image.get("image_url", ""))
+        if isinstance(url, dict):
+            url = url.get("url", "")
+        image = url
+
+    if not image:
+        raise ValueError("Empty image input")
+
+    # Check if it's base64 FIRST (before Path.exists() which fails on long strings)
+    if is_base64_image(image):
+        return save_base64_image(image)
+
+    # Check if it's a URL
+    if is_url(image):
+        return download_image(image)
+
+    # Check if it's a local file (only for short strings that could be paths)
+    if len(image) < 4096 and Path(image).exists():
+        return image
+
+    raise ValueError(f"Cannot process image: {image[:50]}...")
+
+
+def round_by_factor(x: int, factor: int) -> int:
+    """Round to nearest multiple of factor."""
+    return round(x / factor) * factor
+
+
+def ceil_by_factor(x: float, factor: int) -> int:
+    """Ceiling to next multiple of factor."""
+    return math.ceil(x / factor) * factor
+
+
+def floor_by_factor(x: float, factor: int) -> int:
+    """Floor to previous multiple of factor."""
+    return math.floor(x / factor) * factor
+
+
+def smart_nframes(
+    total_frames: int,
+    video_fps: float,
+    target_fps: float = DEFAULT_FPS,
+    min_frames: int = MIN_FRAMES,
+    max_frames: int = MAX_FRAMES,
+) -> int:
+    """
+    Calculate optimal number of frames to extract from video.
+
+    Uses smart sampling based on video length and target FPS.
+    """
+    # Calculate duration-based frame count
+    duration = total_frames / video_fps if video_fps > 0 else 0
+    nframes = duration * target_fps
+
+    # Clamp to min/max
+    nframes = max(min_frames, min(nframes, max_frames, total_frames))
+
+    # Round to factor
+    nframes = max(FRAME_FACTOR, floor_by_factor(nframes, FRAME_FACTOR))
+
+    return int(nframes)
+
+
+
+def _video_pixel_key_suffix(controls: Any) -> str:
+    """Cache-key suffix for per-request pixel controls; empty when unset."""
+    from ..video_controls import VideoControls
+
+    if isinstance(controls, VideoControls) and controls.has_pixel_controls:
+        return f":px{controls.pixel_fragment()}"
+    return ""
+
+
+def extract_video_frames_smart(
+    video_path: str,
+    fps: float = DEFAULT_FPS,
+    max_frames: int = MAX_FRAMES,
+    resize: tuple[int, int] | None = None,
+    *,
+    return_metadata: bool = False,
+):
+    """
+    Extract frames from video with smart sampling.
+
+    Args:
+        video_path: Path to video file
+        fps: Target frames per second (default: 2.0)
+        max_frames: Maximum frames to extract
+        resize: Optional (width, height) to resize frames
+
+    Returns:
+        List of RGB arrays; with return_metadata, (frames, metadata) where
+        metadata follows successful decoder reads, not requested FPS.
+        timestamp_seconds is nominal source frame index / reported FPS,
+        not decoder presentation timestamps (VFR timing is not guaranteed).
+    """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError("opencv-python is required for video processing")
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Cannot open video: {video_path}")
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    reported_fps = cap.get(cv2.CAP_PROP_FPS)
+    timestamp_fps = reported_fps if reported_fps and np.isfinite(reported_fps) and reported_fps > 0 else None
+    video_fps = reported_fps or 30.0
+
+    # Calculate number of frames to extract
+    nframes = smart_nframes(
+        total_frames=total_frames,
+        video_fps=video_fps,
+        target_fps=fps,
+        max_frames=max_frames,
+    )
+
+    # Calculate frame indices (evenly spaced)
+    indices = np.linspace(0, total_frames - 1, nframes).round().astype(int)
+
+    logger.info(
+        f"Video: {total_frames} total frames @ {video_fps:.1f} fps, "
+        f"extracting {nframes} frames"
+    )
+
+    frames = []
+    metadata = []
+    for idx in indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        if not ret:
+            continue
+
+        # Convert BGR to RGB
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Resize if specified
+        if resize:
+            frame = cv2.resize(frame, resize)
+
+        frames.append(frame)
+        metadata.append({"frame_index": int(idx), "timestamp_seconds": float(idx / timestamp_fps) if timestamp_fps else None})
+
+    cap.release()
+
+    return (frames, metadata) if return_metadata else frames
+
+
+def save_frames_to_temp(frames: list[np.ndarray]) -> list[str]:
+    """Save frame arrays to temporary files and return paths."""
+    try:
+        from PIL import Image
+    except ImportError:
+        raise ImportError("Pillow is required for frame processing")
+
+    paths = []
+    for i, frame in enumerate(frames):
+        img = Image.fromarray(frame)
+        temp_file = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+        img.save(temp_file.name, "JPEG", quality=85)
+        paths.append(_temp_manager.register(temp_file.name))
+
+    return paths
+
+
+def _simple_video_frame_cap(kwargs: dict, n_videos: int, n_images: int) -> int:
+    """Per-video frame cap for SimpleEngine: the request's image limit split across its
+    videos, after its own images -- the same split the batched frame fallback uses."""
+    limit = int(kwargs.get("max_images_per_request", 20) or 20)
+    return max(1, (limit - int(n_images)) // max(1, int(n_videos)))
+
+
+# Families whose SimpleEngine video handling routes through sampled frames
+# sent as images. Mirror of the BatchedEngine's _video_frame_fallback_messages
+# family gate (batched.py) minus native-gemma4: qwen3_5's native video tensors
+# misread even simple color sequences, so frame-fallback IS the designed path.
+# A family folded into all_images at frame extraction but absent from this set
+# renders ONE un-expanded <|video_pad|> while the tower produces per-frame
+# features — "Image features and image tokens do not match" at generation.
+_VIDEO_FRAME_FALLBACK_MODEL_TYPES = {
+    "gemma4_unified",
+    "step3p7",
+    "qwen3_5",
+    "qwen3_5_moe",
+    # SimpleEngine (always used by DFlash2 sessions) passes decoded video frames as images; without the placeholder
+    # expansion the GLM template rendered a video slot and the request failed with "GLM image features and
+    # placeholders disagree: tokens=0, features=672" (2026-10-10). The batched engine keeps native video processing.
+    "glm5_next",
+}
+
+
+
+# Families whose native processor takes SimpleEngine's sampled frames as a
+# real clip (pixel_values_videos at the video pad id) instead of frames sent as
+# images. MiniCPM-V-4.7 encodes a video as consecutive <image>-wrapped frames
+# of <|video_pad|> with no image ids, one canvas group; frames-as-images would
+# add <image_id> text between frames and split the canvas.
+_NATIVE_VIDEO_FRAME_MODEL_TYPES = {"minicpmv4_7"}
+
+
+_DSPARK_MODEL_TYPES = {"minicpmv4_7"}
+
+
+def _config_declares_dspark(cfg: Any) -> bool:
+    """openbmb MiniCPM-V-4.7 drafters (``Qwen3DSparkModel``, ``dflash_config.projector_type: dspark``) and
+    SpecForge ``DSparkDraftModel``. Mirrors panel/src/main/dsparkBundle.ts::configDeclaresDspark."""
+    if not isinstance(cfg, dict):
+        return False
+    if any("dspark" in str(a).lower() for a in cfg.get("architectures") or []):
+        return True
+    projector = (cfg.get("dflash_config") or {}).get("projector_type") or cfg.get("projector_type")
+    return str(projector or "").lower() == "dspark"
+
+
+def _load_dspark_runtime(model: Any, model_path: str | Path) -> dict | None:
+    """DSpark drafter for a bundle that declares it, or None.
+
+    Contract: ``jang_config.json["speculative"] = {"method": "dspark",
+    "drafter_path": "dspark"}`` (path relative to the bundle; default
+    ``dspark``) with a drafter directory holding ``config.json`` +
+    ``model.safetensors`` (BF16, or pre-quantized by
+    ``vmlx_engine.dspark.write_quantized_drafter``). Only text requests use it
+    (see ``_dspark_eligible``).
+
+    On/off follows the FILES (Eric 2026-10-13: "check model files if it has or not ... enabled if it has it and if
+    not don't use it"): a drafter directory present in the bundle (``<bundle>/dspark``, or the stamp's
+    ``drafter_path``) is used by default; a bundle shipped without it serves AR (never an error, even when
+    ``jang_config`` still declares DSpark). ``VMLX_DSPARK=0`` / ``serve --dspark off`` keeps the bundle on AR. The
+    stamp's ``speculative.default`` is informational only.
+    """
+    override = os.environ.get("VMLX_DSPARK", "").strip().lower()
+    if override in {"0", "false", "off", "no"}:
+        return None
+    root = Path(model_path)
+    try:
+        cfg = json.loads((root / "config.json").read_text())
+    except Exception:
+        return None
+    if str(cfg.get("model_type", "")).lower() not in _DSPARK_MODEL_TYPES:
+        return None
+    spec = {}
+    stamp_path = root / "jang_config.json"
+    if stamp_path.is_file():
+        try:
+            spec = json.loads(stamp_path.read_text()).get("speculative") or {}
+        except Exception:
+            spec = {}
+    if spec and str(spec.get("method", "")).lower() not in ("", "dspark"):
+        return None
+    drafter_dir = root / str(spec.get("drafter_path") or "dspark")
+    if not (drafter_dir / "config.json").is_file():
+        if spec:
+            logger.info("DSpark declared in jang_config but the bundle ships no drafter (%s); serving AR", drafter_dir)
+        return None
+    # Same rule as the panel (dsparkBundle.configDeclaresDspark), which picks the single-request lane from it: a
+    # sidecar config that does not declare DSpark is not a DSpark drafter.
+    try:
+        dcfg_raw = json.loads((drafter_dir / "config.json").read_text())
+    except Exception:
+        dcfg_raw = {}
+    if not _config_declares_dspark(dcfg_raw):
+        logger.info("%s/config.json does not declare a DSpark drafter; serving AR", drafter_dir)
+        return None
+    from ..dspark import load_drafter
+    from ..dspark.minicpm_target import MAX_VERIFY_ROWS, MiniCPMDSparkTarget
+
+    target = MiniCPMDSparkTarget(model)
+    drafter = load_drafter(drafter_dir)
+    text_cfg = cfg.get("text_config") or {}
+    dcfg = drafter.cfg
+    if int(dcfg["hidden_size"]) != int(text_cfg.get("hidden_size", -1)):
+        raise ValueError("DSpark drafter hidden_size does not match the target")
+    if int(dcfg["vocab_size"]) > int(text_cfg.get("vocab_size", 0)):
+        raise ValueError("DSpark drafter vocabulary is larger than the target's")
+    if max(drafter.target_layer_ids) >= int(text_cfg.get("num_hidden_layers", 0)):
+        raise ValueError("DSpark drafter taps layers the target does not have")
+    # MoE targets: stay below the expert sort threshold (minicpm_target.preferred_max_draft: 6 at top-8), where the
+    # stock multi-row block is row-exact and ~1.7x cheaper than the per-row route the threshold needs.
+    max_draft = max(1, min(int(spec.get("max_draft", target.preferred_max_draft)), MAX_VERIFY_ROWS - 1,
+                           int(target.preferred_max_draft)))
+    logger.info(
+        "DSpark drafter loaded from %s: block %d, taps %s, max draft %d per round",
+        drafter_dir, drafter.block, drafter.target_layer_ids, max_draft,
+    )
+    return {"target": target, "drafter": drafter, "path": str(drafter_dir), "max_draft": max_draft,
+            "cost_per_row": float(spec.get("cost_per_row", 0.12))}
+
+
+def _video_frames_as_native_clip(frames: list) -> "np.ndarray":
+    """(T, H, W, 3) uint8 clip from SimpleEngine's sampled frame files."""
+    from PIL import Image
+
+    arrays = []
+    for frame in frames:
+        if isinstance(frame, (str, os.PathLike)):
+            with Image.open(frame) as image:
+                arrays.append(np.asarray(image.convert("RGB")))
+        else:
+            arrays.append(np.asarray(frame))
+    if not arrays:
+        raise ValueError("video produced no frames")
+    if len({a.shape for a in arrays}) != 1:
+        raise ValueError("sampled video frames must share one size")
+    return np.stack(arrays)
+
+
+def _order_images_and_video_frames(chat_messages: list[dict], images: list, frame_lists: list[list]) -> list | None:
+    """Media list in PROMPT order for VLMs that read videos as image frames.
+
+    ``_expand_video_placeholders_to_image_frames`` turns each video part into
+    N image placeholders where the video sits, so the processor assigns the
+    image list to placeholders in message order. Appending every video's
+    frames after all images handed a later image's slot to a video frame
+    (audit 2026-10-07: screenshot -> video -> blue image answered "Orange",
+    the video's last scene). Returns None when the parts and lists disagree.
+    """
+    image_iter, frame_iter = iter(images), iter(frame_lists)
+    ordered: list = []
+    try:
+        for msg in chat_messages:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                kind = part.get("type") if isinstance(part, dict) else None
+                if kind == "image":
+                    ordered.append(next(image_iter))
+                elif kind == "video":
+                    ordered.extend(next(frame_iter))
+    except StopIteration:
+        return None
+    if next(image_iter, None) is not None or next(frame_iter, None) is not None:
+        return None
+    return ordered
+
+def _expand_video_placeholders_to_image_frames(
+    chat_messages: list[dict],
+    frame_counts: list[int],
+) -> list[dict]:
+    """Replace each video placeholder with N image placeholders.
+
+    Some VLMs route videos through sampled image frames in the SimpleEngine
+    path. Their prompts must contain image placeholders matching those sampled
+    frames; otherwise the model sees no attached media or receives a native
+    video marker unsupported by its image-only template.
+    """
+    if not frame_counts:
+        return chat_messages
+
+    counts = iter(frame_counts)
+    rewritten: list[dict] = []
+    changed = False
+    for msg in chat_messages:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            rewritten.append(msg)
+            continue
+        new_content: list[dict] = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "video":
+                count = max(1, int(next(counts, 1) or 1))
+                new_content.extend({"type": "image"} for _ in range(count))
+                changed = True
+            else:
+                new_content.append(part)
+        if changed:
+            out = dict(msg)
+            out["content"] = new_content
+            rewritten.append(out)
+        else:
+            rewritten.append(msg)
+    return rewritten if changed else chat_messages
+
+
+def _mimo_v2_token_text(processor, token_id, fallback: str) -> str:
+    try:
+        tokenizer = getattr(processor, "tokenizer", processor)
+        convert = getattr(tokenizer, "convert_ids_to_tokens", None)
+        if callable(convert) and token_id is not None:
+            token = convert(int(token_id))
+            if isinstance(token, str) and token:
+                return token
+    except Exception:
+        pass
+    return fallback
+
+
+
+_DFLASH2_MIN_MEDIA_KEY_RUN = 5  # 5 x 30 bits >= 150 bits per media item
+
+
+def _dflash2_media_key_tokens(tokens: list, media_ids: set, grid, pixel_values):
+    """Per-item, position-aware media identity for the DFlash2 session key.
+
+    Store + lookup only (the model always sees the real ids): each media
+    item's placeholder run is replaced by one pseudo id derived from THAT
+    item's processed pixels and grid row. Plain token-prefix matching then
+    reuses a conversation through identical earlier images and diverges
+    exactly at a new one. Returns None (caller falls back to the
+    whole-request salt, RAM-only) when runs and grid rows cannot be paired.
+    """
+    import hashlib
+
+    import mlx.core as mx
+    import numpy as np
+
+    if grid is None or pixel_values is None:
+        return None
+    runs, start = [], None
+    for i, t in enumerate(list(tokens) + [-1]):
+        if t in media_ids and start is None:
+            start = i
+        elif t not in media_ids and start is not None:
+            runs.append((start, i))
+            start = None
+    rows = [tuple(int(v) for v in r) for r in np.asarray(grid).reshape(-1, 3).tolist()]
+    pixels = np.asarray(pixel_values.astype(mx.float32) if pixel_values.dtype == mx.bfloat16 else pixel_values)
+    spans = [t_ * h_ * w_ for t_, h_, w_ in rows]
+    if not runs or len(runs) != len(rows) or sum(spans) != pixels.shape[0]:
+        return None
+    # Collision resistance: one 30-bit id PER PLACEHOLDER POSITION from a
+    # SHAKE-256 stream of the item, so a run of n tokens carries 30*n bits.
+    # Runs shorter than _DFLASH2_MIN_MEDIA_KEY_RUN (< 150 bits) fall back to the whole-
+    # request salt + RAM-only entries (a single 30-bit id could collide and
+    # let one image resume another image's KV).
+    if any(run_end - run_start < _DFLASH2_MIN_MEDIA_KEY_RUN for run_start, run_end in runs):
+        return None
+    key_tokens = list(tokens)
+    offset = 0
+    for (run_start, run_end), span, row in zip(runs, spans, rows):
+        n = run_end - run_start
+        stream = hashlib.shake_256(pixels[offset:offset + span].tobytes() + np.asarray(row).tobytes()).digest(4 * n)
+        offset += span
+        key_tokens[run_start:run_end] = [
+            0x80000000 | (int.from_bytes(stream[4 * j:4 * j + 4], "big") & 0x3FFFFFFF)  # above any vocab id
+            for j in range(n)
+        ]
+    return key_tokens
+
+def _dspark_crop_media_keys(tokens: list, config, pixel_values, extra: dict):
+    """Match MiniCPM NaViT strips to crop runs without touching model inputs.
+
+    The vision tower consumes (1,C,P,sum(h*w)*P); each crop has one pad
+    run of h*w/divisor tokens. Hash only that crop's processed bytes and
+    geometry, so appending media never changes an earlier crop's identity.
+    Unknown layouts retain the existing whole-request identity.
+    """
+    import hashlib
+
+    import mlx.core as mx
+    import numpy as np
+
+    mode = extra.get("downsample_mode") or getattr(config, "downsample_mode", None)
+    if mode not in ("4x", "16x"):
+        return None
+    divisor = 4 if mode == "4x" else 16
+    vision = getattr(config, "vision_config", None)
+    patch = getattr(vision, "patch_size", None)
+    channels = getattr(vision, "num_channels", None)
+    if not patch or not channels:
+        return None
+    keys = list(tokens)
+    matched = set()
+    for modality, token_id, pixels, sizes in (
+        ("image", getattr(config, "image_token_id", None), pixel_values, extra.get("target_sizes")),
+        ("video", getattr(config, "video_token_id", None), extra.get("pixel_values_videos"), extra.get("target_sizes_videos")),
+    ):
+        runs, start = [], None
+        for i, token in enumerate(list(tokens) + [None]):
+            if token_id is not None and token == token_id and start is None:
+                start = i
+            elif token != token_id and start is not None:
+                runs.append((start, i))
+                start = None
+        if not runs and pixels is None and sizes is None:
+            continue
+        if not runs or pixels is None or sizes is None:
+            return None
+        grid = np.asarray(sizes)
+        if grid.ndim != 2 or grid.shape[1] != 2 or len(runs) != len(grid):
+            return None
+        rows = [tuple(int(v) for v in row) for row in grid.tolist()]
+        spans = [h * w for h, w in rows]
+        if any(h <= 0 or w <= 0 for h, w in rows):
+            return None
+        if pixels.ndim != 4 or pixels.shape[0] < 1 or tuple(pixels.shape[1:]) != (
+            channels, patch, sum(spans) * patch,
+        ):
+            return None
+        if any(span % divisor or end - begin != span // divisor
+               or end - begin < _DFLASH2_MIN_MEDIA_KEY_RUN
+               for (begin, end), span in zip(runs, spans)):
+            return None
+        # The native vision path uses batch row0. BF16 is hashed as raw bits;
+        # NumPy cannot represent BF16, and widening it creates an unnecessary
+        # full-media FP32 copy solely for identity hashing.
+        dtype = str(pixels.dtype)
+        first = pixels[:1]
+        bits = first.view(mx.uint16) if first.dtype == mx.bfloat16 else first
+        data = np.asarray(bits)
+        offset = 0
+        for (begin, end), span, row in zip(runs, spans, rows):
+            payload = data[..., offset * patch:(offset + span) * patch]
+            header = repr(("dspark-crop-v1", modality, mode, patch, channels, dtype, row)).encode()
+            stream = hashlib.shake_256(header + payload.tobytes()).digest(4 * (end - begin))
+            keys[begin:end] = [
+                0x80000000 | (int.from_bytes(stream[4*j:4*j+4], "big") & 0x3FFFFFFF)
+                for j in range(end - begin)
+            ]
+            offset += span
+        matched.add(int(token_id))
+    expected = {int(v) for v in (
+        getattr(config, "image_token_id", None), getattr(config, "video_token_id", None),
+        getattr(config, "image_token_index", None), getattr(config, "video_token_index", None),
+    ) if v is not None}
+    if not matched or any(t in expected - matched for t in tokens):
+        return None
+    return keys
+
+
+def _dspark_salted_media_keys(tokens: list, media_ids: set, salt: str) -> list:
+    """Session-key tokens for a DSpark media request: every media placeholder position carries a pseudo id from a
+    SHAKE-256 stream of the request's media salt (30 bits per position, above any vocab id; text positions keep their
+    ids). Prefix matching (RAM and SSD) then runs through the media only when ALL of it is identical -- a follow-up
+    turn about the same image(s) -- and stops at the first placeholder otherwise. The model never sees these ids."""
+    import hashlib
+
+    positions = [i for i, t in enumerate(tokens) if t in media_ids]
+    stream = hashlib.shake_256(("dspark-media|" + str(salt)).encode()).digest(4 * len(positions))
+    keys = list(tokens)
+    for j, i in enumerate(positions):
+        keys[i] = 0x80000000 | (int.from_bytes(stream[4 * j:4 * j + 4], "big") & 0x3FFFFFFF)
+    return keys
+
+
+class MLXMultimodalLM:
+    """
+    Wrapper around mlx-vlm for multimodal inference.
+
+    This class provides a unified interface for multimodal language models
+    using Apple's MLX framework. Supports:
+    - Image understanding (single and multi-image)
+    - Video understanding (smart frame extraction)
+    - Audio understanding (for supported models)
+    - OpenAI-compatible API format
+
+    Supported models include:
+    - Qwen2-VL / Qwen2.5-VL / Qwen3-VL
+    - LLaVA
+    - Idefics3
+    - PaliGemma
+    - And more via mlx-vlm
+
+    Example:
+        >>> model = MLXMultimodalLM("mlx-community/Qwen2-VL-2B-Instruct-4bit")
+        >>> model.load()
+        >>> output = model.generate(
+        ...     prompt="What's in this image?",
+        ...     images=["photo.jpg"]
+        ... )
+        >>> print(output.text)
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        trust_remote_code: bool = True,
+        enable_cache: bool = True,
+        cache_size: int = 50,
+    ):
+        """
+        Initialize the MLX multimodal language model.
+
+        Args:
+            model_name: HuggingFace model name or local path
+            trust_remote_code: Whether to trust remote code
+            enable_cache: Enable KV cache for repeated image/video+prompt (default: True)
+            cache_size: Maximum cache entries (default: 50)
+        """
+        self.model_name = model_name
+        self.trust_remote_code = trust_remote_code
+        self.enable_cache = enable_cache
+
+        self.model = None
+        self.processor = None
+        self.config = None
+        self._loaded = False
+
+        # Initialize MLLM prefix cache manager (with vision embedding caching)
+        self._cache_manager: MLLMPrefixCacheManager | None = None
+        if enable_cache:
+            self._cache_manager = MLLMPrefixCacheManager(max_entries=cache_size)
+
+    def load(self) -> None:
+        """Load the model and processor."""
+        if self._loaded:
+            return
+
+        # Resolve/download before constructing any model object, then validate
+        # every nested shard. No config file is required, so separate native
+        # MTP and vision/audio weights are covered by the same load boundary.
+        from ..model_bundle_integrity import prepare_model_bundle_for_load
+
+        resolved_name, _integrity_report = prepare_model_bundle_for_load(
+            self.model_name,
+            allow_download=True,
+        )
+        _register_local_mlx_vlm_runtime_if_needed(resolved_name)
+
+        def _finalize_loaded_model() -> None:
+            """Finish loading on this same MLX-owning worker thread."""
+            from ..mlx_memory import maybe_harmonize_quant_metadata_dtypes
+
+            try:
+                from ..vision_feature_cache import install as _install_vision_feature_cache
+
+                _install_vision_feature_cache(self.model, resolved_name)
+            except Exception:
+                logger.warning("Vision feature SSD cache not installed", exc_info=True)
+
+            maybe_harmonize_quant_metadata_dtypes(
+                self.model,
+                model_path=resolved_name,
+                log=logger,
+            )
+            _set_vlm_inference_mode(self.model)
+            # The text route runs the model's post-hydration acceleration hook
+            # (projection grouping, fused-MoE registration) after inference
+            # mode is set; the mllm route never did, so a VL GLM-5.3 session
+            # served ungrouped with zero fused-MoE modules while the phase
+            # display still said "restoring_acceleration". Inference mode is
+            # already set above (fusion refuses training-mode modules), and
+            # this worker owns the MLX stream. A failure must stay loud but
+            # must not turn a loadable VL model into a startup failure.
+            prepare = getattr(self.model, "prepare_acceleration", None)
+            if callable(prepare):
+                try:
+                    preparation = prepare()
+                    logger.info(
+                        "Post-hydration acceleration preparation (mllm): %s",
+                        preparation,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "mllm acceleration preparation failed; serving "
+                        "ungrouped/unfused: %s",
+                        exc,
+                    )
+            # DFlash2 decodes ONLY through 5..8-row verify forwards.  MLX's
+            # quantized_matmul switches kernels with the row count (27B JANG_4D:
+            # 5 rows 53 ms, 8 rows 79 ms); the lane matmul (metal/lane_qmm.py,
+            # Metal 4 tensor ops) costs about the same for 1..16 rows, which makes
+            # the drafter's trained width 8 nearly free.  Target language model
+            # only; drafter, vision tower and every non-DFlash2 session keep MLX.
+            try:
+                from ..speculative import is_dflash2_enabled
+
+                _lm_type = str(getattr(getattr(self.model, "config", None), "model_type", "") or "")
+                # glm5_next: the lane matmul corrupts the target from the first token (served DFlash2 lane answered
+                # "17 x 15" for 17 x 19 at temperature 0; VMLX_LANE_QMM=0 restored the exact answer, 2026-10-10). Its
+                # verify slabs are measured without it; keep GLM on the native kernels.
+                if is_dflash2_enabled() and _lm_type != "glm5_next" and os.environ.get(
+                    "VMLX_LANE_QMM", "1"
+                ).strip().lower() not in ("0", "off", "false", "no"):
+                    import time as _time
+                    from ..metal import lane_qmm
+
+                    _t0 = _time.perf_counter()
+                    counts = lane_qmm.install(
+                        getattr(self.model, "language_model", self.model),
+                        tile=os.environ.get("VMLX_LANE_QMM_TILED", "1").strip()
+                        not in ("0", "off", "false", "no"),
+                    )
+                    logger.info(
+                        "DFlash2 target lane matmul: %d projections (%d tiled), "
+                        "kept on MLX: %s (%.1fs)",
+                        counts["lane"], counts["tiled"], counts["skipped"] or "none",
+                        _time.perf_counter() - _t0,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("DFlash2 lane matmul not installed: %s", exc)
+            try:
+                self._dspark = _load_dspark_runtime(self.model, resolved_name)
+                if self._dspark is not None:
+                    from ..dspark import session as _dspark_session
+
+                    _dspark_session.attach_ssd(resolved_name, self._dspark["path"])
+            except Exception as exc:  # noqa: BLE001
+                self._dspark = None
+                logger.warning("DSpark drafter not loaded for %s: %s", resolved_name, exc)
+            self._loaded = True
+
+        from .mimo_v26_contract import read_mimo_v26_contract
+        if read_mimo_v26_contract(resolved_name) is not None:
+            from .mimo_v26 import load_mimo_v26
+            self.model, self.processor, self.config = load_mimo_v26(resolved_name)
+            _finalize_loaded_model()
+            return
+
+        from .nemotron_bolt_vl import is_nemotron_bolt_vl_bundle
+        if is_nemotron_bolt_vl_bundle(resolved_name):
+            from .nemotron_bolt_vl import load_nemotron_bolt_vl
+            self.model, self.processor, self.config = load_nemotron_bolt_vl(resolved_name)
+            _finalize_loaded_model()
+            return
+
+        # Install mlx_vlm registry patches (gemma4 + kimi_k25) on THIS thread
+        # so any module-level `mx.new_stream(...)` in mlx_vlm.generate ends
+        # up bound to the loader-executor worker rather than uvicorn
+        # MainThread. Otherwise scheduler.step() crashes mid-prefill with
+        # `RuntimeError: There is no Stream(gpu, N) in current thread.`
+        # (mlxstudio#119 follow-up, 2026-05-02).
+        try:
+            from .. import _install_mlx_vlm_registry_patches
+            _install_mlx_vlm_registry_patches()
+        except Exception:
+            pass
+
+        # Apply mlx_vlm runtime compat patches (Qwen3-VL grid_thw coercion, #69).
+        try:
+            from ..utils.mlx_vlm_compat import apply as _apply_mlx_vlm_compat
+            _apply_mlx_vlm_compat()
+        except Exception as _e:
+            logger.debug(f"mlx_vlm compat patch skipped: {_e}")
+
+        # Native MTP sanitize/runtime patches must be applied BEFORE the model
+        # is constructed, whichever loader runs. Both existing call sites live
+        # inside the JANG loader, so a v3 capability-schema bundle (stock MLX
+        # weights + jang_config metadata, e.g. Qwen3.6-27B D-series) loaded via
+        # stock mlx_vlm never got patched: the MTPModule was not constructed,
+        # sanitize dropped the mtp.* tensors, and every request logged "loaded
+        # language model has no native MTP head" while the startup banner said
+        # READY. Best-effort and a no-op for bundles without an MTP artifact.
+        try:
+            from ..native_mtp import maybe_apply_native_mtp
+            maybe_apply_native_mtp(resolved_name, allow_runtime=True)
+        except Exception as _mtp_e:
+            logger.debug(f"Native MTP pre-load apply skipped: {_mtp_e}")
+
+        # Qwen3.8 Flash Next owns a 51B PLE/n-gram table. Its loader must run
+        # before DFlash2, generic mlx-vlm, and generic JANG: all three assemble
+        # ordinary model weights and can materialize the PLE table instead of
+        # preserving row-addressable SSD shards.
+        from .qwen4_exp.loader import (
+            is_qwen4_exp_bundle,
+            load_qwen4_exp_vlm_model,
+        )
+        if is_qwen4_exp_bundle(resolved_name):
+            from mlx_vlm.utils import load_config
+
+            logger.info("Loading Qwen3.8 Flash Next through SSD-backed PLE runtime")
+            self.model, self.processor = load_qwen4_exp_vlm_model(resolved_name)
+            self.config = load_config(resolved_name)
+            _finalize_loaded_model()
+            logger.info("Qwen3.8 Flash Next source runtime loaded")
+            return
+
+        # DFlash2's measured Qwen3.8 path is the current upstream mlx-vlm
+        # runtime for ordinary families. Do not let it bypass the qwen4_exp PLE
+        # boundary above.
+        try:
+            from ..speculative import is_dflash2_enabled
+            from ..utils.jang_loader import is_jang_model as _needs_jang_loader
+
+            # Bundles whose weights need the JANG codec (e.g. Qwen3.8-27B
+            # JANGH2, format jangtq2: Hadamard-codebook MLP) cannot load through
+            # stock mlx-vlm (nn.quantize fails on their packed codes). They fall
+            # through to the JANG VL loader below; the qwen3_5 registry still
+            # keeps the upstream runtime DFlash2 needs while it is enabled.
+            # Plain-affine stamps (JANG_4D, no format) keep this measured path.
+            if is_dflash2_enabled() and not _needs_jang_loader(resolved_name):
+                from mlx_vlm import load
+                from mlx_vlm.utils import load_config
+
+                logger.info(
+                    "Loading DFlash2 target through direct mlx-vlm path: %s",
+                    self.model_name,
+                )
+                self._patch_video_processor()
+                self.model, self.processor = load(resolved_name)
+                self.config = load_config(resolved_name)
+                _finalize_loaded_model()
+                logger.info("DFlash2 target loaded: %s", self.model_name)
+                return
+        except ImportError:
+            raise
+
+        # JANG VL models: use JANG loader (handles mixed-precision + mlx-vlm sanitization)
+        from ..utils.jang_loader import (
+            is_glm5_next_embedded_jang_vlm,
+            is_jang_model,
+        )
+        if is_jang_model(resolved_name) or is_glm5_next_embedded_jang_vlm(
+            resolved_name
+        ):
+            logger.info(f"Loading JANG VL model: {self.model_name}")
+            from ..utils.jang_loader import load_jang_vlm_model
+            from mlx_vlm.utils import load_config
+            try:
+                from .. import server as _server_module
+                _smelt = getattr(_server_module, '_smelt_enabled', False)
+                _smelt_pct = getattr(_server_module, '_smelt_experts', 50)
+            except Exception:
+                _smelt = False
+                _smelt_pct = 50
+            if _smelt:
+                from ..utils.smelt_loader import smelt_load
+                self.model, self.processor = smelt_load(resolved_name, expert_percent=_smelt_pct)
+            else:
+                self.model, self.processor = load_jang_vlm_model(resolved_name)
+            try:
+                _apply_mlx_vlm_compat()
+            except Exception as _e:
+                logger.debug(f"mlx_vlm compat patch after JANG load skipped: {_e}")
+            self.config = load_config(resolved_name)
+            _finalize_loaded_model()
+            logger.info(f"JANG VL model loaded: {self.model_name}")
+            return
+
+        try:
+            from mlx_vlm import load
+            from mlx_vlm.utils import load_config
+
+            logger.info(f"Loading MLLM: {self.model_name}")
+
+            # Bundled Python doesn't include torch/torchvision (~2GB). Preemptively
+            # patch video processor loading and suppress warnings so models with
+            # video_processor sub-components (Qwen3.5-VL, InternVL, etc.) load cleanly.
+            self._patch_video_processor()
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*torchvision.*", category=UserWarning)
+                self.model, self.processor = load(resolved_name)
+            if _is_mimo_v2_runtime_object_or_name(self.model, resolved_name):
+                try:
+                    from ..utils.jang_loader import (
+                        _bind_mimo_v2_preserved_media_weights_from_index,
+                    )
+
+                    _bind_mimo_v2_preserved_media_weights_from_index(
+                        self.model, Path(resolved_name)
+                    )
+                except Exception as _mimo_media_err:
+                    raise RuntimeError(
+                        "MiMo-V2 media-enabled load could not bind preserved "
+                        f"visual/audio tensors: {_mimo_media_err}"
+                    ) from _mimo_media_err
+            self.config = load_config(resolved_name)
+            if str((self.config or {}).get("model_type", "")).lower() == "zaya1_vl":
+                from ..utils.jang_loader import _build_vlm_processor
+
+                self.processor = _build_vlm_processor(Path(resolved_name))
+
+            # vmlx#80 follow-up (Flor1an-B, 2026-04-15): mlx_vlm.load() is a
+            # DIFFERENT code path from utils.tokenizer.load_model_with_fallback,
+            # so neither the monkey-patch of mlx_lm.tokenizer_utils.load nor
+            # the wrapper-level _inject_chat_template_if_missing ever fire for
+            # standard mlx-community MLLM quants like gemma-4-31b-8bit. These
+            # models ship the chat template as a sidecar chat_template.jinja
+            # that HF AutoTokenizer silently ignores, and the engine crashes
+            # the first time apply_chat_template is called inside batched.py.
+            # Fix: inject the sidecar template directly into the processor
+            # (and its inner tokenizer) right after load, before the engine
+            # is marked loaded. Idempotent — bails out if a template is
+            # already present.
+            try:
+                from ..utils.tokenizer import _inject_chat_template_if_missing as _inj
+                _injected = _inj(self.processor, self.model_name)
+                if _injected:
+                    logger.info(
+                        f"MLLM chat template injected from {_injected} for {self.model_name}"
+                    )
+            except Exception as _e:
+                logger.debug(f"MLLM chat_template injection skipped: {_e}")
+
+            # TurboQuant: auto-enable for ALL MLX VLM models
+            _lang = getattr(self.model, 'language_model', None)
+            if _lang is not None and hasattr(_lang, 'layers'):
+                if _is_mimo_v2_runtime_object_or_name(self.model, resolved_name):
+                    logger.info(
+                        "TurboQuant skipped for MiMo-V2 MLLM load: native asymmetric SWA cache required"
+                    )
+                else:
+                    from ..utils.tokenizer import _apply_turboquant_to_model
+                    _apply_turboquant_to_model(_lang, resolved_name)
+
+            _finalize_loaded_model()
+            logger.info(f"MLLM loaded successfully: {self.model_name}")
+
+        except ImportError as e:
+            # 2026-05-03: surface the ACTUAL missing module instead of
+            # always blaming mlx-vlm. Common upstream causes:
+            #   - torch / torchvision missing → Qwen3VLVideoProcessor and
+            #     similar transformers VLM processors hard-require them.
+            #     Earlier vMLX builds stripped torch from bundled-python
+            #     (see panel/scripts/bundle-python.sh:128) — that strip was
+            #     reversed 2026-05-03 because every VL bundle hits this.
+            #   - mlx_vlm itself absent → bare wheel issue.
+            #   - One of mlx_vlm's submodules (e.g. video_processor backend)
+            #     transitively imports a missing dep.
+            # Pre-fix we always re-raised "mlx-vlm is required" which hid
+            # the real cause. Pass the original exception through.
+            _msg = str(e).lower()
+            if ("torch" in _msg and ("vision" in _msg or "audio" in _msg)) or "torchvision" in _msg:
+                raise ImportError(
+                    f"VLM bundle requires torch+torchvision in vMLX bundled-python. "
+                    f"Install: <bundled-python>/bin/pip install torch torchvision. "
+                    f"Original error: {e}"
+                ) from e
+            if "mlx_vlm" in _msg or "mlx-vlm" in _msg:
+                raise ImportError(
+                    f"mlx-vlm is required for multimodal inference. "
+                    f"Install with: pip install mlx-vlm. "
+                    f"Original error: {e}"
+                ) from e
+            # Unknown ImportError: re-raise WITH original cause attached so
+            # the traceback shows the real failure, not a generic message.
+            raise ImportError(
+                f"VLM model load failed with ImportError (cause not auto-detected): {e}"
+            ) from e
+        except Exception as e:
+            logger.error(f"Failed to load MLLM: {e}")
+            raise
+
+    _video_processor_patched = False
+
+    @classmethod
+    def _patch_video_processor(cls):
+        """Patch AutoVideoProcessor to skip torchvision requirement.
+
+        Some VLM models (Qwen3.5-VL, InternVL) include a video_processor
+        sub-component that requires torchvision. Since we only do image inference
+        and torchvision requires torch (~2GB), we patch the processor to load
+        without it. Called preemptively before first model load. Idempotent.
+        """
+        if cls._video_processor_patched:
+            return
+
+        try:
+            from transformers.models.auto import video_processing_auto
+
+            _orig_from_pretrained = video_processing_auto.AutoVideoProcessor.from_pretrained
+
+            @classmethod  # type: ignore[misc]
+            def _patched_from_pretrained(cls, pretrained_model_name_or_path, *args, **kwargs):
+                try:
+                    return _orig_from_pretrained.__func__(cls, pretrained_model_name_or_path, *args, **kwargs)
+                except (ValueError, ImportError) as e:
+                    if "torchvision" in str(e):
+                        logger.info("Video processor skipped (torchvision not available) — image-only mode")
+                        return None
+                    raise
+
+            video_processing_auto.AutoVideoProcessor.from_pretrained = _patched_from_pretrained
+            cls._video_processor_patched = True
+            logger.debug("Patched AutoVideoProcessor for torchvision-free loading")
+        except Exception:
+            logger.warning("Failed to patch AutoVideoProcessor — torchvision-dependent VLMs may fail to load")
+            cls._video_processor_patched = True  # Don't retry on every load, log warning once
+
+    def _prepare_images(self, images: list) -> list[str]:
+        """Process image inputs and return local file paths."""
+        processed = []
+        failed_count = 0
+        for img in images:
+            try:
+                path = process_image_input(img)
+                processed.append(path)
+            except Exception as e:
+                failed_count += 1
+                logger.warning(f"Failed to process image: {e}")
+        if images and not processed:
+            raise ValueError(
+                f"All {failed_count} image(s) failed to process. "
+                f"Check image URLs/paths and try again."
+            )
+        return processed
+
+    def _prepare_audio(self, audio_inputs: list) -> list[str]:
+        """Process audio inputs and return local paths/URLs loadable by mlx-vlm."""
+        processed = []
+        failed_count = 0
+        for audio in audio_inputs:
+            try:
+                path = process_audio_input(audio)
+                if path:
+                    processed.append(path)
+            except Exception as e:
+                failed_count += 1
+                logger.warning(f"Failed to process audio: {e}")
+        if audio_inputs and not processed:
+            raise ValueError(
+                f"All {failed_count} audio input(s) failed to process. "
+                f"Check audio URLs/paths and try again."
+            )
+        return processed
+
+    def _prepare_video(
+        self,
+        video_input: str | dict,
+        fps: float = DEFAULT_FPS,
+        max_frames: int = MAX_FRAMES,
+        controls: Any = None,
+        frame_cap: int | None = None,
+    ) -> list[str]:
+        """
+        Process video input and extract frames.
+
+        Supports:
+        - Local file paths
+        - URLs (http/https) - will be downloaded
+        - Base64 encoded videos (data:video/mp4;base64,...)
+        - OpenAI format dicts: {"url": "..."} or {"video_url": {"url": "..."}}
+
+        Args:
+            video_input: Video in any supported format
+            fps: Frames per second to extract
+            max_frames: Maximum frames to extract
+
+        Returns:
+            List of paths to extracted frame images
+        """
+        # Process video input (download if URL, decode if base64)
+        video_path = process_video_input(video_input)
+
+        # Extract frames
+        frames = extract_video_frames_smart(
+            video_path,
+            fps=fps,
+            max_frames=max_frames,
+        )
+        # Every SimpleEngine video reaches the model as sampled frames sent as
+        # images. Plan them exactly like the batched engine's frame fallback
+        # (engine/batched.py): per-video frame cap (the request's image limit
+        # split across its videos, and video_max_frames), the token budget fit
+        # against the image processor's real per-frame cost, and a 768 px
+        # default long edge. Before this, SimpleEngine kept every sampled frame
+        # at full resolution and then REFUSED the request at the image limit:
+        # a 20 s video at the default 2 fps (40 frames) returned HTTP 400 on
+        # 27B, and the same clip cost ~882 tokens/frame there vs ~292 on the
+        # batched engine (ISSUES I-24, I-33).
+        from ..video_controls import (
+            VideoControls,
+            bound_video_frames,
+            image_pixel_floor,
+            image_token_pixels,
+            plan_fallback_frames,
+            subsample_frames_evenly,
+        )
+
+        controls = controls if isinstance(controls, VideoControls) else VideoControls(fps=fps, max_frames=max_frames)
+        processor = getattr(self, "processor", None)
+        try:
+            planned = controls.with_processor(processor) if processor is not None else controls
+        except Exception:
+            planned = controls
+        image_ceiling = None
+        try:
+            ip = getattr(processor, "image_processor", None) or processor
+            size = getattr(ip, "size", None)
+            image_ceiling = getattr(ip, "max_pixels", None) or (
+                size.get("longest_edge") if isinstance(size, dict) else None
+            )
+            image_ceiling = int(image_ceiling) if image_ceiling else None
+        except Exception:
+            image_ceiling = None
+        try:
+            long_edge = max(224, int(os.environ.get("VMLINUX_VIDEO_FALLBACK_MAX_LONG_EDGE", "768")))
+        except (TypeError, ValueError):
+            long_edge = 768
+        sampled = len(frames)
+        shape = getattr(frames[0], "shape", None) if frames else None
+        cap = int(max_frames) if frame_cap is None else min(int(max_frames), int(frame_cap))
+        plan = plan_fallback_frames(
+            planned,
+            frames_available=sampled,
+            frame_cap=max(1, cap),
+            frame_height=int(shape[0]) if shape is not None and len(shape) >= 2 else None,
+            frame_width=int(shape[1]) if shape is not None and len(shape) >= 2 else None,
+            token_pixels=image_token_pixels(processor),
+            pixel_floor=image_pixel_floor(processor),
+            pixel_ceiling=image_ceiling,
+        )
+        frames = subsample_frames_evenly(frames, plan.num_frames)
+        bounds = controls.fallback_bounds(
+            default_long_edge=long_edge,
+            num_frames=len(frames),
+            per_frame_max_pixels=plan.per_frame_max_pixels,
+        )
+        frames = bound_video_frames(
+            frames,
+            max_long_edge=bounds.max_long_edge,
+            max_pixels=bounds.max_pixels,
+            resize=bounds.resize,
+        )
+        logger.info(
+            "SimpleEngine video frame plan: sampled=%d kept=%d frame_cap=%d per_frame_max_pixels=%s "
+            "expected_tokens_per_frame=%s expected_total=%s token_budget=%s met=%s reason=%s",
+            sampled, len(frames), plan.frame_cap, bounds.max_pixels, plan.expected_tokens_per_frame,
+            plan.expected_total, plan.budget if plan.budget is not None else "-",
+            plan.met if plan.met is not None else "-", plan.reason,
+        )
+        return save_frames_to_temp(frames)
+
+    def _guard_simple_image_prefill(
+        self,
+        formatted_prompt: str,
+        has_images: bool,
+        *,
+        images: list | None = None,
+        resize_shape: object | None = None,
+    ) -> None:
+        """Apply the vmlx#156 image-prefill guard on SimpleEngine paths.
+
+        Continuous-batching VLMs run this guard inside
+        ``MLLMBatchGenerator._run_vision_encoding_inner``. Direct
+        ``MLXMultimodalLM`` generate/chat paths still call ``mlx_vlm``
+        one-shot APIs, so they need the same preflight before Metal sees an
+        image-expanded prompt. Use processor-expanded ``input_ids`` when
+        possible because each VLM family can expand one image/video placeholder
+        into a different number of language tokens.
+        """
+        if not has_images:
+            return
+        try:
+            import mlx.core as mx
+
+            mx.clear_cache()
+        except Exception:
+            mx = None  # type: ignore[assignment]
+
+        try:
+            seq_len = self._simple_vlm_prefill_seq_len(
+                formatted_prompt,
+                images=images,
+                resize_shape=resize_shape,
+            )
+        except Exception as exc:
+            logger.debug("Simple VLM image-prefill guard skipped: tokenize failed: %s", exc)
+            return
+
+        try:
+            if mx is not None:
+                mx.clear_cache()
+        except Exception:
+            pass
+
+        from vmlx_engine.mllm_batch_generator import (
+            _raise_if_image_prefill_exceeds_budget,
+        )
+
+        language_model = getattr(self.model, "language_model", None)
+        if language_model is None:
+            inner = getattr(self.model, "model", None)
+            language_model = getattr(inner, "language_model", None)
+        _raise_if_image_prefill_exceeds_budget(
+            has_images=True,
+            seq_len=seq_len,
+            language_model=language_model,
+        )
+
+    def _simple_vlm_prefill_seq_len(
+        self,
+        formatted_prompt: str,
+        *,
+        images: list | None = None,
+        resize_shape: object | None = None,
+    ) -> int:
+        """Return the best available VLM prefill length for direct paths."""
+
+        def _seq_len_from_input_ids(input_ids: object) -> int | None:
+            if input_ids is None:
+                return None
+            shape = getattr(input_ids, "shape", None)
+            if shape:
+                if len(shape) >= 2:
+                    return int(shape[1])
+                return int(shape[0])
+            if isinstance(input_ids, list):
+                if input_ids and isinstance(input_ids[0], list):
+                    return int(len(input_ids[0]))
+                return int(len(input_ids))
+            return None
+
+        if images:
+            try:
+                from mlx_vlm.generate import normalize_resize_shape, prepare_inputs
+
+                model_config = getattr(self.model, "config", None)
+                image_token_index = (
+                    getattr(model_config, "image_token_index", None)
+                    if model_config is not None else None
+                )
+                if image_token_index is None and model_config is not None:
+                    image_token_index = getattr(model_config, "image_token_id", None)
+                model_type = str(getattr(model_config, "model_type", "") or "")
+                add_special_tokens = (
+                    getattr(self.processor, "chat_template", None) is None
+                    if model_type in {"gemma3", "gemma3n", "gemma4"}
+                    else True
+                )
+                inputs = prepare_inputs(
+                    self.processor,
+                    images=images,
+                    prompts=formatted_prompt,
+                    image_token_index=image_token_index,
+                    resize_shape=normalize_resize_shape(resize_shape),
+                    add_special_tokens=add_special_tokens,
+                )
+                seq_len = _seq_len_from_input_ids(inputs.get("input_ids"))
+                if seq_len:
+                    return seq_len
+            except Exception as exc:
+                logger.debug(
+                    "Simple VLM image-prefill guard using raw tokenizer length; "
+                    "processor expansion probe failed: %s",
+                    exc,
+                )
+
+        tokenizer = (
+            self.processor.tokenizer
+            if hasattr(self.processor, "tokenizer")
+            else self.processor
+        )
+        return len(tokenizer.encode(formatted_prompt))
+
+    @staticmethod
+    def _extract_multimodal_messages(
+        messages: list[dict],
+    ) -> tuple[list[dict], list[str], list, list]:
+        """
+        Parse OpenAI-format messages into chat_messages, image URLs, videos, and audio.
+
+        Extracts text, images, and videos from multimodal message content,
+        building properly structured chat messages for Qwen3-VL-MoE and similar
+        models that expect image tokens before text in user messages.
+
+        Args:
+            messages: List of chat messages in OpenAI format
+
+        Returns:
+            Tuple of (chat_messages, all_image_urls, videos, audio_inputs) where:
+            - chat_messages: Properly structured messages for chat template
+            - all_image_urls: Raw image URLs/paths to process
+            - videos: Raw video inputs to process
+            - audio_inputs: Raw audio inputs to process
+        """
+        all_image_urls: list[str] = []
+        videos: list = []
+        audio_inputs: list = []
+        chat_messages: list[dict] = []
+
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            msg_text = ""
+            msg_image_count = 0
+            msg_video_count = 0
+            msg_audio_count = 0
+            msg_media_types: list[str] = []
+
+            if isinstance(content, str):
+                msg_text = content
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, str):
+                        msg_text += item
+                        continue
+
+                    # Convert Pydantic models to dicts.
+                    # exclude_none=True prevents Jinja2 false key-existence bugs
+                    # (checking 'if image_url' returns True for None values). If a
+                    # field should be explicitly None (not absent), it would need
+                    # special handling.
+                    if hasattr(item, "model_dump"):
+                        item = item.model_dump(exclude_none=True)
+                    elif hasattr(item, "dict"):
+                        item = item.dict()
+                        # Remove None values to match exclude_none behavior
+                        item = {k: v for k, v in item.items() if v is not None}
+
+                    if isinstance(item, dict):
+                        item_type = item.get("type", "")
+
+                        if item_type in ("text", "input_text"):
+                            msg_text += item.get("text", "")
+
+                        elif item_type == "image_url":
+                            img_url = item.get("image_url", {})
+                            if isinstance(img_url, str):
+                                all_image_urls.append(img_url)
+                            else:
+                                all_image_urls.append(img_url.get("url", ""))
+                            msg_image_count += 1
+                            msg_media_types.append("image")
+
+                        elif item_type == "input_image":
+                            img_url = item.get("image_url", item.get("url", ""))
+                            if isinstance(img_url, str):
+                                all_image_urls.append(img_url)
+                            elif isinstance(img_url, dict):
+                                all_image_urls.append(img_url.get("url", ""))
+                            msg_image_count += 1
+                            msg_media_types.append("image")
+
+                        elif item_type == "image":
+                            all_image_urls.append(
+                                item.get("image", item.get("url", ""))
+                            )
+                            msg_image_count += 1
+                            msg_media_types.append("image")
+
+                        elif item_type == "video":
+                            videos.append(item.get("video", item.get("url", "")))
+                            msg_video_count += 1
+                            msg_media_types.append("video")
+
+                        elif item_type == "video_url":
+                            vid_url = item.get("video_url", {})
+                            if isinstance(vid_url, str):
+                                videos.append(vid_url)
+                            else:
+                                videos.append(vid_url.get("url", ""))
+                            msg_video_count += 1
+                            msg_media_types.append("video")
+
+                        elif item_type == "input_video":
+                            vid_url = item.get("video_url", item.get("url", item.get("file_id", "")))
+                            if isinstance(vid_url, str):
+                                videos.append(vid_url)
+                            else:
+                                videos.append(vid_url.get("url", ""))
+                            msg_video_count += 1
+                            msg_media_types.append("video")
+
+                        elif item_type in ("input_audio", "audio", "audio_url"):
+                            src = item.get("input_audio") or item.get("audio") or item.get("audio_url") or item
+                            audio_inputs.append(src)
+                            msg_audio_count += 1
+                            msg_media_types.append("audio")
+
+            # Build properly structured message for Qwen3-VL-MoE
+            # Format: {"role": "...", "content": [{"type": "image"|"video"}, ..., {"type": "text", "text": "..."}]}
+            # Preserve tool_calls on assistant messages and tool role fields
+            tool_calls = _normalize_tool_calls_for_template(msg.get("tool_calls"))
+            tool_call_id = msg.get("tool_call_id")
+            msg_name = msg.get("name")
+            reasoning_content = msg.get("reasoning_content")
+            has_reasoning = (
+                role == "assistant"
+                and isinstance(reasoning_content, str)
+                and bool(reasoning_content)
+            )
+
+            if msg_text or msg_image_count > 0 or msg_video_count > 0 or msg_audio_count > 0 or tool_calls or has_reasoning or role == "tool":
+                if (msg_image_count > 0 or msg_video_count > 0 or msg_audio_count > 0) and role in ("user", "assistant", "tool"):
+                    # Build multimodal content list with image markers for
+                    # any role that carries media (user, assistant or tool).
+                    # Some UIs (e.g. klite) send images on assistant messages
+                    # when attaching an image to the conversation context.
+                    # Tool results carry screenshots from agent tools; the Qwen
+                    # templates render tool content through render_content()
+                    # inside <tool_response>. Flattening them to a string left
+                    # the collected image with no placeholder: 27B -> HTTP 400
+                    # "Image features and image tokens do not match", Flash-Next
+                    # -> the image silently dropped and a hallucinated answer.
+                    content_list: list[dict] = []
+                    if msg_audio_count and not msg_image_count and not msg_video_count:
+                        content_list.append(
+                            {"type": "text", "text": msg_text, "content": msg_text}
+                        )
+                        for _ in range(msg_audio_count):
+                            content_list.append({"type": "audio"})
+                    else:
+                        # Keep the media marker order from the request.  The
+                        # processor merges visual features in placeholder
+                        # order; grouping images before videos here silently
+                        # pairs the wrong feature rows with a video-first
+                        # message.
+                        for media_type in msg_media_types:
+                            content_list.append({"type": media_type})
+                        content_list.append(
+                            {"type": "text", "text": msg_text, "content": msg_text}
+                        )
+                    out_msg: dict = {"role": role, "content": content_list}
+                    if role == "tool":
+                        if tool_call_id:
+                            out_msg["tool_call_id"] = tool_call_id
+                        if msg_name:
+                            out_msg["name"] = msg_name
+                    if role == "assistant" and tool_calls:
+                        out_msg["tool_calls"] = tool_calls
+                    if role == "assistant" and "reasoning_content" in msg:
+                        out_msg["reasoning_content"] = reasoning_content
+                    chat_messages.append(out_msg)
+                elif role == "assistant":
+                    out_msg = {"role": role, "content": msg_text}
+                    if tool_calls:
+                        out_msg["tool_calls"] = tool_calls
+                    # The native template decides whether to retain reasoning
+                    # from prior turns. Media normalization must not discard
+                    # the current tool generation's reasoning before it does.
+                    if "reasoning_content" in msg:
+                        out_msg["reasoning_content"] = reasoning_content
+                    chat_messages.append(out_msg)
+                elif role == "tool":
+                    out_msg = {"role": role, "content": msg_text}
+                    if tool_call_id:
+                        out_msg["tool_call_id"] = tool_call_id
+                    if msg_name:
+                        out_msg["name"] = msg_name
+                    chat_messages.append(out_msg)
+                else:
+                    chat_messages.append(
+                        {
+                            "role": role,
+                            "content": [
+                                {"type": "text", "text": msg_text, "content": msg_text}
+                            ],
+                        }
+                    )
+
+        return chat_messages, all_image_urls, videos, audio_inputs
+
+    def _normalize_text_only_messages_for_processor(
+        self,
+        chat_messages: list[dict],
+        *,
+        has_media: bool,
+    ) -> list[dict]:
+        """Use family-native plain text turns when a VLM request has no media.
+
+        Some local processor templates have two distinct modes: rich list
+        content is required for real image/video turns, while text-only turns
+        render correctly as plain strings. Feeding a no-media request through
+        the generic rich-content MLLM shape can make the template path look
+        like a multimodal prompt and weakens exact text, multi-turn, and
+        reasoning probes. Keep media turns untouched; only collapse text-only
+        content lists that contain text fragments and no modality markers.
+        """
+
+        if has_media:
+            return chat_messages
+
+        config = getattr(self, "config", None)
+        if isinstance(config, dict):
+            model_type = str(config.get("model_type", "") or "").lower()
+        else:
+            model_type = str(getattr(config, "model_type", "") or "").lower()
+        if model_type not in {"zaya1_vl", "mimo_v2"}:
+            return chat_messages
+
+        normalized: list[dict] = []
+        for message in chat_messages:
+            content = message.get("content")
+            if not isinstance(content, list):
+                normalized.append(message)
+                continue
+
+            text_parts: list[str] = []
+            contains_media_marker = False
+            for item in content:
+                if isinstance(item, str):
+                    text_parts.append(item)
+                    continue
+                if not isinstance(item, dict):
+                    text_parts.append(str(item))
+                    continue
+                item_type = str(item.get("type", "") or "").lower()
+                if item_type and item_type != "text":
+                    contains_media_marker = True
+                    break
+                text_parts.append(str(item.get("text") or item.get("content") or ""))
+
+            if contains_media_marker:
+                normalized.append(message)
+                continue
+
+            collapsed = dict(message)
+            collapsed["content"] = "".join(text_parts)
+            normalized.append(collapsed)
+
+        if model_type == "mimo_v2" and not getattr(getattr(self, "model", None), "_mimo_v26_runtime", False):
+            leading_system_parts: list[str] = []
+            folded: list[dict] = []
+            folded_into_user = False
+            for message in normalized:
+                role = str(message.get("role") or "").lower()
+                if not folded and role in {"system", "developer"}:
+                    text = str(message.get("content") or "").strip()
+                    if text:
+                        leading_system_parts.append(text)
+                    continue
+                if (
+                    leading_system_parts
+                    and not folded_into_user
+                    and role == "user"
+                ):
+                    combined = dict(message)
+                    user_text = str(combined.get("content") or "").strip()
+                    combined["content"] = "\n\n".join(
+                        part for part in [*leading_system_parts, user_text] if part
+                    )
+                    folded.append(combined)
+                    folded_into_user = True
+                    continue
+                folded.append(message)
+            if leading_system_parts and not folded_into_user:
+                folded.insert(
+                    0,
+                    {
+                        "role": "user",
+                        "content": "\n\n".join(leading_system_parts),
+                    },
+                )
+            normalized = folded
+
+        return normalized
+
+    def _normalize_mimo_audio_messages_for_template(
+        self,
+        chat_messages: list[dict],
+    ) -> list[dict]:
+        """Render MiMo audio content parts as explicit artifact audio tokens.
+
+        The current local MiMo bundles use a Qwen2.5-VL processor shim. That
+        processor preserves image/video content parts, but ignores raw
+        ``{"type": "audio"}`` parts when rendering the chat template. The
+        audio code bridge can only splice embeddings if the prompt contains
+        the model-owned audio pad token, so normalize MiMo audio placeholders
+        to the special token sequence declared in ``processor_config``.
+        """
+
+        config = getattr(self, "config", None)
+        if isinstance(config, dict):
+            model_type = str(config.get("model_type", "") or "").lower()
+            processor_config = config.get("processor_config") or {}
+        else:
+            model_type = str(getattr(config, "model_type", "") or "").lower()
+            processor_config = getattr(config, "processor_config", None) or {}
+        if model_type != "mimo_v2" or not isinstance(processor_config, dict):
+            return chat_messages
+        audio_token_id = processor_config.get("audio_token_id")
+        if audio_token_id is None:
+            return chat_messages
+        audio_marker = _mimo_v2_token_text(
+            self.processor,
+            processor_config.get("audio_start_token_id"),
+            "<|mimo_audio_start|>",
+        )
+        audio_marker += _mimo_v2_token_text(
+            self.processor,
+            audio_token_id,
+            "<|audio_pad|>",
+        )
+        audio_marker += _mimo_v2_token_text(
+            self.processor,
+            processor_config.get("audio_end_token_id"),
+            "<|mimo_audio_end|>",
+        )
+
+        rewritten: list[dict] = []
+        changed = False
+        for message in chat_messages:
+            content = message.get("content")
+            if not isinstance(content, list):
+                rewritten.append(message)
+                continue
+            new_content: list[dict] = []
+            for part in content:
+                if isinstance(part, dict) and str(part.get("type") or "").lower() in {
+                    "audio",
+                    "input_audio",
+                    "audio_url",
+                }:
+                    new_content.append({"type": "text", "text": audio_marker, "content": audio_marker})
+                    changed = True
+                else:
+                    new_content.append(part)
+            if changed:
+                out = dict(message)
+                out["content"] = new_content
+                rewritten.append(out)
+            else:
+                rewritten.append(message)
+        return rewritten if changed else chat_messages
+
+    def _synthesizes_thinking_prompt_when_enabled(self) -> bool:
+        """Return True for MLLM families whose template needs an explicit open rail.
+
+        Some MLLM bundles declare qwen3 reasoning support while their mlx-vlm
+        chat template can be a plain ``assistant: `` suffix. In that case an
+        explicit per-chat/API ``enable_thinking=true`` may need to open the
+        qwen3 rail in the prompt. This is intentionally family-gated; most VLM
+        templates either own their think rail or do not support reasoning. The
+        current ZAYA1-VL plain-template artifacts are registry-demoted to
+        ``supports_thinking=False`` because live proof produced hidden-only
+        output under the synthetic rail.
+        """
+
+        config = getattr(self, "config", None)
+        if not isinstance(config, dict):
+            config = {}
+
+        caps = config.get("capabilities")
+        caps = caps if isinstance(caps, dict) else {}
+        if caps.get("supports_thinking") is False:
+            return False
+
+        model_type = config.get("model_type")
+        text_config = config.get("text_config")
+        if not model_type and isinstance(text_config, dict):
+            model_type = text_config.get("model_type")
+
+        family_names = {
+            str(v).lower()
+            for v in (caps.get("family"), model_type)
+            if isinstance(v, str) and v
+        }
+        reasoning_parser = caps.get("reasoning_parser")
+        supports_thinking = caps.get("supports_thinking")
+        think_in_template = caps.get("think_in_template")
+
+        try:
+            from vmlx_engine.model_config_registry import get_model_config_registry
+
+            registry = get_model_config_registry()
+            family_config = registry.lookup(str(getattr(self, "model_name", "") or ""))
+            if getattr(family_config, "family_name", None):
+                family_names.add(str(family_config.family_name).lower())
+            if getattr(family_config, "reasoning_parser", None):
+                reasoning_parser = family_config.reasoning_parser
+            if getattr(family_config, "supports_thinking", None) is not None:
+                supports_thinking = family_config.supports_thinking
+            if getattr(family_config, "think_in_template", None) is not None:
+                think_in_template = family_config.think_in_template
+        except Exception:
+            pass
+
+        if supports_thinking is False:
+            return False
+        if think_in_template is True:
+            return False
+        if str(reasoning_parser or "").lower() != "qwen3":
+            return False
+        return bool(family_names & {"zaya", "zaya1_vl", "zaya1-vl"})
+
+    def _prompt_template_supports_thinking(self) -> bool:
+        """Return whether the native VLM prompt template owns the think rail.
+
+        Capability stamps are the source of truth here. A model can support a
+        qwen-style reasoning parser while its VLM chat template remains plain;
+        those families must not receive template-sentinel assumptions when
+        ``enable_thinking=false``.
+        """
+
+        config = getattr(self, "config", None)
+        caps = config.get("capabilities") if isinstance(config, dict) else None
+        caps = caps if isinstance(caps, dict) else {}
+        if caps.get("supports_thinking") is False:
+            return False
+        if caps.get("think_in_template") is not None:
+            return bool(caps.get("think_in_template"))
+
+        try:
+            from vmlx_engine.model_config_registry import get_model_config_registry
+
+            family_config = get_model_config_registry().lookup(
+                str(getattr(self, "model_name", "") or "")
+            )
+            if getattr(family_config, "supports_thinking", None) is False:
+                return False
+            if getattr(family_config, "think_in_template", None) is not None:
+                return bool(family_config.think_in_template)
+        except Exception:
+            pass
+
+        return False
+
+    def _apply_chat_template(
+        self,
+        chat_messages: list[dict],
+        enable_thinking: bool | None = None,
+        tools: list[dict] | None = None,
+        reasoning_effort: str | None = None,
+        chat_template_kwargs: dict | None = None,
+    ) -> str:
+        """
+        Apply chat template to structured messages with enable_thinking support.
+
+        Handles TypeError fallback for processors that don't support
+        enable_thinking and general exception fallback to last user message.
+        The wrapper preserves the native template output; family-specific
+        no-thinking prompt sentinels must live in explicit renderer contracts.
+
+        Args:
+            chat_messages: Structured chat messages from _extract_multimodal_messages()
+            enable_thinking: Whether to enable thinking mode (None = don't pass)
+
+        Returns:
+            Formatted prompt string
+        """
+        from mlx_vlm.prompt_utils import get_chat_template
+
+        # Keep caller template variables in the renderer only. Explicit
+        # request controls win, matching the shared text-engine contract.
+        template_kwargs = {
+            k: v for k, v in (chat_template_kwargs or {}).items()
+            if k not in ("tokenize", "add_generation_prompt")
+        }
+        if enable_thinking is not None and "thinking" in template_kwargs:
+            template_kwargs["thinking"] = bool(enable_thinking)
+        model_type = ""
+        try:
+            config = getattr(self, "config", None)
+            if isinstance(config, dict):
+                model_type = str(config.get("model_type", "") or "").lower()
+            else:
+                model_type = str(getattr(config, "model_type", "") or "").lower()
+        except Exception:
+            model_type = ""
+        if enable_thinking is not None:
+            template_kwargs["enable_thinking"] = enable_thinking
+        if tools:
+            template_kwargs["tools"] = tools
+        if reasoning_effort:
+            # SimpleEngine forwards the request's effort here.  Without it the
+            # template rendered its default (Qwen3.8: xhigh) for every request
+            # on this path, so the effort control did nothing on DFlash2
+            # sessions (they always run SimpleEngine).
+            template_kwargs["reasoning_effort"] = reasoning_effort
+        if model_type.startswith("glm5") and model_type not in {
+            "glm5_next", "glm5_next_text"
+        }:
+            # Preserve GLM-5.3's native history default and causal prefix.
+            template_kwargs.setdefault("clear_thinking", True)
+        if model_type == "mimo_v2":
+            chat_messages = self._normalize_mimo_audio_messages_for_template(chat_messages)
+        if getattr(self.processor, "_mimo_v26_runtime", False):
+            from .mimo_v26_contract import canonicalize_mimo_v26_tool_results
+            # Validate before the generic template fallback: losing tool-result
+            # associations must never fall back to only the last user message.
+            chat_messages = canonicalize_mimo_v26_tool_results(chat_messages)
+
+        formatted_prompt = None
+        try:
+            formatted_prompt = get_chat_template(
+                self.processor,
+                chat_messages,
+                add_generation_prompt=True,
+                **template_kwargs,
+            )
+        except TypeError:
+            # Processor doesn't support enable_thinking kwarg — use processor
+            # WITHOUT the kwarg first. Preserve tools unless the processor
+            # rejects them too.
+            fallback_kwargs = dict(template_kwargs)
+            fallback_kwargs.pop("enable_thinking", None)
+            fallback_kwargs.pop("clear_thinking", None)
+            try:
+                formatted_prompt = get_chat_template(
+                    self.processor,
+                    chat_messages,
+                    add_generation_prompt=True,
+                    **fallback_kwargs,
+                )
+            except TypeError:
+                fallback_kwargs.pop("tools", None)
+                try:
+                    formatted_prompt = get_chat_template(
+                        self.processor,
+                        chat_messages,
+                        add_generation_prompt=True,
+                        **fallback_kwargs,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to apply chat template: {e}, using last user message"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to apply chat template: {e}, using last user message"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Failed to apply chat template: {e}, using last user message"
+            )
+
+        # Some processor templates can be plain while the model is still
+        # qwen3-reasoning capable. Honor explicit thinking-on by opening the
+        # rail in the assistant generation prompt only for registry-approved
+        # families; Auto/Off remain plain.
+        if (
+            enable_thinking is True
+            and formatted_prompt
+            and self._synthesizes_thinking_prompt_when_enabled()
+        ):
+            from ..utils.chat_template_kwargs import trailing_open_think_index
+            # An open rail is only the trailing generation-prompt <think>; a
+            # <think> quoted in user content must not suppress opening it.
+            has_open_unclosed = trailing_open_think_index(formatted_prompt) >= 0
+            if not has_open_unclosed:
+                stripped = formatted_prompt.rstrip()
+                if stripped.endswith("assistant:"):
+                    formatted_prompt = stripped + " <think>\n"
+                else:
+                    formatted_prompt = stripped + "\n<think>\n"
+
+        if enable_thinking is False and formatted_prompt:
+            try:
+                from ..utils.chat_template_kwargs import ensure_thinking_off_sentinel
+
+                formatted_prompt = ensure_thinking_off_sentinel(
+                    formatted_prompt,
+                    family_name=str((self.config or {}).get("model_type", ""))
+                    if isinstance(self.config, dict)
+                    else None,
+                    model_name=self.model_name,
+                    tools_present=bool(tools),
+                )
+            except Exception as exc:
+                logger.debug(
+                    "MLLM thinking-off prompt sentinel skipped for %s: %s",
+                    self.model_name,
+                    exc,
+                )
+
+        if formatted_prompt is None:
+            # Fallback to last user message if template fails
+            last_user_msg = ""
+            for m in reversed(chat_messages):
+                if m["role"] == "user":
+                    content = m.get("content", "")
+                    if isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                last_user_msg = item.get("text", "")
+                                break
+                    else:
+                        last_user_msg = content
+                    break
+            formatted_prompt = last_user_msg
+
+        return formatted_prompt
+
+    def generate(
+        self,
+        prompt: str,
+        images: list | None = None,
+        videos: list | None = None,
+        audio: list[str] | None = None,
+        max_tokens: int = 256,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        video_fps: float = DEFAULT_FPS,
+        video_max_frames: int = MAX_FRAMES,
+        use_cache: bool = True,
+        video_controls: Any = None,
+        **kwargs,
+    ) -> MLLMOutput:
+        """
+        Generate text from multimodal input.
+
+        Args:
+            prompt: Text prompt/question
+            images: List of image paths, URLs, or base64 strings
+            videos: List of video inputs (paths, URLs, base64, or OpenAI format dicts)
+            audio: List of audio file paths
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Top-p sampling parameter
+            video_fps: FPS for video frame extraction (default: 2.0)
+            video_max_frames: Max frames to extract from video
+            use_cache: Whether to use KV cache (default: True)
+            **kwargs: Additional generation parameters
+
+        Returns:
+            MLLMOutput with generated text
+
+        Example:
+            # With local video
+            output = model.generate("Describe this video", videos=["video.mp4"])
+
+            # With video URL
+            output = model.generate("What happens?", videos=["https://example.com/video.mp4"])
+
+            # With base64 video
+            output = model.generate("Describe", videos=["data:video/mp4;base64,AAAA..."])
+        """
+        if not self._loaded:
+            self.load()
+
+        from mlx_vlm import generate
+        from mlx_vlm.models import cache as vlm_cache
+        from mlx_vlm.prompt_utils import apply_chat_template
+
+        images = images or []
+        videos = videos or []
+        audio = audio or []
+
+        # Process all images (including frames from videos) and audio.
+        all_images = []
+        all_audio = []
+        all_sources = []  # Track original sources for cache key
+
+        # Process image inputs
+        if images:
+            all_images.extend(self._prepare_images(images))
+            all_sources.extend(images)
+        if audio:
+            all_audio.extend(self._prepare_audio(audio))
+            all_sources.extend(audio)
+
+        # Extract frames from videos
+        for video_path in videos:
+            frames = self._prepare_video(
+                video_path,
+                fps=video_fps,
+                max_frames=video_max_frames,
+                controls=video_controls,
+                frame_cap=_simple_video_frame_cap(kwargs, len(videos), len(images)),
+            )
+            all_images.extend(frames)
+            # Include video params in cache key (pixel controls only when set,
+            # so requests without them keep their pre-existing keys)
+            video_str = video_path if isinstance(video_path, str) else str(video_path)
+            all_sources.append(
+                f"video:{video_str}:fps{video_fps}:max{video_max_frames}"
+                + _video_pixel_key_suffix(video_controls)
+            )
+            logger.info(f"Added {len(frames)} frames from video: {video_path}")
+
+        # ADVISORY only (Eric's rule: estimates may advise, never refuse). Video
+        # frames are already planned to the per-video cap in _prepare_video; a
+        # request that still carries many images is attempted -- the allocator
+        # fails loudly if it truly does not fit.
+        _max_images = kwargs.get("max_images_per_request", 20)
+        if len(all_images) > _max_images:
+            logger.warning(
+                "Request carries %d images (incl. video frames), above the advisory "
+                "max_images_per_request=%d; attempting it.", len(all_images), _max_images,
+            )
+
+        # Apply chat template if needed
+        if all_images and hasattr(self.processor, "apply_chat_template"):
+            try:
+                formatted_prompt = apply_chat_template(
+                    self.processor,
+                    self.config,
+                    prompt,
+                    num_images=len(all_images),
+                )
+            except Exception:
+                formatted_prompt = prompt
+        else:
+            formatted_prompt = prompt
+
+        # Check cache for existing KV state
+        prompt_cache = None
+        prompt_cache_state = None
+        cache_hit = False
+        prefix_match_len = 0
+        _cache_token_ids: list[int] | None = None  # reused by store path below
+        media_cache_safe = _supports_simple_media_prompt_cache(self.model)
+
+        if use_cache and media_cache_safe and self._cache_manager is not None and all_sources:
+            try:
+                tokenizer = (
+                    self.processor.tokenizer
+                    if hasattr(self.processor, "tokenizer")
+                    else self.processor
+                )
+                token_ids = _media_expanded_token_ids_for_cache(
+                    self.model,
+                    self.processor,
+                    formatted_prompt,
+                    images=all_images,
+                    resize_shape=kwargs.get("resize_shape"),
+                ) or tokenizer.encode(formatted_prompt)
+                _cache_token_ids = token_ids
+                cache_entry, prefix_match_len = self._cache_manager.fetch(
+                    all_sources, formatted_prompt, token_ids
+                )
+                if cache_entry and cache_entry.kv_cache is not None:
+                    if all_images:
+                        prompt_cache_state = _prompt_cache_state_from_entry(cache_entry)
+                        if prompt_cache_state is None:
+                            logger.debug(
+                                "[PREFIX CACHE] Generate image hit lacked PromptCacheState; "
+                                "falling back to full prompt processing"
+                            )
+                        else:
+                            logger.debug(
+                                "[PREFIX CACHE] Generate image hit - using mlx-vlm "
+                                "PromptCacheState for prefix trim"
+                            )
+                    else:
+                        prompt_cache = cache_entry.kv_cache
+                    cache_hit = True
+                    logger.info(
+                        f"MLLM cache hit for {len(all_sources)} source(s)"
+                        + (f", {prefix_match_len} prefix tokens match" if prefix_match_len > 0 else "")
+                    )
+            except Exception as e:
+                logger.debug(f"Generate cache fetch failed: {e}")
+
+        # Create new cache if needed
+        if prompt_cache is None and prompt_cache_state is None and self.model is not None:
+            try:
+                prompt_cache = vlm_cache.make_prompt_cache(self.model.language_model)
+            except Exception:
+                prompt_cache = None
+        if prompt_cache_state is not None:
+            kwargs["prompt_cache_state"] = prompt_cache_state
+
+        self._guard_simple_image_prefill(
+            formatted_prompt,
+            bool(all_images and prompt_cache_state is None),
+            images=all_images,
+            resize_shape=kwargs.get("resize_shape"),
+        )
+
+        # Generate with cache.  Non-stream ``mlx_vlm.generate`` synchronizes
+        # its module-global generation_stream in wired_limit(), just like the
+        # streaming path.  Entering the owned stream context first also
+        # rebinds that global after direct-engine teardown/model swaps.
+        with _MaybeVLMStream():
+            result = generate(
+                self.model,
+                self.processor,
+                formatted_prompt,
+                all_images if all_images else None,
+                audio=all_audio if all_audio else None,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                verbose=False,
+                prompt_cache=prompt_cache,
+                **kwargs,
+            )
+
+        # Store cache for future reuse (only on miss).
+        # Use `is not None` — MLLMPrefixCacheManager.__len__ exists but
+        # __bool__ does not, so plain `if self._cache_manager` evaluates
+        # False when the cache is empty (via len fallback). That made
+        # store skip the very first attempt, so the cache could never
+        # populate and no request ever hit. (2026-04-18 Ralph iter 11)
+        if use_cache and media_cache_safe and self._cache_manager is not None and all_sources and not cache_hit:
+            if prompt_cache is not None:
+                try:
+                    num_tokens = getattr(result, "prompt_tokens", 0)
+                    cache_to_store = _copy_prompt_cache_to_prompt_boundary(
+                        prompt_cache, num_tokens
+                    )
+                    # Prefer the real token_ids (computed above during fetch)
+                    # so partial-hit prefix matching works. store_cache's
+                    # num_tokens-only path writes dummy `[0] * N` which makes
+                    # downstream get_prefix_match_length always return 0.
+                    if _cache_token_ids:
+                        self._cache_manager.store(
+                            images=all_sources,
+                            prompt=formatted_prompt,
+                            vision_embeddings=None,
+                            kv_cache=cache_to_store,
+                            token_ids=_cache_token_ids,
+                            num_image_tokens=0,
+                            model_name=self.model_name,
+                        )
+                    else:
+                        self._cache_manager.store_cache(
+                            all_sources, formatted_prompt, cache_to_store, num_tokens
+                        )
+                    logger.info(f"MLLM cache stored for {len(all_sources)} source(s)")
+                except Exception as e:
+                    logger.debug(f"Failed to store MLLM cache: {e}")
+
+        # Handle GenerationResult object or plain string
+        if hasattr(result, "text"):
+            output_text = result.text
+            prompt_tokens = getattr(result, "prompt_tokens", 0)
+            generation_tokens = getattr(result, "generation_tokens", 0)
+        else:
+            output_text = str(result)
+            prompt_tokens = 0
+            generation_tokens = 0
+
+        finish_reason = "length" if generation_tokens >= max_tokens else "stop"
+
+        return MLLMOutput(
+            text=output_text,
+            finish_reason=finish_reason,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=generation_tokens,
+            cached_tokens=prefix_match_len if cache_hit else 0,
+            cache_detail="memory" if cache_hit and prefix_match_len > 0 else "",
+        )
+
+    def stream_generate(
+        self,
+        prompt: str,
+        images: list | None = None,
+        videos: list[str] | None = None,
+        max_tokens: int = 256,
+        temperature: float = 0.7,
+        video_fps: float = DEFAULT_FPS,
+        video_max_frames: int = MAX_FRAMES,
+        video_controls: Any = None,
+        **kwargs,
+    ) -> Iterator[str]:
+        """
+        Stream text generation for multimodal input.
+
+        Args:
+            prompt: Text prompt
+            images: List of image inputs
+            videos: List of video paths
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            video_fps: FPS for video frame extraction
+            video_max_frames: Maximum video frames to extract
+            **kwargs: Additional parameters
+
+        Yields:
+            Generated text chunks
+        """
+        if not self._loaded:
+            self.load()
+
+        try:
+            from mlx_vlm import stream_generate
+            from mlx_vlm.models import cache as vlm_cache
+            from mlx_vlm.prompt_utils import apply_chat_template
+        except ImportError:
+            # Fallback to non-streaming
+            output = self.generate(
+                prompt=prompt,
+                images=images,
+                videos=videos,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                video_fps=video_fps,
+                **kwargs,
+            )
+            yield output.text
+            return
+
+        images = images or []
+        videos = videos or []
+
+        # Process images
+        all_images = []
+        all_sources = []
+        if images:
+            all_images.extend(self._prepare_images(images))
+            all_sources.extend(images)
+        for video_path in videos:
+            frames = self._prepare_video(
+                video_path, fps=video_fps, max_frames=video_max_frames, controls=video_controls,
+                frame_cap=_simple_video_frame_cap(kwargs, len(videos), len(images)),
+            )
+            all_images.extend(frames)
+            video_str = video_path if isinstance(video_path, str) else str(video_path)
+            all_sources.append(
+                f"video:{video_str}:fps{video_fps}:max{video_max_frames}"
+                + _video_pixel_key_suffix(video_controls)
+            )
+
+        # ADVISORY only (Eric's rule: estimates may advise, never refuse). Video
+        # frames are already planned to the per-video cap in _prepare_video; a
+        # request that still carries many images is attempted -- the allocator
+        # fails loudly if it truly does not fit.
+        _max_images = kwargs.get("max_images_per_request", 20)
+        if len(all_images) > _max_images:
+            logger.warning(
+                "Request carries %d images (incl. video frames), above the advisory "
+                "max_images_per_request=%d; attempting it.", len(all_images), _max_images,
+            )
+
+        # Apply chat template
+        if all_images:
+            try:
+                formatted_prompt = apply_chat_template(
+                    self.processor,
+                    self.config,
+                    prompt,
+                    num_images=len(all_images),
+                )
+            except Exception:
+                formatted_prompt = prompt
+        else:
+            formatted_prompt = prompt
+
+        if not all_images:
+            try:
+                from ..dflash2_runtime import stream_dflash2_generate
+                from ..speculative import get_draft_model, is_dflash2_enabled
+
+                if is_dflash2_enabled():
+                    tokenizer = (
+                        self.processor.tokenizer
+                        if hasattr(self.processor, "tokenizer")
+                        else self.processor
+                    )
+                    logger.info("DFlash2 text generation active for %s", self.model_name)
+                    yield from stream_dflash2_generate(
+                        self.model,
+                        tokenizer,
+                        get_draft_model(),
+                        formatted_prompt,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_p=float(kwargs.get("top_p", 1.0)),
+                        top_k=int(kwargs.get("top_k", 0)),
+                        stop=kwargs.get("stop"),
+                    )
+                    return
+            except ImportError:
+                logger.exception("DFlash2 runtime is unavailable")
+                raise
+
+        prompt_cache = None
+        prompt_cache_state = None
+        cache_hit = False
+        token_ids: list[int] = []
+        use_cache = kwargs.pop("use_cache", True)
+        media_cache_safe = _supports_simple_media_prompt_cache(self.model)
+
+        if use_cache and media_cache_safe and self._cache_manager is not None and all_sources:
+            try:
+                tokenizer = (
+                    self.processor.tokenizer
+                    if hasattr(self.processor, "tokenizer")
+                    else self.processor
+                )
+                token_ids = _media_expanded_token_ids_for_cache(
+                    self.model,
+                    self.processor,
+                    formatted_prompt,
+                    images=all_images,
+                    resize_shape=kwargs.get("resize_shape"),
+                ) or tokenizer.encode(formatted_prompt)
+                cache_entry, prefix_match_len = self._cache_manager.fetch(
+                    all_sources, formatted_prompt, token_ids
+                )
+                if cache_entry and cache_entry.kv_cache is not None:
+                    if all_images:
+                        prompt_cache_state = _prompt_cache_state_from_entry(cache_entry)
+                        if prompt_cache_state is None:
+                            logger.debug(
+                                "[PREFIX CACHE] Stream generate image hit lacked "
+                                "PromptCacheState; falling back to full prompt processing"
+                            )
+                    else:
+                        prompt_cache = cache_entry.kv_cache
+                    cache_hit = True
+                    if prefix_match_len > 0:
+                        logger.debug(
+                            f"Stream generate prefix cache hit: {prefix_match_len} tokens, "
+                            f"{len(all_sources)} source(s)"
+                        )
+            except Exception as e:
+                logger.debug(f"Stream generate cache fetch failed: {e}")
+
+        if prompt_cache is None and prompt_cache_state is None and self.model is not None:
+            try:
+                prompt_cache = vlm_cache.make_prompt_cache(self.model.language_model)
+            except Exception:
+                prompt_cache = None
+        if prompt_cache_state is not None:
+            kwargs["prompt_cache_state"] = prompt_cache_state
+
+        self._guard_simple_image_prefill(
+            formatted_prompt,
+            bool(all_images and prompt_cache_state is None),
+            images=all_images,
+            resize_shape=kwargs.get("resize_shape"),
+        )
+
+        last_prompt_tokens = 0
+        from ..utils.prefill_step import prefill_step_size
+
+        kwargs.setdefault("prefill_step_size", prefill_step_size())
+        with _MaybeVLMStream():
+            for chunk in stream_generate(
+                self.model,
+                self.processor,
+                formatted_prompt,
+                all_images if all_images else None,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                prompt_cache=prompt_cache,
+                **kwargs,
+            ):
+                chunk_prompt_tokens = getattr(chunk, "prompt_tokens", 0)
+                if chunk_prompt_tokens:
+                    last_prompt_tokens = chunk_prompt_tokens
+                yield chunk
+
+        if (
+            use_cache
+            and media_cache_safe
+            and self._cache_manager is not None
+            and all_sources
+            and not cache_hit
+            and prompt_cache
+        ):
+            try:
+                prompt_tokens_count = last_prompt_tokens or len(token_ids)
+                cache_to_store = _copy_prompt_cache_to_prompt_boundary(
+                    prompt_cache, prompt_tokens_count
+                )
+                self._cache_manager.store(
+                    images=all_sources,
+                    prompt=formatted_prompt,
+                    vision_embeddings=None,
+                    kv_cache=cache_to_store,
+                    token_ids=token_ids,
+                    num_image_tokens=0,
+                    model_name=self.model_name,
+                )
+                logger.info(
+                    f"MLLM stream cache stored for {len(all_sources)} source(s)"
+                )
+            except Exception as e:
+                logger.debug(f"Failed to store MLLM stream cache: {e}")
+
+    def chat(
+        self,
+        messages: list[dict],
+        max_tokens: int = 256,
+        temperature: float = 0.7,
+        **kwargs,
+    ) -> MLLMOutput:
+        """
+        Chat with OpenAI-compatible message format.
+
+        Supports multimodal content in messages:
+        - {"type": "text", "text": "..."}
+        - {"type": "image_url", "image_url": {"url": "..."}}
+        - {"type": "image_url", "image_url": {"url": "data:image/...;base64,..."}}
+
+        Args:
+            messages: List of chat messages (OpenAI format)
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            **kwargs: Additional parameters
+
+        Returns:
+            MLLMOutput with assistant's response
+        """
+        if not self._loaded:
+            self.load()
+
+        from mlx_vlm import generate
+
+        # Extract text, images, videos, and audio from messages
+        chat_messages, all_image_urls, videos, audio_inputs = self._extract_multimodal_messages(messages)
+        if getattr(self.model, "_mimo_v26_runtime", False):
+            chat_messages = messages
+        chat_messages = self._normalize_text_only_messages_for_processor(
+            chat_messages,
+            has_media=bool(all_image_urls or videos or audio_inputs),
+        )
+
+        logger.info(f"MLLM.chat() called with {len(messages)} messages")
+
+        # Process images
+        all_images = []
+        all_audio = []
+        prepared_images = self._prepare_images(all_image_urls) if all_image_urls else []
+        all_images.extend(prepared_images)
+        video_frame_lists: list[list] = []
+        if audio_inputs:
+            all_audio.extend(self._prepare_audio(audio_inputs))
+
+        # Process videos
+        from ..video_controls import pop_video_control_kwargs
+
+        _video_controls = pop_video_control_kwargs(kwargs)
+        video_fps = _video_controls.effective_fps() if _video_controls else DEFAULT_FPS
+        video_max_frames = _video_controls.effective_max_frames() if _video_controls else MAX_FRAMES
+        video_frame_counts: list[int] = []
+        for video_path in videos:
+            frames = self._prepare_video(
+                video_path, fps=video_fps, max_frames=video_max_frames, controls=_video_controls,
+                frame_cap=_simple_video_frame_cap(kwargs, len(videos), len(prepared_images)),
+            )
+            all_images.extend(frames)
+            video_frame_counts.append(len(frames))
+            video_frame_lists.append(list(frames))
+            logger.info(f"Added {len(frames)} frames from video: {video_path}")
+
+        model_type = (
+            str(self.config.get("model_type", "") or "").lower()
+            if isinstance(self.config, dict)
+            else str(getattr(self.config, "model_type", "") or "").lower()
+        )
+        if model_type in _VIDEO_FRAME_FALLBACK_MODEL_TYPES and video_frame_counts:
+            ordered_media = _order_images_and_video_frames(chat_messages, prepared_images, video_frame_lists)
+            if ordered_media is not None:
+                all_images = ordered_media
+            else:
+                raise ValueError("Cannot align media items with prompt order; check image and video inputs")
+            chat_messages = _expand_video_placeholders_to_image_frames(
+                chat_messages,
+                video_frame_counts,
+            )
+        native_video_clips = None
+        if model_type in _NATIVE_VIDEO_FRAME_MODEL_TYPES and video_frame_lists:
+            # The video placeholder stays in the prompt; frames go to the
+            # processor's videos= path, images keep their own list.
+            native_video_clips = [_video_frames_as_native_clip(f) for f in video_frame_lists]
+            all_images = list(prepared_images)
+
+        # ADVISORY only (Eric's rule: estimates may advise, never refuse). Video
+        # frames are already planned to the per-video cap in _prepare_video; a
+        # request that still carries many images is attempted -- the allocator
+        # fails loudly if it truly does not fit.
+        _max_images = kwargs.get("max_images_per_request", 20)
+        if len(all_images) > _max_images:
+            logger.warning(
+                "Request carries %d images (incl. video frames), above the advisory "
+                "max_images_per_request=%d; attempting it.", len(all_images), _max_images,
+            )
+
+        # Apply chat template
+        template_tools = kwargs.pop("tools", None)
+        logger.info(
+            f"Applying chat template with {len(chat_messages)} messages, "
+            f"{len(all_images)} images, {len(all_audio)} audio"
+        )
+        for i, cm in enumerate(chat_messages):
+            content_preview = str(cm.get("content", ""))[:80]
+            logger.info(
+                f"  Chat msg {i}: role={cm['role']}, content={content_preview}..."
+            )
+        enable_thinking = kwargs.pop("enable_thinking", None)
+        reasoning_effort = kwargs.pop("reasoning_effort", None)
+        extra_template = kwargs.pop("chat_template_kwargs", None)
+        formatted_prompt = self._apply_chat_template(
+            chat_messages,
+            enable_thinking,
+            tools=template_tools,
+            reasoning_effort=reasoning_effort,
+            **({"chat_template_kwargs": extra_template} if extra_template else {}),
+        )
+
+        # Post-template image count guard: VLM chat templates may not expand
+        # image placeholders for assistant-role messages. Trim all_images to
+        # match actual placeholder token count to prevent crashes in generate().
+        if all_images and self.config:
+            _img_token_id = getattr(self.config, "image_token_index", None)
+            if _img_token_id is not None:
+                _tok = (
+                    self.processor.tokenizer
+                    if hasattr(self.processor, "tokenizer")
+                    else self.processor
+                )
+                try:
+                    _token_ids = _tok.encode(formatted_prompt)
+                    _slot_count = _token_ids.count(_img_token_id)
+                    if _slot_count != len(all_images):
+                        logger.warning(
+                            f"Image count mismatch: {len(all_images)} images but "
+                            f"{_slot_count} slots in prompt (likely assistant-role "
+                            f"images not supported by template). Trimming to {_slot_count}."
+                        )
+                        all_images = all_images[:_slot_count]
+                except Exception as _e:
+                    logger.debug(f"Image slot count check failed: {_e}")
+
+        # MiniCPM video arrives as native clips (processor videos= path): DSpark plans it like images.
+        _dspark_media = None
+        _dspark_videos = native_video_clips or []
+        if self._dspark_eligible(all_images, [] if _dspark_videos else videos, all_audio, temperature, kwargs) and (
+            not (all_images or _dspark_videos)
+            or (_dspark_media := self._dspark_media_plan(formatted_prompt, all_images, kwargs, _dspark_videos)) is not None
+        ):
+            final = None
+            text = ""
+            for final in self._stream_dspark(formatted_prompt, max_tokens, temperature, kwargs, media=_dspark_media):
+                text += final.text
+            final.text = text
+            return final
+
+        # Prefix caching with vision embedding support
+        # Following LMCache approach: cache vision embeddings to skip encoder on hit
+        from mlx_vlm.models import cache as vlm_cache
+        import time
+
+        use_cache = kwargs.pop("use_cache", True)
+        cache_entry = None
+        prefix_match_len = 0
+        cache_hit = False
+
+        # Tokenize prompt for cache lookup
+        tokenizer = (
+            self.processor.tokenizer
+            if hasattr(self.processor, "tokenizer")
+            else self.processor
+        )
+        token_ids = _media_expanded_token_ids_for_cache(
+            self.model,
+            self.processor,
+            formatted_prompt,
+            images=all_images,
+            audio=all_audio,
+            resize_shape=kwargs.get("resize_shape"),
+        ) or tokenizer.encode(formatted_prompt)
+        media_cache_safe = _supports_simple_media_prompt_cache(self.model)
+
+        # Check prefix cache
+        if use_cache and media_cache_safe and self._cache_manager is not None and all_images:
+            try:
+                cache_entry, prefix_match_len = self._cache_manager.fetch(
+                    all_images, formatted_prompt, token_ids
+                )
+                if cache_entry:
+                    cache_hit = True
+                    # NOTE: cache_entry.vision_embeddings is not used — mlx-vlm's
+                    # generate() does not accept pre-computed vision embeddings.
+                    # The KV cache hit path below handles the actual speedup.
+                    if prefix_match_len > 0:
+                        logger.debug(
+                            f"[PREFIX CACHE] {prefix_match_len} prefix tokens match"
+                        )
+            except Exception as e:
+                logger.warning(f"Cache fetch failed: {e}")
+
+        # Generate - use KV cache if available from previous identical request
+        start_time = time.time()
+
+        # Create or reuse prompt cache for prefix caching speedup
+        prompt_cache = None
+        prompt_cache_state = None
+        skip_prompt_processing = False
+
+        if media_cache_safe and cache_hit and cache_entry and cache_entry.kv_cache:
+            if all_images:
+                # mlx-vlm trims multimodal prefixes via PromptCacheState. Passing
+                # raw prompt_cache with the full prompt would double-process the
+                # image/prefix tokens; dropping the hit would full-prefill every
+                # follow-up turn.
+                prompt_cache_state = _prompt_cache_state_from_entry(cache_entry)
+                if prompt_cache_state is None:
+                    logger.debug(
+                        "[PREFIX CACHE] Image prefix hit lacked PromptCacheState; "
+                        "falling back to full prompt processing"
+                    )
+                else:
+                    logger.debug(
+                        "[PREFIX CACHE] Image prefix hit - using mlx-vlm "
+                        "PromptCacheState for prefix trim"
+                    )
+                skip_prompt_processing = False
+            else:
+                # Text-only: can use skip_prompt_processing for maximum speedup
+                logger.debug(
+                    "[PREFIX CACHE] Text-only cache hit - using skip_prompt_processing speedup"
+                )
+                cached_prompt_cache = cache_entry.kv_cache
+                try:
+                    import copy
+
+                    prompt_cache = []
+                    for layer_cache in cached_prompt_cache:
+                        new_cache = copy.copy(layer_cache)
+                        if hasattr(layer_cache, "state"):
+                            state = layer_cache.state
+                            if state is not None:
+                                import mlx.core as mx
+
+                                if len(state) >= 2 and state[0] is not None:
+                                    new_cache.keys = mx.array(state[0])
+                                    new_cache.values = mx.array(state[1])
+                                    if len(state) >= 3:
+                                        new_cache.offset = state[2]
+                                    elif hasattr(layer_cache, "offset"):
+                                        new_cache.offset = layer_cache.offset
+                        prompt_cache.append(new_cache)
+                    skip_prompt_processing = True
+                    logger.debug(
+                        f"[PREFIX CACHE] Skipping {prefix_match_len} token forward pass"
+                    )
+                except Exception as e:
+                    logger.warning(f"[PREFIX CACHE] Failed to copy cache: {e}")
+                    prompt_cache = None
+                    skip_prompt_processing = False
+
+        if prompt_cache is None and prompt_cache_state is None and self.model is not None:
+            # Create fresh cache
+            try:
+                prompt_cache = vlm_cache.make_prompt_cache(self.model.language_model)
+            except Exception:
+                prompt_cache = None
+
+        # Extract sampling params not natively supported by mlx_vlm.generate()
+        # (top_k, min_p require a custom sampler; they're silently ignored otherwise)
+        top_k = kwargs.pop("top_k", 0)
+        min_p = kwargs.pop("min_p", 0.0)
+        if (top_k and top_k > 0) or (min_p and min_p > 0.0):
+            from ..sampling import make_sampler
+            top_p = kwargs.pop("top_p", 1.0)
+            kwargs["sampler"] = make_sampler(
+                temp=temperature, top_p=top_p, min_p=min_p, top_k=top_k
+            )
+        if prompt_cache_state is not None:
+            kwargs["prompt_cache_state"] = prompt_cache_state
+
+        self._guard_simple_image_prefill(
+            formatted_prompt,
+            bool(all_images and prompt_cache_state is None),
+            images=all_images,
+            resize_shape=kwargs.get("resize_shape"),
+        )
+        if native_video_clips:
+            kwargs["video"] = native_video_clips
+
+        result = generate(
+            self.model,
+            self.processor,
+            formatted_prompt,
+            all_images if all_images else None,
+            audio=all_audio if all_audio else None,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            verbose=False,
+            prompt_cache=prompt_cache,
+            skip_prompt_processing=skip_prompt_processing,
+            **kwargs,
+        )
+
+        # Store KV cache for future reuse (on cache miss)
+        # IMPORTANT: We need to store only the prompt portion, not generated tokens
+        if (
+            use_cache
+            and media_cache_safe
+            and self._cache_manager is not None
+            and all_images
+            and not cache_hit
+            and prompt_cache
+        ):
+            try:
+                # Get prompt token count (before generation)
+                prompt_tokens_count = getattr(result, "prompt_tokens", 0)
+
+                cache_to_store = _copy_prompt_cache_to_prompt_boundary(
+                    prompt_cache, prompt_tokens_count
+                )
+
+                # Estimate num_image_tokens from the model config or token IDs.
+                # Different models use different counts (e.g., Gemma3=256, Qwen2-VL varies).
+                num_img_tokens = 0
+                if all_images and self.config:
+                    # Try to get image_token_index from config and count occurrences in token_ids
+                    img_token_id = getattr(self.config, "image_token_index", None)
+                    if img_token_id is not None and token_ids:
+                        num_img_tokens = token_ids.count(img_token_id)
+                    if num_img_tokens == 0:
+                        # Fallback: use prompt_tokens_count minus a rough text estimate
+                        # or just leave as 0 (cache stats only, not critical for correctness)
+                        num_img_tokens = 0
+
+                self._cache_manager.store(
+                    images=all_images,
+                    prompt=formatted_prompt,
+                    vision_embeddings=None,  # mlx-vlm doesn't support pre-computed embeddings
+                    kv_cache=cache_to_store,
+                    token_ids=token_ids,
+                    num_image_tokens=num_img_tokens,
+                    model_name=self.model_name,
+                )
+                logger.info(
+                    f"[PREFIX CACHE] Stored KV cache for {len(all_images)} image(s) ({prompt_tokens_count} prompt tokens)"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to cache: {e}")
+
+        # Handle GenerationResult object or plain string
+        if hasattr(result, "text"):
+            output_text = result.text
+            prompt_tokens = getattr(result, "prompt_tokens", 0)
+            generation_tokens = getattr(result, "generation_tokens", 0)
+        else:
+            output_text = str(result)
+            prompt_tokens = 0
+            generation_tokens = 0
+
+        finish_reason = "length" if generation_tokens >= max_tokens else "stop"
+
+        return MLLMOutput(
+            text=output_text,
+            finish_reason=finish_reason,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=generation_tokens,
+            cached_tokens=prefix_match_len if cache_hit else 0,
+            cache_detail="memory" if cache_hit and prefix_match_len > 0 else "",
+        )
+
+    def _dflash2_media_plan(self, formatted_prompt: str, images: list, kwargs: dict) -> dict | None:
+        """VLM prefill inputs for a DFlash2 image/video request, or None.
+
+        Mirrors what mlx_vlm.stream_generate does before its first forward:
+        processor inputs (placeholders expanded to one token per patch), then
+        the model's own get_input_embeddings, which runs the vision tower,
+        merges the features and computes the prompt's M-RoPE position ids and
+        rope delta (language_model._position_ids / _rope_deltas). The DFlash2
+        target adapter consumes these; nothing here forwards the language
+        model. None (native VLM path) for models without that interface.
+
+        GLM-5.3-Flash (glm5_next) has no M-RoPE: its language model takes
+        merged input embeddings and positions from the cache offset, so its
+        plan carries embeddings only (no position ids, rope delta 0) and the
+        GLM DFlash2 lane prefills them. Videos arrive as sampled image frames
+        (one key per frame); native video tokens/pixels keep the native path.
+        """
+        import hashlib
+
+        import mlx.core as mx
+        import numpy as np
+
+        from ..glm_dflash2 import is_glm5_next
+
+        language_model = getattr(self.model, "language_model", None)
+        glm = is_glm5_next(self.model)
+        if glm and (language_model is None or not hasattr(self.model, "get_input_embeddings")):
+            return None
+        if not glm and (
+            language_model is None
+            or not hasattr(language_model, "get_rope_index")
+            or not hasattr(self.model, "get_input_embeddings")
+        ):
+            logger.info(
+                "DFlash2 media request on %s: no M-RoPE VLM prefill interface; native VLM path",
+                self.model_name,
+            )
+            return None
+        from mlx_vlm.utils import prepare_inputs
+
+        try:
+            from mlx_vlm.generate import normalize_resize_shape
+        except ImportError:  # older mlx-vlm
+            normalize_resize_shape = lambda shape: shape  # noqa: E731
+        config = self.model.config
+        inputs = prepare_inputs(
+            self.processor,
+            images=images,
+            prompts=formatted_prompt,
+            image_token_index=getattr(config, "image_token_index", None),
+            resize_shape=normalize_resize_shape(kwargs.get("resize_shape")),
+            add_special_tokens=True,
+        )
+        input_ids = inputs["input_ids"]
+        pixel_values = inputs.get("pixel_values")
+        extra = {
+            k: v for k, v in inputs.items()
+            if k not in ("input_ids", "pixel_values", "attention_mask")
+        }
+        attention_mask = inputs.get("attention_mask")
+
+        def materialize() -> dict:
+            """Vision tower + merged embeddings + M-RoPE plan (the expensive half).
+
+            Deferred: when the DFlash2 session store restores a prefix that
+            already contains every media item of this request, the uncached
+            tail is pure text at offset + the cached rope delta, and this never
+            runs (M-RoPE delta caching)."""
+            features = self.model.get_input_embeddings(input_ids, pixel_values, mask=attention_mask, **extra)
+            embeds = getattr(features, "inputs_embeds", features)
+            if glm:
+                # 1-D positions from the cache offset: nothing else to plan.
+                mx.eval(embeds)
+                return {"embeds": embeds, "positions": None, "rope_delta": 0}
+            positions = getattr(language_model, "_position_ids", None)
+            rope_delta = getattr(language_model, "_rope_deltas", None)
+            # The VLM's next forward must not reuse this request's rope state.
+            language_model._position_ids = None
+            language_model._rope_deltas = None
+            if positions is None or rope_delta is None or positions.shape[-1] != input_ids.shape[-1]:
+                raise ValueError("DFlash2 media plan incomplete: no full-prompt M-RoPE positions")
+            mx.eval(embeds, positions, rope_delta)
+            return {"embeds": embeds, "positions": positions, "rope_delta": int(rope_delta.reshape(-1)[0].item())}
+
+        tokens = [int(t) for t in input_ids[0].tolist()]
+        media_ids = {
+            int(v) for v in (getattr(config, "image_token_index", None), getattr(config, "video_token_index", None))
+            if v is not None
+        }
+        if glm:
+            media_ids |= {
+                int(v) for v in (getattr(config, "image_token_id", None), getattr(config, "video_token_id", None))
+                if v is not None
+            }
+            video_start = getattr(config, "video_start_token_id", None)
+            if (
+                extra.get("pixel_values_videos") is not None
+                or extra.get("video_grid_thw") is not None
+                or (video_start is not None and int(video_start) in tokens)
+            ):
+                logger.info(
+                    "DFlash2 media request on %s: GLM video in the conversation; native VLM path",
+                    self.model_name,
+                )
+                return None
+        first_media = next((i for i, t in enumerate(tokens) if t in media_ids), len(tokens))
+        # Session-store salt: the processed pixels (placeholder ids are the
+        # same for every image, so the token ids cannot tell images apart).
+        digest = hashlib.sha256()
+        digest.update(np.asarray(pixel_values.astype(mx.float32) if pixel_values.dtype == mx.bfloat16 else pixel_values).tobytes())
+        for key in ("image_grid_thw", "video_grid_thw"):
+            if extra.get(key) is not None:
+                digest.update(np.asarray(extra[key]).tobytes())
+        # Per-item, position-aware media identity for the DFlash2 session key
+        # (store + lookup only; the model always sees the real ids): each media
+        # item's placeholder run is replaced by one pseudo id derived from THAT
+        # item's processed pixels and grid. Plain token-prefix matching then
+        # reuses a conversation through identical earlier images and diverges
+        # exactly at a new one. Fails closed to the whole-request salt when the
+        # placeholder runs and grid rows cannot be paired.
+        grid = extra.get("image_grid_thw")
+        if grid is None:
+            grid = extra.get("video_grid_thw")
+        try:
+            key_tokens = _dflash2_media_key_tokens(tokens, media_ids, grid, pixel_values)
+        except Exception:
+            logger.debug("DFlash2 per-item media key unavailable; whole-request salt", exc_info=True)
+            key_tokens = None
+        media_end = max((i + 1 for i, t in enumerate(tokens) if t in media_ids), default=0)
+        return {
+            "prompt_tokens": tokens,
+            "key_tokens": key_tokens,
+            "materialize": materialize,
+            "embeds": None,
+            "positions": None,
+            "rope_delta": None,
+            "media_end": media_end,
+            "first_media_index": first_media,
+            "salt": digest.hexdigest()[:32],
+        }
+
+    def _dspark_eligible(self, images, videos, audio, temperature, kwargs) -> bool:
+        """Requests whose sampling the DSpark loop reproduces exactly: text, or images (the caller then needs a
+        ``_dspark_media_plan``). Video and audio keep the native VLM path."""
+        if getattr(self, "_dspark", None) is None or videos or audio:
+            return False
+        from ..dspark.minicpm_target import verify_mode
+        from ..metal.row_exact_qmv import row_exact_qmv_requested
+
+        if verify_mode() == "exact" and not row_exact_qmv_requested():
+            # Verify rows would not be bit-equal to decode steps.
+            logger.info("DSpark skipped: row-exact verify is off (VMLX_ROW_EXACT_VERIFY_QMV); AR decode")
+            return False
+        unsupported = []
+        if kwargs.get("logit_bias"):
+            unsupported.append("logit_bias")
+        for name in ("repetition_penalty",):
+            if kwargs.get(name) not in (None, 1.0):
+                unsupported.append(name)
+        for name in ("frequency_penalty", "presence_penalty"):
+            if kwargs.get(name):
+                unsupported.append(name)
+        for name in ("stop", "thinking_budget", "prompt_cache_state"):
+            if kwargs.get(name):
+                unsupported.append(name)
+        if unsupported:
+            logger.info("DSpark skipped for this request (unsupported: %s); AR decode", ",".join(unsupported))
+            return False
+        return True
+
+    def _dspark_media_plan(self, formatted_prompt: str, images: list, kwargs: dict,
+                           videos: list | None = None) -> dict | None:
+        """Image / native-video request inputs for the DSpark lane (MiniCPM-V-4.7), or None (native VLM path).
+
+        The same mlx-vlm ``prepare_inputs`` call as the native route (``stream_generate``: images, native video clips,
+        ``add_special_tokens=True``); then, deferred in ``materialize``, the model's own ``get_input_embeddings`` --
+        vision tower on image crops and video frames, merged features, canvas M-RoPE positions and the rope delta of
+        the text after the prompt (the DFlash2 media plan's shape). Known NaViT strips use per-crop processed-pixel
+        identity; appending media preserves earlier crops' prefix keys. Unmatched layouts retain the whole-request
+        salt. VMLX_DSPARK_MEDIA=0 keeps media requests on the native path (A/B).
+        """
+        import hashlib
+
+        import mlx.core as mx
+        import numpy as np
+
+        if os.environ.get("VMLX_DSPARK_MEDIA", "1").strip().lower() in {"0", "false", "off", "no"}:
+            return None
+        language_model = getattr(self.model, "language_model", None)
+        if (language_model is None or not hasattr(language_model, "get_rope_index")
+                or not hasattr(self.model, "get_input_embeddings")):
+            return None
+        if images:
+            self._guard_simple_image_prefill(
+                formatted_prompt, True, images=images, resize_shape=kwargs.get("resize_shape"),
+            )
+        from mlx_vlm.utils import prepare_inputs
+
+        try:
+            from mlx_vlm.generate import normalize_resize_shape
+        except ImportError:  # older mlx-vlm
+            normalize_resize_shape = lambda shape: shape  # noqa: E731
+        config = self.model.config
+        inputs = prepare_inputs(
+            self.processor,
+            images=images or None,
+            videos=videos or None,
+            prompts=formatted_prompt,
+            image_token_index=getattr(config, "image_token_index", None),
+            resize_shape=normalize_resize_shape(kwargs.get("resize_shape")),
+            add_special_tokens=True,
+        )
+        input_ids = inputs["input_ids"]
+        pixel_values = inputs.get("pixel_values")
+        attention_mask = inputs.get("attention_mask")
+        extra = {k: v for k, v in inputs.items() if k not in ("input_ids", "pixel_values", "attention_mask")}
+
+        def materialize() -> dict:
+            features = self.model.get_input_embeddings(input_ids, pixel_values, mask=attention_mask, **extra)
+            embeds = getattr(features, "inputs_embeds", features)
+            positions = getattr(language_model, "_position_ids", None)
+            rope_delta = getattr(language_model, "_rope_deltas", None)
+            # The VLM's next forward must not reuse this request's rope state.
+            language_model._position_ids = None
+            language_model._rope_deltas = None
+            if positions is None or rope_delta is None or positions.shape[-1] != input_ids.shape[-1]:
+                raise ValueError("DSpark media plan incomplete: no full-prompt M-RoPE positions")
+            mx.eval(embeds, positions, rope_delta)
+            return {"embeds": embeds, "positions": positions, "rope_delta": int(rope_delta.reshape(-1)[0].item())}
+
+        tokens = [int(t) for t in input_ids[0].tolist()]
+        media_ids = {
+            int(v) for v in (getattr(config, name, None) for name in (
+                "image_token_index", "video_token_index", "image_token_id", "video_token_id"))
+            if v is not None
+        }
+        media_end = max((i + 1 for i, t in enumerate(tokens) if t in media_ids), default=0)
+        if not media_end:
+            return None
+        try:
+            key_tokens = _dspark_crop_media_keys(tokens, config, pixel_values, extra)
+        except (TypeError, ValueError, AttributeError, OverflowError):
+            logger.debug("DSpark crop identity unavailable; whole-request identity", exc_info=True)
+            key_tokens = None
+        salt = None
+        if key_tokens is None:
+            digest = hashlib.sha256()
+            for key, value in (("pixel_values", pixel_values),) + tuple(
+                    (k, extra.get(k)) for k in ("pixel_values_videos", "target_sizes", "target_sizes_videos",
+                                                "image_grid_thw", "video_grid_thw")):
+                if value is None:
+                    continue
+                arr = np.asarray(value.astype(mx.float32) if getattr(value, "dtype", None) == mx.bfloat16 else value)
+                digest.update(key.encode() + str(arr.shape).encode() + arr.tobytes())
+            salt = digest.hexdigest()[:32]
+            key_tokens = _dspark_salted_media_keys(tokens, media_ids, salt)
+        logger.info("DSpark media prefix identity: %s", "per-crop" if salt is None else "whole-request fallback")
+        return {
+            "prompt_tokens": tokens,
+            "key_tokens": key_tokens,
+            "materialize": materialize,
+            "media_end": media_end,
+            "first_media_index": next(i for i, t in enumerate(tokens) if t in media_ids),
+            "salt": salt,
+            "image_count": len(images or []),
+            "video_count": len(videos or []),
+        }
+
+    def _stream_dspark(self, formatted_prompt: str, max_tokens: int, temperature: float, kwargs: dict,
+                       media: dict | None = None):
+        """DSpark generation for a text or image prompt, streamed as MLLMOutput chunks.
+
+        Tokenization, prefill chunking and stop tokens follow the served
+        mlx-vlm AR path, so greedy output equals AR decoding token for token.
+        ``media`` (``_dspark_media_plan``): the processor's prompt ids, session key ids and the deferred vision plan.
+        """
+        import time as _time
+
+        from mlx_vlm.tokenizer_utils import make_streaming_detokenizer
+
+        from ..dspark import DSparkStats, iter_dspark
+        from ..dspark.generate import ARFallback
+        from ..utils.prefill_step import prefill_step_size
+
+        runtime = self._dspark
+        tokenizer = self.processor.tokenizer if hasattr(self.processor, "tokenizer") else self.processor
+        if media is not None:
+            prompt_ids = [int(t) for t in media["prompt_tokens"]]
+            key_ids = [int(t) for t in media["key_tokens"]]
+        else:
+            prompt_ids = list(tokenizer(formatted_prompt, add_special_tokens=True)["input_ids"])
+            key_ids = prompt_ids
+        criteria = getattr(tokenizer, "stopping_criteria", None)
+        eos = set(getattr(criteria, "eos_token_ids", None) or [])
+        if not eos and getattr(tokenizer, "eos_token_id", None) is not None:
+            eos = {int(tokenizer.eos_token_id)}
+        sampler = None
+        if temperature and float(temperature) > 0:
+            from ..sampling import make_sampler
+
+            sampler = make_sampler(
+                temp=float(temperature),
+                top_p=float(kwargs.get("top_p", 1.0) or 0.0),
+                min_p=float(kwargs.get("min_p", 0.0) or 0.0),
+                top_k=int(kwargs.get("top_k", 0) or 0),
+            )
+        detok = make_streaming_detokenizer(self.processor)
+        detok.reset()
+        stats = DSparkStats()
+        step = int(kwargs.get("prefill_step_size") or prefill_step_size())
+        produced = 0
+        finish = None
+        started = _time.perf_counter()
+        # Multi-turn reuse (dspark/session.py): resume the longest stored prefix of this prompt (RAM, then SSD),
+        # snapshot at the system end / before the assistant tag, store the end-of-turn state.
+        from mlx_lm.models.cache import KVCache
+
+        from ..dspark import session as _dsession
+
+        target, drafter = runtime["target"], runtime["drafter"]
+        model_key = (id(target), id(drafter))
+
+        def _make_draft():
+            return [KVCache() for _ in drafter.layers]
+
+        resume = _dsession.lookup(model_key, key_ids, tokenizer, target.make_cache, _make_draft)
+        cache_len = int(resume["cache_len"]) if resume is not None else 0
+        if resume is not None and resume.get("load_s") is not None:
+            # SSD restore receipt (the SSD-only RAM policy reads every resumed turn from SSD): time, bytes, rate.
+            _restored = 0
+            for _c in list(resume.get("target_cache") or []) + list(resume.get("draft_cache") or []):
+                _st = _c.state if isinstance(_c.state, (list, tuple)) else [_c.state]
+                _restored += sum(int(getattr(_a, "nbytes", 0) or 0) for _a in _st if _a is not None)
+            _ls = float(resume["load_s"])
+            logger.info("DSpark SSD restore: %d tokens, %.0f MB in %.1f ms (%.2f GB/s)", cache_len, _restored / 1e6,
+                        1000 * _ls, _restored / max(_ls, 1e-9) / 1e9)
+        # Media: a restored prefix holding every media item of this request leaves a text tail at offset + its cached
+        # rope delta (vision tower skipped); otherwise run the plan (vision tower, merged embeddings, positions).
+        vision_s = 0.0
+        if media is None:
+            target.set_media()
+        else:
+            cached_delta = resume.get("rope_delta") if resume is not None else None
+            if cached_delta is not None and cache_len >= int(media["media_end"]):
+                target.set_media(rope_delta=int(cached_delta))
+                logger.info("DSpark media: every media token is inside the restored %d-token prefix; cached rope "
+                            "delta %d, vision tower skipped", cache_len, int(cached_delta))
+            else:
+                _vt = _time.perf_counter()
+                planned = media["materialize"]()
+                vision_s = _time.perf_counter() - _vt
+                target.set_media(planned["embeds"], planned["positions"], planned["rope_delta"])
+        active_delta = int(target.rope_delta)
+
+        def _entry_delta(cut: int):
+            # Valid for a later request only when the entry holds all of its own request's media.
+            if media is None:
+                return 0
+            return active_delta if int(cut) >= int(media["media_end"]) else None
+        cuts = _dsession.snapshot_cuts(tokenizer, prompt_ids, cache_len)
+        snapshots = []
+        dchunks = _dsession.ChunkWriter(_dsession.ssd_parent(resume))
+
+        def _on_snapshot(cut, cache, draft_caches):
+            kind = next((k for k, c in cuts if c == cut), "boundary")
+            t_cache, d_cache = _dsession.clone(cache, target.make_cache), _dsession.clone(draft_caches, _make_draft)
+            if kind == "chunk":
+                # stored now (not held to the end of the answer), chained on the previous chunk (dspark.session)
+                if t_cache is not None and d_cache is not None:
+                    dchunks.put({"kind": "chunk", "tokens": key_ids[:cut], "cache_len": int(cut), "target_cache": t_cache,
+                                 "draft_cache": d_cache, "model_key": model_key, "rope_delta": _entry_delta(cut)})
+                return
+            snapshots.append((kind, cut, t_cache, d_cache))
+
+        session = {}
+        ar_policy = (None if os.environ.get("VMLX_DSPARK_AR_FALLBACK", "1").strip().lower() in
+                     {"0", "false", "off", "no"} else ARFallback())
+        logger.info("DSpark %s chat active for %s (prompt %d tokens, %d restored from %s)",
+                    "media (%d image(s), %d video(s))" % (int(media.get("image_count") or 0),
+                                                         int(media.get("video_count") or 0))
+                    if media is not None else "text",
+                    self.model_name, len(prompt_ids), cache_len, (resume or {}).get("source", "none"))
+        with _MaybeVLMStream(), _dspark_media_cleared(target):
+            for chunk in iter_dspark(
+                target, drafter, prompt_ids, int(max_tokens), eos,
+                prefill_step=step, sampler=sampler, max_draft=runtime["max_draft"],
+                cost_per_row=runtime["cost_per_row"], stats=stats,
+                # AR steps when drafting measures slower (low-acceptance text); VMLX_DSPARK_AR_FALLBACK=0 = A/B off.
+                ar_fallback=ar_policy,
+                resume=resume, snapshot_cuts=[c for _, c in cuts], on_snapshot=_on_snapshot, session=session,
+            ):
+                for token in chunk:
+                    if token in eos:
+                        # Counted like the AR path, whose usage includes the stop token.
+                        finish = "stop"
+                        produced += 1
+                        break
+                    detok.add_token(token)
+                    produced += 1
+                if finish is None and produced >= int(max_tokens):
+                    finish = "length"
+                if finish is not None:
+                    break
+                yield MLLMOutput(text=detok.last_segment, prompt_tokens=len(prompt_ids), completion_tokens=produced)
+        detok.finalize()
+        elapsed = _time.perf_counter() - started
+        # Store this turn's reusable states (snapshots, then the end-of-turn entry: exactly the tokens the caches
+        # hold). The last SSD receipt settles before the next lookup (SimpleEngine terminal persistence).
+        receipt = None
+        parent = _dsession.ssd_parent(resume)
+        for kind, cut, t_cache, d_cache in snapshots:
+            if t_cache is not None and d_cache is not None:
+                parent = dchunks.parent_for(cut, parent)
+                receipt = _dsession.store({"kind": kind, "tokens": key_ids[:cut], "cache_len": int(cut),
+                                           "target_cache": t_cache, "draft_cache": d_cache, "model_key": model_key,
+                                           "rope_delta": _entry_delta(cut)},
+                                          parent=parent)
+                parent = _dsession.chain_after(parent, receipt)   # a full write becomes the next entries' parent
+        forwarded = list(session.get("forwarded") or [])
+        if _dsession.reuse_enabled() and len(forwarded) > cache_len and session.get("target_cache") is not None:
+            # Session keys: the prompt's key ids (media positions carry the media identity) + the generated tokens.
+            turn_tokens = key_ids + forwarded[len(prompt_ids):] if len(forwarded) >= len(prompt_ids) else forwarded
+            receipt = _dsession.store({"kind": "turn", "tokens": turn_tokens, "cache_len": len(forwarded),
+                                       "target_cache": session["target_cache"],
+                                       "draft_cache": drafter.context_caches(), "model_key": model_key,
+                                       "rope_delta": _entry_delta(len(forwarded))},
+                                      parent=dchunks.parent_for(len(forwarded), parent))
+        summary = stats.as_dict()
+        if ar_policy is not None:
+            logger.info("DSpark adaptive measured costs: %s ar_tokens=%d rounds=%d",
+                        ar_policy.cost_snapshot(), stats.ar_tokens, stats.rounds)
+        # Same keys as the DFlash2 lane's spec_stats (the Perf panel's Last-request card reads kind / lane / cycles /
+        # emitted_per_cycle / acceptance / ar_tokens / widths), plus the DSpark-specific counters.
+        spec = {"kind": "dspark", "lane": "minicpm" + ("-media" if media is not None else ""), **summary,
+                "cycles": summary["rounds"], "emitted_per_cycle": summary["tokens_per_round"],
+                "widths": {str(k): v for k, v in summary["widths"].items()},
+                "generation_tps": summary.get("decode_tok_s")}
+        logger.info(
+            "DSpark generation stats: prompt_tokens=%d output_tokens=%d rounds=%d tokens_per_round=%.3f "
+            "acceptance=%.1f%% decode_tps=%s widths=%s total_s=%.2f finish=%s",
+            len(prompt_ids), produced, stats.rounds, stats.tokens_per_round, 100.0 * stats.acceptance,
+            spec.get("decode_tok_s"), spec.get("widths"), elapsed, finish or "length",
+        )
+        yield MLLMOutput(
+            text=detok.last_segment, finish_reason=finish or "length", prompt_tokens=len(prompt_ids),
+            completion_tokens=produced, spec_stats=spec,
+            cached_tokens=cache_len, cache_detail=(resume or {}).get("source", ""),
+            # The footer's pp/s receipt (same contract as the DFlash2 lane / batched engine).
+            prefill_usage={"tokens": int(len(prompt_ids) - cache_len), "seconds": float(stats.prefill_s) + vision_s,
+                           "scope": "model_prefill_and_prompt_state", "path": "dspark"},
+            persistence_future=receipt,
+        )
+
+    def _mimo_dflash_draft(self):
+        """(MiMoDFlashDrafter, mask_vec) when this is a MiMo-V2.6 target on a server with its bundled DFlash drafter."""
+        if not getattr(self.model, "_mimo_v26_runtime", False):
+            return None
+        from ..speculative import get_draft_model, is_dflash2_enabled
+
+        if not is_dflash2_enabled():
+            return None
+        draft = get_draft_model()
+        return draft if isinstance(draft, tuple) and len(draft) == 2 else None
+
+    def _stream_mimo_dflash(self, formatted_prompt: str, max_tokens: int, temperature: float, kwargs: dict, *,
+                            draft, images: list, videos: list, audio: list):
+        """MiMo-V2.6 DFlash lane for text, image, video and audio requests, streamed as MLLMOutput chunks.
+
+        The generic routes failed every MiMo media request on this lane (2026-10-15 baseline): images reached the
+        native mlx-vlm stream (no ``stopping_criteria`` on MiMo's tokenizer), videos were split into image frames
+        against MiMo's video placeholder (count mismatch), audio arrived as decoded arrays (the MiMo processor takes
+        files). Here MiMo's own processor builds the prompt ids and media rows exactly as the batched lane does
+        (videos by local path, sampled by the processor at 1 fps; audio by path), the omni model merges the vision /
+        audio features (``get_input_embeddings``) and the lane prefills those embeddings, then drafts from the
+        target's taps as for text. Media positions carry salted session-key ids (one digest per item: its pixel or
+        audio-code rows), so a follow-up turn about the same media resumes past it and different media never match.
+        Multi-turn reuse: vmlx_engine.mimo_session (RAM + the managed SSD pool, publish-early end-of-turn receipt).
+        """
+        import hashlib
+        import time as _time
+
+        import mlx.core as mx
+        from mlx_lm.tokenizer_utils import TokenizerWrapper
+
+        from .. import mimo_session as _ms
+        from ..mimo_dflash import LaneStats, _lane_for, mimo_rounds
+        from ..utils.prefill_step import prefill_step_size
+
+        # draft None: the drafter-less AR lane (bundled DFlash drafter switched off). MiMo has no other route that
+        # serves it: the generic mlx-vlm path failed every request ("'TokenizerWrapper' object is not callable").
+        drafter, mask_vec = draft if draft is not None else (None, None)
+        if drafter is None and _ms.SSD is None and not getattr(self, "_mimo_ar_ssd_tried", False):
+            # the drafter loader attaches the speculative lane's tier; the AR lane attaches its own on first use
+            self._mimo_ar_ssd_tried = True
+            _path = Path(str(self.model_name)).expanduser()
+            if _path.is_dir():
+                _ms.attach_ssd(str(_path), None)
+        lane = _lane_for(self.model, drafter)
+        target = lane["target"]
+        tokenizer = self.processor.tokenizer if hasattr(self.processor, "tokenizer") else self.processor
+        has_media = bool(images or videos or audio)
+        inputs = self.processor(formatted_prompt, images=list(images) or None, videos=list(videos) or None,
+                                audio=list(audio) or None)
+        prompt_ids = [int(t) for t in np.array(inputs["input_ids"])[0].tolist()]
+        items = list(inputs.get("_vmlx_mimo26_media_items") or [])
+        key_ids, media_end = list(prompt_ids), 0
+        for item in items:
+            rows = (inputs["audio_codes"][item["code_start"]:item["code_end"]] if item["modality"] == "audio"
+                    else inputs["pixel_values"][item["pixel_start"]:item["pixel_end"]])
+            digest = hashlib.sha256(item["modality"].encode())
+            digest.update(np.array(rows.astype(mx.float32)).tobytes())
+            stream = hashlib.shake_256(b"mimo-media|" + digest.digest()).digest(4 * (item["token_end"] - item["token_start"]))
+            for j, i in enumerate(range(item["token_start"], item["token_end"])):
+                key_ids[i] = 0x80000000 | (int.from_bytes(stream[4 * j:4 * j + 4], "big") & 0x3FFFFFFF)
+            media_end = max(media_end, int(item["token_end"]))
+        eos = {151643, 151645, 151672}
+        gen_eos = (self.config.get("eos_token_id") if isinstance(self.config, dict) else getattr(self.config, "eos_token_id", None))
+        eos |= set(gen_eos if isinstance(gen_eos, list) else ([gen_eos] if gen_eos is not None else []))
+        model_key = (id(target), id(drafter))
+        resume = _ms.lookup(model_key, key_ids, tokenizer, target.model.make_cache, eos, need_draft=drafter is not None)
+        cache_len = int(resume["cache_len"]) if resume is not None else 0
+        if resume is not None and resume.get("load_s") is not None:
+            _restored = 0
+            for _c in list(resume.get("target_cache") or []):
+                _st = _c.state if isinstance(_c.state, (list, tuple)) else [_c.state]
+                _restored += sum(int(getattr(_a, "nbytes", 0) or 0) for _a in _st if _a is not None)
+            _restored += int(getattr(resume.get("draft_context"), "nbytes", 0) or 0)
+            _ls = float(resume["load_s"])
+            logger.info("MiMo DFlash SSD restore: %d tokens, %.0f MB in %.1f ms (%.2f GB/s)", cache_len, _restored / 1e6,
+                        1000 * _ls, _restored / max(_ls, 1e-9) / 1e9)
+        # Media features only when this request prefills a media position (a restored prefix holding every media
+        # item skips the vision / audio towers).
+        embeds, media_s = None, 0.0
+        if has_media and media_end > cache_len:
+            _t = _time.perf_counter()
+            embeds = self.model.get_input_embeddings(
+                inputs["input_ids"], pixel_values=inputs.get("pixel_values"), image_grid_thw=inputs.get("image_grid_thw"),
+                audio_codes=inputs.get("audio_codes"),
+            ).inputs_embeds
+            mx.eval(embeds)
+            media_s = _time.perf_counter() - _t
+        elif has_media:
+            logger.info("MiMo DFlash media: every media token is inside the restored %d-token prefix; towers skipped",
+                        cache_len)
+        cuts = _ms.snapshot_cuts(tokenizer, prompt_ids, cache_len)
+        snapshots = []
+        chunks = _ms.ChunkWriter(_ms.ssd_parent(resume))
+
+        def _on_snapshot(cut, cache, taps):
+            kind = next((k for k, c in cuts if c == cut), "boundary")
+            t_cache = _ms.clone(cache, target.model.make_cache)
+            if kind == "chunk":
+                # stored now (not held to the end of the answer), chained to the previous chunk (mimo_session)
+                if t_cache is not None:
+                    chunks.put({"kind": "chunk", "tokens": key_ids[:cut], "cache_len": int(cut),
+                                "target_cache": t_cache, "draft_context": taps, "model_key": model_key})
+                return
+            snapshots.append((kind, cut, t_cache, taps))
+
+        controls = None
+        min_p = float(kwargs.get("min_p", 0.0) or 0.0)
+        rep = kwargs.get("repetition_penalty")
+        rep = 1.0 if rep is None else float(rep)
+        freq = float(kwargs.get("frequency_penalty", 0.0) or 0.0)
+        pres = float(kwargs.get("presence_penalty", 0.0) or 0.0)
+        bias = kwargs.get("logit_bias")
+        if min_p or bias or rep != 1.0 or freq or pres:
+            from ..dflash2_sampling import DFlash2SamplingControls
+
+            controls = DFlash2SamplingControls(min_p=min_p, logit_bias=bias, repetition_penalty=rep,
+                                               frequency_penalty=freq, presence_penalty=pres)
+        tw = tokenizer if isinstance(tokenizer, TokenizerWrapper) else TokenizerWrapper(tokenizer)
+        detok = tw.detokenizer
+        detok.reset()
+        stop = kwargs.get("stop")
+        if stop:
+            from ..dflash2_runtime import _StopDetokenizer
+
+            detok = _StopDetokenizer(detok, [stop] if isinstance(stop, str) else list(stop))
+        st = LaneStats()
+        session: dict = {}
+        produced, emitted, finish = 0, [], None
+        started = _time.perf_counter()
+        lane_label = "MiMo DFlash" if drafter is not None else "MiMo AR (no drafter)"
+        logger.info("%s %s chat active for %s (prompt %d tokens, %d restored from %s)", lane_label,
+                    "media (%d image(s), %d video(s), %d audio)" % (len(images), len(videos), len(audio))
+                    if has_media else "text", self.model_name, len(prompt_ids), cache_len,
+                    (resume or {}).get("source", "none"))
+        drafted = []
+        for new, n_drafted in mimo_rounds(
+            target, drafter, mask_vec, prompt_ids, int(max_tokens), eos, float(temperature),
+            float(kwargs.get("top_p", 1.0) or 1.0), int(kwargs.get("top_k", 0) or 0),
+            prefill_step=int(kwargs.get("prefill_step_size") or prefill_step_size()), stats=st,
+            adaptive=os.environ.get("VMLX_MIMO_DFLASH_ADAPTIVE", "1").strip().lower() not in {"0", "false", "off", "no"},
+            controls=controls, resume=resume, snapshot_cuts=[c for _, c in cuts], on_snapshot=_on_snapshot,
+            session=session, embeds=embeds,
+        ):
+            drafted.append(int(n_drafted))
+            for token in new:
+                emitted.append(int(token))
+                produced += 1
+                if token in eos:
+                    finish = "stop"
+                    break
+                detok.add_token(token)
+            if finish is None and getattr(detok, "matched", False):
+                finish = "stop"
+            if finish is None and produced >= int(max_tokens):
+                finish = "length"
+            if finish is not None:
+                break
+            yield MLLMOutput(text=detok.last_segment, prompt_tokens=len(prompt_ids), completion_tokens=produced)
+        detok.finalize()
+        elapsed = _time.perf_counter() - started
+        # Store this turn's reusable states: snapshots, then the end-of-turn entry (key = the prompt's key ids + every
+        # emitted token; the cache holds all but the last, which the next prompt re-forwards).
+        receipt = None
+        parent = _ms.ssd_parent(resume)
+        for kind, cut, t_cache, taps in snapshots:
+            if t_cache is not None:
+                parent = chunks.parent_for(cut, parent)
+                receipt = _ms.store({"kind": kind, "tokens": key_ids[:cut], "cache_len": int(cut),
+                                     "target_cache": t_cache, "draft_context": taps, "model_key": model_key},
+                                    parent=parent)
+                parent = _ms.chain_after(parent, receipt)   # a full write becomes the next entries' parent
+        forwarded = int(session.get("forwarded") or 0)
+        # The cache holds every emitted token but the last; when a pipelined AR step already forwarded the final EOS
+        # (st.eos_forwarded) it holds that too -- either way the entry's key is the prompt + every emitted token.
+        expect = len(prompt_ids) + len(emitted) - (0 if st.eos_forwarded else 1)
+        if (_ms.reuse_enabled() and session.get("target_cache") is not None and forwarded > cache_len
+                and forwarded == expect):
+            receipt = _ms.store({"kind": "turn", "tokens": key_ids + emitted, "cache_len": forwarded,
+                                 "target_cache": session["target_cache"], "draft_context": session["taps"],
+                                 "model_key": model_key}, parent=chunks.parent_for(forwarded, parent))
+        spec_rounds = [d for d in drafted if d > 0]
+        accepted = list(st.accepted)
+        _pol = (st.policy or {}).get("_policy")
+        if _pol is not None:
+            logger.info("MiMo DFlash adaptive costs: t_ar_ms=%s t_round_ms=%s p=%s ar_outliers_skipped=%s",
+                        None if _pol.t_ar is None else round(1000 * _pol.t_ar, 2),
+                        {b: round(1000 * t, 2) for b, t in sorted(_pol.t_round.items())},
+                        [round(_pol.p(i), 3) for i in range(1, _pol.bmax)],
+                        getattr(_pol, "ar_outliers_skipped", 0))
+        tpr = (sum(accepted) + len(accepted)) / max(len(accepted), 1)
+        spec = {"kind": "dflash2", "lane": "mimo" + ("-media" if has_media else ""), "cycles": len(accepted),
+                "emitted_per_cycle": round(tpr, 3),
+                "acceptance": round(sum(accepted) / max(sum(spec_rounds), 1), 4) if spec_rounds else 0.0,
+                "ar_tokens": int(st.ar_steps),
+                "widths": {str(w + 1): spec_rounds.count(w) for w in sorted(set(spec_rounds))},
+                "generation_tps": round(produced / max(elapsed - st.prefill_s, 1e-9), 2)}
+        if getattr(st, "cut_drafts", 0):
+            spec["cut_drafts"] = int(st.cut_drafts)              # VMLX_MIMO_DFLASH_DRAFT_PMIN confidence cut
+        logger.info("%s generation stats: prompt_tokens=%d cached=%d output_tokens=%d rounds=%d "
+                    "tokens_per_round=%.3f acceptance=%.1f%% ar_tokens=%d decode_tps=%.2f prefill_s=%.3f media_s=%.3f "
+                    "total_s=%.2f finish=%s", lane_label, len(prompt_ids), cache_len, produced, len(accepted), tpr,
+                    100.0 * spec["acceptance"], st.ar_steps, spec["generation_tps"], st.prefill_s, media_s, elapsed,
+                    finish or "length")
+        yield MLLMOutput(
+            text=detok.last_segment, finish_reason=finish or "length", prompt_tokens=len(prompt_ids),
+            # the drafter-less lane reports no speculative decoding (Perf panel: none)
+            completion_tokens=produced, spec_stats=spec if drafter is not None else None, cached_tokens=cache_len,
+            cache_detail=(resume or {}).get("source", ""),
+            prefill_usage={"tokens": int(len(prompt_ids) - cache_len), "seconds": float(st.prefill_s) + media_s,
+                           "scope": "model_prefill_and_prompt_state",
+                           "path": "mimo_dflash" if drafter is not None else "mimo_ar"},
+            persistence_future=receipt,
+        )
+
+    def stream_chat(
+        self,
+        messages: list[dict],
+        max_tokens: int = 256,
+        temperature: float = 0.7,
+        **kwargs,
+    ) -> Iterator[MLLMOutput]:
+        """
+        Stream chat with OpenAI-compatible message format.
+
+        Supports multimodal content in messages:
+        - {"type": "text", "text": "..."}
+        - {"type": "image_url", "image_url": {"url": "..."}}
+        - {"type": "image_url", "image_url": {"url": "data:image/...;base64,..."}}
+
+        Args:
+            messages: List of chat messages (OpenAI format)
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            **kwargs: Additional parameters
+
+        Yields:
+            MLLMOutput with incremental text chunks
+        """
+        if not self._loaded:
+            self.load()
+
+        try:
+            from mlx_vlm import stream_generate
+        except ImportError:
+            # Fallback to non-streaming if stream_generate not available
+            output = self.chat(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                **kwargs,
+            )
+            yield output
+            return
+
+        # Extract text, images, videos, and audio from messages
+        chat_messages, all_image_urls, videos, audio_inputs = self._extract_multimodal_messages(messages)
+        if getattr(self.model, "_mimo_v26_runtime", False):
+            chat_messages = messages
+        chat_messages = self._normalize_text_only_messages_for_processor(
+            chat_messages,
+            has_media=bool(all_image_urls or videos or audio_inputs),
+        )
+
+        # Process images
+        all_images = []
+        all_audio = []
+        prepared_images = self._prepare_images(all_image_urls) if all_image_urls else []
+        all_images.extend(prepared_images)
+        video_frame_lists: list[list] = []
+        if audio_inputs:
+            all_audio.extend(self._prepare_audio(audio_inputs))
+
+        # Process videos
+        from ..video_controls import pop_video_control_kwargs
+
+        _video_controls = pop_video_control_kwargs(kwargs)
+        video_fps = _video_controls.effective_fps() if _video_controls else DEFAULT_FPS
+        video_max_frames = _video_controls.effective_max_frames() if _video_controls else MAX_FRAMES
+        video_frame_counts: list[int] = []
+        for video_path in videos:
+            frames = self._prepare_video(
+                video_path, fps=video_fps, max_frames=video_max_frames, controls=_video_controls,
+                frame_cap=_simple_video_frame_cap(kwargs, len(videos), len(prepared_images)),
+            )
+            all_images.extend(frames)
+            video_frame_counts.append(len(frames))
+            video_frame_lists.append(list(frames))
+
+        model_type = (
+            str(self.config.get("model_type", "") or "").lower()
+            if isinstance(self.config, dict)
+            else str(getattr(self.config, "model_type", "") or "").lower()
+        )
+        if model_type in _VIDEO_FRAME_FALLBACK_MODEL_TYPES and video_frame_counts:
+            ordered_media = _order_images_and_video_frames(chat_messages, prepared_images, video_frame_lists)
+            if ordered_media is not None:
+                all_images = ordered_media
+            else:
+                raise ValueError("Cannot align media items with prompt order; check image and video inputs")
+            chat_messages = _expand_video_placeholders_to_image_frames(
+                chat_messages,
+                video_frame_counts,
+            )
+        native_video_clips = None
+        if model_type in _NATIVE_VIDEO_FRAME_MODEL_TYPES and video_frame_lists:
+            # The video placeholder stays in the prompt; frames go to the
+            # processor's videos= path, images keep their own list.
+            native_video_clips = [_video_frames_as_native_clip(f) for f in video_frame_lists]
+            all_images = list(prepared_images)
+
+        # ADVISORY only (Eric's rule: estimates may advise, never refuse). Video
+        # frames are already planned to the per-video cap in _prepare_video; a
+        # request that still carries many images is attempted -- the allocator
+        # fails loudly if it truly does not fit.
+        _max_images = kwargs.get("max_images_per_request", 20)
+        if len(all_images) > _max_images:
+            logger.warning(
+                "Request carries %d images (incl. video frames), above the advisory "
+                "max_images_per_request=%d; attempting it.", len(all_images), _max_images,
+            )
+
+        # Apply chat template
+        template_tools = kwargs.pop("tools", None)
+        enable_thinking = kwargs.pop("enable_thinking", None)
+        reasoning_effort = kwargs.pop("reasoning_effort", None)
+        extra_template = kwargs.pop("chat_template_kwargs", None)
+        formatted_prompt = self._apply_chat_template(
+            chat_messages,
+            enable_thinking,
+            tools=template_tools,
+            reasoning_effort=reasoning_effort,
+            **({"chat_template_kwargs": extra_template} if extra_template else {}),
+        )
+
+        # Post-template image count guard: VLM chat templates may not expand
+        # image placeholders for assistant-role messages. Trim all_images to
+        # match actual placeholder token count to prevent crashes in generate().
+        if all_images and self.config:
+            _img_token_id = getattr(self.config, "image_token_index", None)
+            if _img_token_id is not None:
+                _tok = (
+                    self.processor.tokenizer
+                    if hasattr(self.processor, "tokenizer")
+                    else self.processor
+                )
+                try:
+                    _token_ids = _tok.encode(formatted_prompt)
+                    _slot_count = _token_ids.count(_img_token_id)
+                    if _slot_count != len(all_images):
+                        logger.warning(
+                            f"Image count mismatch: {len(all_images)} images but "
+                            f"{_slot_count} slots in prompt (likely assistant-role "
+                            f"images not supported by template). Trimming to {_slot_count}."
+                        )
+                        all_images = all_images[:_slot_count]
+                except Exception as _e:
+                    logger.debug(f"Image slot count check failed: {_e}")
+
+        # MiMo-V2.6: text and every media kind go through the MiMo lane (its own processor, merged media embeddings,
+        # session reuse) -- speculative with the bundled DFlash drafter, AR without it. The generic routes below cannot
+        # serve MiMo at all (every request failed there with the drafter off, release audit 2026-10-18 R15).
+        _mimo_draft = self._mimo_dflash_draft()
+        if _mimo_draft is not None or getattr(self.model, "_mimo_v26_runtime", False):
+            yield from self._stream_mimo_dflash(
+                formatted_prompt, max_tokens, temperature, kwargs, draft=_mimo_draft, images=list(prepared_images),
+                videos=[process_video_input(v) for v in videos], audio=list(all_audio),
+            )
+            return
+
+        # MiniCPM video arrives as native clips (processor videos= path): DSpark plans it like images.
+        _dspark_media = None
+        _dspark_videos = native_video_clips or []
+        if self._dspark_eligible(all_images, [] if _dspark_videos else videos, all_audio, temperature, kwargs) and (
+            not (all_images or _dspark_videos)
+            or (_dspark_media := self._dspark_media_plan(formatted_prompt, all_images, kwargs, _dspark_videos)) is not None
+        ):
+            yield from self._stream_dspark(formatted_prompt, max_tokens, temperature, kwargs, media=_dspark_media)
+            return
+
+        # The server's SimpleEngine uses stream_chat(), not stream_generate().
+        # Route DFlash2 requests here before mlx-vlm constructs its ordinary
+        # prompt cache and generator. Image/video requests (video arrives as
+        # frames in all_images) are PREFILLED through the VLM -- vision tower,
+        # merged input embeddings, M-RoPE positions -- and then decoded by
+        # DFlash2: the drafter only ever proposes text tokens and conditions on
+        # the target's hidden states, so it never needs to see pixels. Audio
+        # and VLMs without M-RoPE prefill support keep the native VLM path.
+        _df2_media = None
+        _df2_route = False
+        if not all_audio:
+            from ..speculative import get_draft_model, is_dflash2_enabled
+
+            if is_dflash2_enabled():
+                if not all_images:
+                    _df2_route = not videos
+                else:
+                    # Same image-prefill guard as the native path (vmlx#156).
+                    self._guard_simple_image_prefill(
+                        formatted_prompt, True, images=all_images,
+                        resize_shape=kwargs.get("resize_shape"),
+                    )
+                    # GLM video reaches here as sampled frames: SimpleEngine
+                    # expands each video placeholder into image placeholders
+                    # (_VIDEO_FRAME_FALLBACK_MODEL_TYPES), so every frame is an
+                    # image of the plan with its own key. The plan itself still
+                    # refuses native video tokens/pixels (native VLM path).
+                    _df2_media = self._dflash2_media_plan(formatted_prompt, all_images, kwargs)
+                    _df2_route = _df2_media is not None
+        if _df2_route:
+            from ..dflash2_runtime import stream_dflash2_generate
+
+            tokenizer = (
+                self.processor.tokenizer
+                if hasattr(self.processor, "tokenizer")
+                else self.processor
+            )
+            top_p = float(kwargs.pop("top_p", 1.0))
+            top_k = int(kwargs.pop("top_k", 0))
+            token_count = 0
+            emitted_per_cycle: list[int] = []
+            drafted_total = 0
+            ar_tokens = 0          # adaptive AR bursts (GLM AdaptiveSpec, Qwen _BlockChooser.next_action)
+            width_cycles: dict[int, int] = {}
+            last_chunk = None
+            stats_logged = False
+            try:
+                from ..glm_dflash2 import is_glm5_next as _is_glm5_next
+                _is_glm_dflash2 = bool(_is_glm5_next(self.model))
+            except Exception:
+                _is_glm_dflash2 = False
+            logger.info(
+                "DFlash2 %s chat active for %s",
+                "media (VLM prefill, %d image(s)/frame(s))" % len(all_images) if _df2_media else "text",
+                self.model_name,
+            )
+            for chunk in stream_dflash2_generate(
+                self.model,
+                tokenizer,
+                get_draft_model(),
+                formatted_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=float(kwargs.get("min_p", 0.0) or 0.0),
+                logit_bias=kwargs.get("logit_bias"),
+                repetition_penalty=float(
+                    1.0 if kwargs.get("repetition_penalty") is None
+                    else kwargs["repetition_penalty"]
+                ),
+                frequency_penalty=float(kwargs.get("frequency_penalty", 0.0) or 0.0),
+                presence_penalty=float(kwargs.get("presence_penalty", 0.0) or 0.0),
+                prompt_tokens=_df2_media["prompt_tokens"] if _df2_media else None,
+                media=_df2_media,
+                stop=kwargs.get("stop"),
+            ):
+                emitted = len(getattr(chunk, "tokens", []) or [])
+                token_count += emitted
+                # GLM adaptive AR bursts can emit multiple tokens with zero
+                # drafts. They contribute to throughput, not draft acceptance.
+                _drafted = int(getattr(chunk, "drafted", 4))
+                if getattr(chunk, "accepted", None) is not None and _drafted == 0:
+                    ar_tokens += emitted
+                if getattr(chunk, "accepted", None) is not None and _drafted > 0:
+                    emitted_per_cycle.append(int(chunk.accepted))
+                    # verify width is adaptive (dflash2_runtime._BlockChooser)
+                    _w = _drafted + 1
+                    drafted_total += _w - 1
+                    width_cycles[_w] = width_cycles.get(_w, 0) + 1
+                last_chunk = chunk
+                if getattr(chunk, "finish_reason", None) is not None:
+                    cycles = len(emitted_per_cycle)
+                    mean_emitted = sum(emitted_per_cycle) / max(1, cycles)
+                    accepted_draft = sum(
+                        max(0, n - 1) for n in emitted_per_cycle
+                    )
+                    proposed_draft = drafted_total
+                    logger.info(
+                        "DFlash2 generation stats: prompt_tokens=%d "
+                        "output_tokens=%d cycles=%d emitted_per_cycle=%.3f "
+                        "draft_acceptance_estimate=%.1f%% generation_tps=%.2f "
+                        "prompt_tps=%.1f peak_memory=%.2fGB block_widths=%s "
+                        "ar_tokens=%d finish_reason=%s",
+                        int(getattr(chunk, "prompt_tokens", 0) or 0),
+                        token_count,
+                        cycles,
+                        mean_emitted,
+                        100.0 * accepted_draft / max(1, proposed_draft),
+                        float(getattr(chunk, "generation_tps", 0.0) or 0.0),
+                        float(getattr(chunk, "prompt_tps", 0.0) or 0.0),
+                        float(getattr(chunk, "peak_memory", 0.0) or 0.0),
+                        dict(sorted(width_cycles.items())),
+                        ar_tokens,
+                        chunk.finish_reason,
+                    )
+                    stats_logged = True
+                    _spec_stats = {
+                        "kind": "dflash2",
+                        "lane": "glm" if _is_glm_dflash2 else "qwen",
+                        "cycles": cycles,
+                        "emitted_per_cycle": round(mean_emitted, 3),
+                        "drafted": proposed_draft,
+                        "accepted": accepted_draft,
+                        "acceptance": round(accepted_draft / proposed_draft, 4) if proposed_draft else None,
+                        "widths": {str(k): v for k, v in sorted(width_cycles.items())},
+                        "ar_tokens": ar_tokens,
+                        "generation_tps": round(float(getattr(chunk, "generation_tps", 0.0) or 0.0), 2),
+                    }
+                else:
+                    _spec_stats = None
+                yield MLLMOutput(
+                    text=getattr(chunk, "text", ""),
+                    finish_reason=getattr(chunk, "finish_reason", None),
+                    prompt_tokens=int(getattr(chunk, "prompt_tokens", 0) or 0),
+                    completion_tokens=token_count,
+                    cached_tokens=int(getattr(chunk, "cached_tokens", 0) or 0),
+                    tokens=getattr(chunk, "output_token_ids", None) or [],
+                    cache_detail=str(getattr(chunk, "cache_detail", "") or ""),
+                    persistence_future=getattr(chunk, "persistence_future", None),
+                    prefill_usage=getattr(chunk, "prefill_usage", None),
+                    spec_stats=_spec_stats,
+                )
+
+            if not stats_logged:
+                cycles = len(emitted_per_cycle)
+                mean_emitted = sum(emitted_per_cycle) / max(1, cycles)
+                accepted_draft = sum(max(0, n - 1) for n in emitted_per_cycle)
+                logger.info(
+                    "DFlash2 generation stats: prompt_tokens=%d output_tokens=%d "
+                    "cycles=%d emitted_per_cycle=%.3f "
+                    "draft_acceptance_estimate=%.1f%% generation_tps=%.2f "
+                    "finish_reason=%s",
+                    int(getattr(last_chunk, "prompt_tokens", 0) or 0),
+                    token_count,
+                    cycles,
+                    mean_emitted,
+                    100.0 * accepted_draft / max(1, drafted_total),
+                    float(getattr(last_chunk, "generation_tps", 0.0) or 0.0),
+                    getattr(last_chunk, "finish_reason", None),
+                )
+            return
+
+        # Check cache for existing KV state (uses images as cache key)
+        from mlx_vlm.models import cache as vlm_cache
+
+        prompt_cache = None
+        prompt_cache_state = None
+        cache_hit = False
+        use_cache = kwargs.pop("use_cache", True)
+        token_ids: list[int] = []
+        media_cache_safe = _supports_simple_media_prompt_cache(self.model)
+
+        if use_cache and media_cache_safe and self._cache_manager is not None and all_images:
+            try:
+                tokenizer = (
+                    self.processor.tokenizer
+                    if hasattr(self.processor, "tokenizer")
+                    else self.processor
+                )
+                token_ids = _media_expanded_token_ids_for_cache(
+                    self.model,
+                    self.processor,
+                    formatted_prompt,
+                    images=all_images,
+                    audio=all_audio,
+                    resize_shape=kwargs.get("resize_shape"),
+                ) or tokenizer.encode(formatted_prompt)
+                cache_entry, prefix_match_len = self._cache_manager.fetch(
+                    all_images, formatted_prompt, token_ids
+                )
+                if cache_entry and cache_entry.kv_cache is not None:
+                    prompt_cache_state = _prompt_cache_state_from_entry(cache_entry)
+                    if prompt_cache_state is None:
+                        logger.debug(
+                            "Stream chat image prefix hit lacked PromptCacheState; "
+                            "falling back to full prompt processing"
+                        )
+                    cache_hit = prompt_cache_state is not None
+                    # The restore shell deliberately leaves the final cached
+                    # token to be recomputed. Report its actual boundary, not
+                    # the longer entry selected by the prefix index.
+                    prefix_match_len = (
+                        min(prefix_match_len, len(prompt_cache_state.token_ids))
+                        if cache_hit else 0
+                    )
+                    if prefix_match_len > 0:
+                        logger.debug(
+                            f"Stream chat prefix cache hit: {prefix_match_len} tokens, "
+                            f"{len(all_images)} image(s)"
+                        )
+                    else:
+                        logger.debug(f"Stream chat cache hit for {len(all_images)} image(s)")
+            except Exception as e:
+                logger.debug(f"Stream chat cache fetch failed: {e}")
+
+        # Create new cache if needed
+        if prompt_cache is None and prompt_cache_state is None and self.model is not None:
+            try:
+                prompt_cache = vlm_cache.make_prompt_cache(self.model.language_model)
+            except Exception:
+                prompt_cache = None
+
+        # Stream generate tokens with cache
+        accumulated_text = ""
+        token_count = 0
+        last_prompt_tokens = 0
+        native_prefill_usage = None
+
+        # Ensure processor uses NaiveStreamingDetokenizer for all MLLM models.
+        # mlx-vlm's default streaming detokenizer can buffer infinitely for some
+        # architectures. NaiveStreamingDetokenizer yields tokens immediately.
+        if not hasattr(self.processor, "_patched_detok"):
+            from mlx_lm.tokenizer_utils import NaiveStreamingDetokenizer
+
+            # Monkey-patch NaiveStreamingDetokenizer to accept kwargs from mlx_vlm
+            if not hasattr(NaiveStreamingDetokenizer, "_vml_patched"):
+                original_add = NaiveStreamingDetokenizer.add_token
+                def _patched_add(self, token, **kwargs):
+                    return original_add(self, token)
+                NaiveStreamingDetokenizer.add_token = _patched_add
+                def _patched_copy(self):
+                    return type(self)(self._tokenizer)
+                NaiveStreamingDetokenizer.__copy__ = _patched_copy
+                NaiveStreamingDetokenizer._vml_patched = True
+
+            tokenizer = self.processor.tokenizer if hasattr(self.processor, "tokenizer") else self.processor
+            self.processor.detokenizer = NaiveStreamingDetokenizer(tokenizer)
+            self.processor._patched_detok = True
+
+        # Extract sampling params not natively supported by mlx_vlm.stream_generate()
+        top_k = kwargs.pop("top_k", 0)
+        min_p = kwargs.pop("min_p", 0.0)
+        if (top_k and top_k > 0) or (min_p and min_p > 0.0):
+            from ..sampling import make_sampler
+            top_p = kwargs.pop("top_p", 1.0)
+            kwargs["sampler"] = make_sampler(
+                temp=temperature, top_p=top_p, min_p=min_p, top_k=top_k
+            )
+        if prompt_cache_state is not None:
+            kwargs["prompt_cache_state"] = prompt_cache_state
+
+        self._guard_simple_image_prefill(
+            formatted_prompt,
+            bool(all_images and prompt_cache_state is None),
+            images=all_images,
+            resize_shape=kwargs.get("resize_shape"),
+        )
+
+        from ..utils.prefill_step import prefill_step_size
+
+        kwargs.setdefault("prefill_step_size", prefill_step_size())
+        if native_video_clips:
+            kwargs["video"] = native_video_clips
+        try:
+            with _MaybeVLMStream():
+                for chunk in stream_generate(
+                    self.model,
+                    self.processor,
+                    formatted_prompt,
+                    all_images if all_images else None,
+                    audio=all_audio if all_audio else None,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    prompt_cache=prompt_cache,
+                    **kwargs,
+                ):
+                    # mlx-vlm reports a cumulative generation_tokens and ends with a
+                    # detokenizer-flush result that REPEATS the last count; counting
+                    # chunks reported max_tokens + 1 on streamed usage (non-stream
+                    # already used generation_tokens). Fall back to +1 per chunk
+                    # only for results without the field.
+                    _cumulative = getattr(chunk, "generation_tokens", None)
+                    token_count = int(_cumulative) if isinstance(_cumulative, int) else token_count + 1
+                    # chunk is a GenerationResult with .text attribute containing the new token
+                    new_text = chunk.text if hasattr(chunk, "text") else str(chunk)
+                    accumulated_text += new_text
+
+                    chunk_prompt_tokens = getattr(chunk, "prompt_tokens", 0)
+                    if chunk_prompt_tokens:
+                        last_prompt_tokens = chunk_prompt_tokens
+
+                    # mlx-vlm 0.5 reports total prompt tokens (including reused
+                    # tokens) / prompt time. Recover elapsed time from that
+                    # numerator, then report only tokens actually prefilled.
+                    _pp_tps = float(getattr(chunk, "prompt_tps", 0.0) or 0.0)
+                    _pp_tokens = int(chunk_prompt_tokens or 0) - (prefix_match_len if cache_hit else 0)
+                    if _pp_tps > 0 and _pp_tokens > 0:
+                        native_prefill_usage = {
+                            "tokens": _pp_tokens, "seconds": int(chunk_prompt_tokens) / _pp_tps,
+                            "scope": "model_prefill_and_prompt_state", "path": "mlx_vlm",
+                        }
+                    yield MLLMOutput(
+                        text=new_text,  # Just the new token for streaming
+                        finish_reason=None,
+                        prompt_tokens=last_prompt_tokens,
+                        prefill_usage=native_prefill_usage,
+                        completion_tokens=token_count,
+                        cached_tokens=prefix_match_len if cache_hit else 0,
+                        cache_detail="memory" if cache_hit and prefix_match_len > 0 else "",
+                    )
+        except Exception as e:
+            clear_mlx_memory_cache(log=logger)
+            logger.error(f"VLM stream_generate error: {type(e).__name__}: {e}")
+            raise
+
+        if (
+            use_cache
+            and media_cache_safe
+            and self._cache_manager is not None
+            and all_images
+            and not cache_hit
+            and prompt_cache
+        ):
+            try:
+                prompt_tokens_count = last_prompt_tokens or len(token_ids)
+                cache_to_store = _copy_prompt_cache_to_prompt_boundary(
+                    prompt_cache, prompt_tokens_count
+                )
+                num_img_tokens = 0
+                if all_images and self.config:
+                    img_token_id = getattr(self.config, "image_token_index", None)
+                    if img_token_id is not None and token_ids:
+                        num_img_tokens = token_ids.count(img_token_id)
+                self._cache_manager.store(
+                    images=all_images,
+                    prompt=formatted_prompt,
+                    vision_embeddings=None,
+                    kv_cache=cache_to_store,
+                    token_ids=token_ids,
+                    num_image_tokens=num_img_tokens,
+                    model_name=self.model_name,
+                )
+                logger.info(
+                    f"[PREFIX CACHE] Stored streaming KV cache for {len(all_images)} "
+                    f"image(s) ({prompt_tokens_count} prompt tokens)"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to cache streaming MLLM prompt: {e}")
+
+        # Final yield with finish_reason
+        finish_reason = "length" if token_count >= max_tokens else "stop"
+        yield MLLMOutput(
+            text="",
+            finish_reason=finish_reason,
+            prompt_tokens=last_prompt_tokens,
+            completion_tokens=token_count,
+            cached_tokens=prefix_match_len if cache_hit else 0,
+            cache_detail="memory" if cache_hit and prefix_match_len > 0 else "",
+            prefill_usage=native_prefill_usage,
+        )
+
+    def describe_image(
+        self,
+        image: str,
+        prompt: str = "Describe this image in detail.",
+        max_tokens: int = 512,
+        **kwargs,
+    ) -> str:
+        """
+        Convenience method to describe an image.
+
+        Args:
+            image: Image path, URL, or base64 string
+            prompt: Description prompt
+            max_tokens: Maximum tokens
+            **kwargs: Additional parameters
+
+        Returns:
+            Image description text
+        """
+        output = self.generate(
+            prompt=prompt,
+            images=[image],
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        return output.text
+
+    def answer_about_image(
+        self,
+        image: str,
+        question: str,
+        max_tokens: int = 256,
+        **kwargs,
+    ) -> str:
+        """
+        Answer a question about an image.
+
+        Args:
+            image: Image path, URL, or base64 string
+            question: Question about the image
+            max_tokens: Maximum tokens
+            **kwargs: Additional parameters
+
+        Returns:
+            Answer text
+        """
+        output = self.generate(
+            prompt=question,
+            images=[image],
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        return output.text
+
+    def describe_video(
+        self,
+        video: str | dict,
+        prompt: str = "Describe what happens in this video.",
+        fps: float = 2.0,
+        max_frames: int = 32,
+        max_tokens: int = 512,
+        **kwargs,
+    ) -> str:
+        """
+        Describe a video using frame extraction.
+
+        Args:
+            video: Video file path, URL, base64, or OpenAI format dict
+            prompt: Description prompt
+            fps: Frames per second to extract
+            max_frames: Maximum frames to extract
+            max_tokens: Maximum tokens to generate
+
+        Returns:
+            Video description text
+
+        Example:
+            # Local file
+            model.describe_video("video.mp4")
+
+            # URL
+            model.describe_video("https://example.com/video.mp4")
+
+            # OpenAI format
+            model.describe_video({"url": "https://example.com/video.mp4"})
+        """
+        output = self.generate(
+            prompt=prompt,
+            videos=[video],
+            video_fps=fps,
+            video_max_frames=max_frames,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        return output.text
+
+    def get_cache_stats(self) -> dict:
+        """
+        Get MLLM cache statistics.
+
+        Returns:
+            Dictionary with cache stats (hits, misses, hit_rate, tokens_saved, etc.)
+        """
+        if self._cache_manager is None:
+            return {"enabled": False}
+
+        stats = self._cache_manager.get_stats()
+        stats["enabled"] = True
+        stats["cache_entries"] = len(self._cache_manager)
+        stats["max_entries"] = self._cache_manager.max_size
+        return stats
+
+    def clear_cache(self) -> None:
+        """Clear the MLLM KV cache."""
+        if self._cache_manager is not None:
+            self._cache_manager.clear()
+            logger.info("MLLM cache cleared")
+
+    def get_model_info(self) -> dict:
+        """Get information about the loaded model."""
+        if not self._loaded:
+            return {"loaded": False, "model_name": self.model_name}
+
+        info = {
+            "loaded": True,
+            "model_name": self.model_name,
+            "type": "multimodal-language-model",
+            "supports_video": True,
+            "supports_streaming": True,
+            "cache_enabled": self.enable_cache,
+        }
+
+        if self.config:
+            info["model_type"] = getattr(self.config, "model_type", "unknown")
+
+        if self._cache_manager is not None:
+            info["cache_stats"] = self._cache_manager.get_stats()
+
+        return info
+
+    @staticmethod
+    def list_supported_model_families() -> dict[str, str]:
+        """
+        List supported model families and their patterns.
+
+        Any model on HuggingFace containing these patterns in the name
+        is likely compatible with mlx-vlm.
+        """
+        return {
+            "Qwen-VL": "Qwen VL models (Qwen2-VL, Qwen2.5-VL, Qwen3-VL, etc.)",
+            "LLaVA": "LLaVA vision-language models",
+            "Idefics": "Idefics vision-language models",
+            "PaliGemma": "PaliGemma multimodal models",
+            "Pixtral": "Mistral's Pixtral vision models",
+            "Molmo": "Allen AI's Molmo models",
+            "Phi-3-Vision": "Microsoft's Phi-3 Vision models",
+            "CogVLM": "Tsinghua's CogVLM models",
+            "InternVL": "InternVL models",
+            "MiniCPM-V": "OpenBMB's MiniCPM-V models",
+            "Florence": "Microsoft Florence vision models",
+            "DeepSeek-VL": "DeepSeek's vision-language models (DeepSeek-VL, DeepSeek-VL2)",
+        }
+
+    @staticmethod
+    def is_mllm_model(model_name: str) -> bool:
+        """Check if a model name indicates an MLLM model.
+
+        Delegates to the canonical implementation in api.utils which checks
+        config.json, model registry, and regex patterns.
+        """
+        from ..api.utils import is_mllm_model as _canonical
+        return _canonical(model_name)
+
+    def __repr__(self) -> str:
+        status = "loaded" if self._loaded else "not loaded"
+        return f"<MLXMultimodalLM model={self.model_name} status={status}>"
+
+
+# Backwards compatibility aliases
+MLXVisionLanguageModel = MLXMultimodalLM
+VLMOutput = MLLMOutput
+is_vlm_model = MLXMultimodalLM.is_mllm_model

@@ -1,0 +1,148 @@
+import ast
+from pathlib import Path
+from types import SimpleNamespace
+
+
+def test_clear_mlx_memory_cache_prefers_top_level_api():
+    from vmlx_engine.mlx_memory import clear_mlx_memory_cache
+
+    calls = []
+    fake_mx = SimpleNamespace(
+        metal=SimpleNamespace(clear_cache=lambda: calls.append("metal")),
+        clear_cache=lambda: calls.append("top"),
+    )
+
+    assert clear_mlx_memory_cache(mx=fake_mx) == "mx.clear_cache"
+    assert calls == ["top"]
+
+
+def test_clear_mlx_memory_cache_falls_back_to_metal_api():
+    from vmlx_engine.mlx_memory import clear_mlx_memory_cache
+
+    calls = []
+    fake_mx = SimpleNamespace(metal=SimpleNamespace(clear_cache=lambda: calls.append("metal")))
+
+    assert clear_mlx_memory_cache(mx=fake_mx) == "mx.metal.clear_cache"
+    assert calls == ["metal"]
+
+
+def test_clear_mlx_memory_cache_logs_missing_api(caplog):
+    from vmlx_engine.mlx_memory import clear_mlx_memory_cache
+
+    fake_mx = SimpleNamespace()
+
+    assert clear_mlx_memory_cache(mx=fake_mx) is None
+    assert "No known MLX memory cache clearing API available" in caplog.text
+
+
+def test_clear_mlx_memory_cache_logs_api_failure(caplog):
+    from vmlx_engine.mlx_memory import clear_mlx_memory_cache
+
+    def boom():
+        raise RuntimeError("top cache failed")
+
+    fake_mx = SimpleNamespace(clear_cache=boom)
+
+    assert clear_mlx_memory_cache(mx=fake_mx) is None
+    assert "MLX memory cache cleanup via mx.clear_cache failed" in caplog.text
+
+
+def test_runtime_paths_do_not_call_removed_clear_memory_cache_directly():
+    repo_root = Path(__file__).resolve().parents[1]
+    runtime_paths = [
+        repo_root / "vmlx_engine" / "engine" / "simple.py",
+        repo_root / "vmlx_engine" / "image_gen.py",
+        repo_root / "vmlx_engine" / "mllm_scheduler.py",
+        repo_root / "vmlx_engine" / "models" / "mllm.py",
+        repo_root / "vmlx_engine" / "reranker.py",
+        repo_root / "vmlx_engine" / "scheduler.py",
+        repo_root / "vmlx_engine" / "server.py",
+        repo_root / "vmlx_engine" / "speculative.py",
+        repo_root / "vmlx_engine" / "worker.py",
+    ]
+
+    offenders = []
+    for path in runtime_paths:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr == "clear_memory_cache":
+                offenders.append(f"{path.relative_to(repo_root)}:{node.lineno}")
+
+    assert offenders == []
+
+
+def test_runtime_paths_do_not_call_deprecated_metal_clear_cache_directly():
+    repo_root = Path(__file__).resolve().parents[1]
+    runtime_paths = [
+        repo_root / "vmlx_engine" / "speculative.py",
+        repo_root / "vmlx_engine" / "worker.py",
+    ]
+
+    offenders = []
+    for path in runtime_paths:
+        source = path.read_text(encoding="utf-8")
+        if "mx.metal.clear_cache()" in source or "metal.clear_cache()" in source:
+            offenders.append(str(path.relative_to(repo_root)))
+
+    assert offenders == []
+
+
+def test_admin_sleep_paths_use_shared_mlx_memory_cache_helper():
+    repo_root = Path(__file__).resolve().parents[1]
+    source = (repo_root / "vmlx_engine" / "server.py").read_text(encoding="utf-8")
+
+    soft_start = source.index('async def admin_soft_sleep')
+    deep_start = source.index('async def admin_deep_sleep')
+    wake_start = source.index('async def admin_wake')
+    soft_source = source[soft_start:deep_start]
+    deep_source = source[deep_start:wake_start]
+
+    assert "clear_mlx_memory_cache(log=logger)" in soft_source
+    assert "clear_mlx_memory_cache(log=logger)" in deep_source
+    assert "mx.clear_cache()" not in soft_source
+    assert "mx.clear_cache()" not in deep_source
+    assert "mx.metal.clear_cache()" not in soft_source
+    assert "mx.metal.clear_cache()" not in deep_source
+
+
+def test_deep_sleep_yields_before_post_teardown_mlx_cleanup():
+    repo_root = Path(__file__).resolve().parents[1]
+    source = (repo_root / "vmlx_engine" / "server.py").read_text(encoding="utf-8")
+
+    helper_start = source.index("async def _post_async_engine_teardown_mlx_cleanup")
+    soft_start = source.index("async def admin_soft_sleep")
+    helper_source = source[helper_start:soft_start]
+    deep_start = source.index("async def admin_deep_sleep")
+    wake_start = source.index("async def admin_wake")
+    deep_source = source[deep_start:wake_start]
+
+    assert "await asyncio.sleep(0)" in helper_source
+    assert 'getattr(_mx, "synchronize", None)' in helper_source
+    assert "clear_mlx_memory_cache(log=logger)" in helper_source
+    assert (
+        'await _post_async_engine_teardown_mlx_cleanup("admin_deep_sleep_engine_stop")'
+        in deep_source
+    )
+    assert deep_source.index("_engine = None") < deep_source.index(
+        "await _post_async_engine_teardown_mlx_cleanup"
+    )
+    assert (
+        # aae5885d3 moved the wake body into _admin_wake_impl (shared by the
+        # JIT middleware and /admin/wake), which sits BEFORE the admin_wake
+        # endpoint in the file — slice from the impl, not the endpoint.
+        'await _post_async_engine_teardown_mlx_cleanup("admin_wake_before_deep_reload")'
+        in source[source.index("async def _admin_wake_impl"):]
+    )
+    assert (
+        '_post_async_engine_teardown_mlx_cleanup("admin_deep_sleep_deferred")'
+        in deep_source
+    )
+    assert "await _run_on_model_executor(_remove_jit_compilation)" in deep_source
+    assert deep_source.index(
+        "await _run_on_model_executor(_remove_jit_compilation)"
+    ) < deep_source.index("await _engine.stop()")
+    health_source = source[
+        source.index("async def health"):
+        source.index("@app.get(\"/health.mtp\")")
+    ]
+    assert '_post_async_engine_teardown_mlx_cleanup("health_standby_deep")' in health_source

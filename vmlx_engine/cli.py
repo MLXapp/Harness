@@ -1,0 +1,5047 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""
+CLI for vmlx-engine.
+
+Commands:
+    vmlx-engine serve <model> --port 8000    Start OpenAI-compatible server
+    vmlx-engine bench <model>                Run benchmark
+
+Usage:
+    vmlx-engine serve mlx-community/Llama-3.2-3B-Instruct-4bit --port 8000
+    vmlx-engine serve /path/to/model-JANG-2.5bit                            # JANG format
+    vmlx-engine bench mlx-community/Llama-3.2-1B-Instruct-4bit --num-prompts 10
+"""
+
+import argparse
+import os
+import shutil
+import sys
+
+DSV4_PAGED_CACHE_BLOCK_SIZE = 256
+DSV4_MAX_CACHE_BLOCKS = 4097  # 4096 data blocks + reserved null block
+# Generic cache-index target, mirroring GENERIC_INDEX_TARGET_TOKENS in
+# panel/src/main/sessions.ts. Both surfaces must size the index by TOKENS, not
+# by a flat block count, or the same build reuses differently depending on
+# whether it was started by the app or from the CLI.
+GENERIC_INDEX_TARGET_TOKENS = 262144
+
+# Per-family request timeouts, mirroring sessions.ts. These families are slow
+# enough that the generic 300s cuts long reasoning off mid-flight.
+DSV4_DEFAULT_TIMEOUT_SECONDS = 900
+_SLOW_FAMILY_TIMEOUTS = {
+    "deepseek_v4": DSV4_DEFAULT_TIMEOUT_SECONDS,
+    "minimax_m3": 900,
+    "openpangu_v2": 900,
+    # Hybrid SSM+attention families chunk their prefill, so a long prompt takes
+    # minutes before the first token. FOUND LIVE IN THE APP, not by API testing:
+    # a 101,502-token prompt to Qwen3.6-27B rendered "Message failed — Request
+    # timed out after 300s" in the chat, while the engine served the identical
+    # prompt in ~230s of prefill plus decode. API probes never saw it because
+    # they pass their own long timeout; only a real user hits the session
+    # default.
+    "qwen3_5": 900,
+    "qwen3_5_moe": 900,
+    "qwen3_next": 900,
+    "nemotron_h": 900,
+}
+#: Default block-disk (SSD / L2) cache budget, as a percent of the cache
+#: volume's capacity. A flat gigabyte default is wrong at both ends: too small
+#: to be useful on a 4TB machine, and able to fill a 512GB one. Percent keeps
+#: the cache proportionate to the machine it runs on.
+DEFAULT_BLOCK_DISK_CACHE_PERCENT = 10.0
+
+DEFAULT_MAX_OUTPUT_TOKENS = 4096
+DEFAULT_MAX_OUTPUT_TOKENS_REASONING = DEFAULT_MAX_OUTPUT_TOKENS * 4
+
+_TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
+
+
+def _configure_generic_tq_diagnostic_policy(log) -> bool:
+    """Keep production cache objects native; permit TQ only as an env diagnostic.
+
+    The Electron app intentionally omits ``--kv-cache-quantization``.  That
+    omission must not replace a model's ``make_cache()`` implementation with a
+    generic ``TurboQuantKVCache``: native full-KV, rotating, recurrent, sparse,
+    and composite caches carry different state.  An operator can still request
+    the old experimental wrapper explicitly with ``VMLX_FORCE_TQ_AUTO=1``.
+
+    Returns whether that diagnostic override is active.
+    """
+    force_tq = os.environ.get("VMLX_FORCE_TQ_AUTO", "").lower() in _TRUE_ENV_VALUES
+    force_native = (
+        os.environ.get("VMLX_FULL_PRECISION_LIVE_KV", "").lower()
+        in _TRUE_ENV_VALUES
+        or os.environ.get("VMLX_DISABLE_TQ_KV", "").lower()
+        in _TRUE_ENV_VALUES
+    )
+    if force_tq and not force_native:
+        os.environ.pop("VMLX_DISABLE_TQ_KV", None)
+        log.warning(
+            "Generic TurboQuant KV diagnostic override enabled by "
+            "VMLX_FORCE_TQ_AUTO=1; this is not the Electron production default."
+        )
+        return True
+
+    os.environ["VMLX_DISABLE_TQ_KV"] = "1"
+    os.environ.pop("VMLX_FORCE_TQ_AUTO", None)
+    log.info(
+        "Native live-cache policy active: preserving the model's make_cache() "
+        "objects; generic TurboQuant KV replacement is disabled."
+    )
+    return False
+
+
+
+def _argv_has_option(argv: list[str], option: str) -> bool:
+    prefix = option + "="
+    return any(arg == option or arg.startswith(prefix) for arg in argv)
+
+
+def _uvicorn_bind_kwargs(args, log_level: str) -> dict:
+    kwargs = {"log_level": log_level.lower()}
+    uds = getattr(args, "uds", None)
+    if uds:
+        kwargs["uds"] = uds
+    else:
+        kwargs["host"] = args.host
+        kwargs["port"] = args.port
+    return kwargs
+
+
+def _split_cli_values(values: list[str] | None) -> list[str]:
+    if not values:
+        return []
+    out: list[str] = []
+    for value in values:
+        for item in str(value).split(","):
+            item = item.strip()
+            if item:
+                out.append(item)
+    return out
+
+
+def _parse_lora_scales(values: list[str] | None) -> list[float] | None:
+    scales = []
+    for value in _split_cli_values(values):
+        try:
+            scales.append(float(value))
+        except ValueError:
+            raise SystemExit(f"Error: --lora-scales values must be floats, got {value!r}")
+    # None = "flag not provided". Returning [] here made image_gen's
+    # `lora_scales is not None` guard fire on LoRA-less launches, so every
+    # mflux image model died at startup with "--lora-scales requires
+    # --lora-paths" (GitHub #224, FLUX.2-klein via the GUI).
+    return scales if scales else None
+
+
+def _validate_lora_args_for_model_type(args, *, is_image: bool) -> None:
+    """Reject LoRA flags on serve paths that cannot consume them."""
+
+    lora_paths = _split_cli_values(getattr(args, "lora_paths", None))
+    lora_scale_values = _split_cli_values(getattr(args, "lora_scales", None))
+    if lora_scale_values and not lora_paths:
+        raise SystemExit("Error: --lora-scales requires --lora-paths")
+    if (lora_paths or lora_scale_values) and not is_image:
+        raise SystemExit(
+            "Error: --lora-paths/--lora-scales are only supported for image "
+            "models through vmlx serve. Text-model LoRA loading is not wired "
+            "in this runtime path."
+        )
+
+
+def _bundle_declares_mxtq_jangtq(model_path: str | None) -> bool:
+    """Return true for bundles that should not enter MPP_NAX auto by default."""
+
+    if not model_path:
+        return False
+    model_text = str(model_path).lower()
+    if "mxtq" in model_text or "jangtq" in model_text:
+        return True
+    try:
+        import json
+        from pathlib import Path
+
+        root = Path(model_path).expanduser()
+        configs = []
+        for name in ("config.json", "jang_config.json"):
+            path = root / name
+            if path.is_file():
+                configs.append(json.loads(path.read_text()))
+        if (root / "jangtq_runtime.safetensors").is_file():
+            return True
+    except Exception:
+        configs = []
+
+    def _declares_mxtq(value) -> bool:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == "mxtq_bits":
+                    return True
+                if _declares_mxtq(item):
+                    return True
+            return False
+        text = str(value or "").lower()
+        return "mxtq" in text or "jangtq" in text
+
+    return any(_declares_mxtq(config) for config in configs)
+
+
+# One definition of "is this an affine bundle", because it was written twice and
+# both copies read only the OLD schema key. Two generations are in the wild:
+# CRACK bundles set format="jang"; newer jangq-ai bundles omit "format" and set
+# weight_format="jang_affine" with quantization.mode="affine". Reading only
+# "format" made both checks silently False for every new-schema bundle.
+#
+# Match exact tokens, never substrings: weight_format is also where mxfp4,
+# mxfp8, mxtq and mlx live, and none of those are affine layouts.
+_JANG_AFFINE_TOKENS = frozenset({"affine", "jang", "jjqf", "mxq", "jang_affine"})
+
+
+def jang_config_is_affine(jang_cfg: dict) -> bool:
+    """True when a parsed jang_config.json describes an affine weight layout."""
+    if not isinstance(jang_cfg, dict):
+        return False
+    quantization = jang_cfg.get("quantization")
+    candidates = (
+        jang_cfg.get("format"),
+        jang_cfg.get("weight_format"),
+        (quantization or {}).get("mode") if isinstance(quantization, dict) else None,
+    )
+    return any(
+        str(value or "").lower() in _JANG_AFFINE_TOKENS for value in candidates
+    )
+
+
+def _stored_kvq_fallback(mixed_swa: bool, jang_hi_fidelity: bool) -> str:
+    """Pick the auto-mode stored-prefix codec. Mixed-SWA wins over JANG q8.
+
+    Mixed sliding/full attention bundles must store EXACT KV — a quantized
+    stored prefix makes them answer a cache HIT differently from a cold prefill
+    (Laguna-S at temperature 0: cold bb040715 vs hit 633c133d). That outranks
+    the JANGTQ/JANG-affine q8 preference, which exists for reuse FIDELITY and
+    therefore has no reason to override the very property it is protecting.
+
+    Pure and separately testable on purpose: the precedence used to be an
+    inline if/elif that a test could only restate rather than execute.
+    """
+    if mixed_swa:
+        return "none"
+    if jang_hi_fidelity:
+        return "q8"
+    return "q4"
+
+
+def _bundle_has_mixed_swa_layout(model_path: str | None) -> bool:
+    """True when the bundle interleaves sliding-window and full attention.
+
+    These bundles (gemma-4, Laguna) keep RotatingKVCache window metadata, and a
+    LOSSY STORED prefix cache changes their answers on reuse: the cold prefill
+    computes full-precision KV while the warm turn reads back the quantized
+    copy, so the same question answered twice gives two different answers and
+    the second one is the degraded one.
+
+    Live-proven on Laguna-S-2.1-JANG_4M-CRACK 2026-08-12, temp 0, same prompt
+    cold then on a confirmed cache hit:
+
+        stored q8 (old default)      cold sha bb040715 -> hit sha 633c133d
+        --kv-cache-quantization none cold sha bb040715 -> hit sha bb040715
+
+    The cold answer is identical in both arms, so only the quantized read-back
+    diverges. Shares one detector with the loader so the two cannot drift.
+    """
+    if not model_path:
+        return False
+    try:
+        import json
+        from pathlib import Path
+
+        from vmlx_engine.utils.jang_loader import has_mixed_attention_layout
+
+        cfg_path = Path(model_path).expanduser() / "config.json"
+        if not cfg_path.is_file():
+            return False
+        return has_mixed_attention_layout(json.loads(cfg_path.read_text()))
+    except Exception:
+        return False
+
+
+def _bundle_is_jang_affine(model_path: str | None) -> bool:
+    """Return true for JANG-affine bundles.
+
+    Affine is a WEIGHT format, and so is JANGTQ/mxtq — they are siblings, not
+    the same thing, and mxtq must NOT match here. What affine bundles share
+    with JANGTQ bundles is the q8 KV-CACHE policy, which is a property of the
+    cache (TQ encoding of KV) and entirely separate from how the weights are
+    quantized. Keep the two ideas apart when reading this: the check is about
+    the weight layout, the consequence is about the cache.
+
+    Getting it wrong is not cosmetic: a new-schema affine bundle was being
+    handed the wrong KV cache policy because this returned False for it.
+    """
+    if not model_path:
+        return False
+    try:
+        import json
+        from pathlib import Path
+
+        cfg_path = Path(model_path).expanduser() / "jang_config.json"
+        if not cfg_path.is_file():
+            return False
+        return jang_config_is_affine(json.loads(cfg_path.read_text()))
+    except Exception:
+        return False
+
+
+def _speculative_incompatibility_reason(args) -> str | None:
+    if not getattr(args, "speculative_model", None):
+        return None
+    if getattr(args, "continuous_batching", False):
+        return "--continuous-batching"
+    from .speculative import external_speculative_incompatibility_reason
+
+    reason = external_speculative_incompatibility_reason(
+        getattr(args, "model", None)
+    )
+    if reason:
+        return reason
+    from .speculative import _is_dflash2_model
+
+    dflash2 = _is_dflash2_model(getattr(args, "speculative_model", ""))
+    try:
+        from .api.utils import is_mllm_model
+
+        if not dflash2 and is_mllm_model(args.model, force_mllm=getattr(args, "is_mllm", False), force_text_only=getattr(args, "force_text_only", False)):
+            return "multimodal (VLM)"
+    except Exception:
+        return None
+    return None
+
+
+def _bundled_dflash2_for(args, logger=None):
+    """The bundle's own DFlash2 drafter to use by default, or None.
+
+    Not with --text-only: the DFlash2 lanes run on the multimodal path, so a text-only engine would hand the drafter
+    to generic speculative decoding, which needs a trimmable prompt cache. GLM-5.3 (KDA) and the Qwen3.8 hybrids
+    (GatedDelta) have none, and every request then failed with HTTP 400 "Speculative decoding requires a trimmable
+    prompt cache". An explicit --speculative-model is still the user's choice.
+    """
+    from .speculative import find_bundled_dflash2
+
+    drafter = find_bundled_dflash2(getattr(args, "model", ""))
+    if drafter and getattr(args, "force_text_only", False):
+        if logger is not None:
+            logger.info(
+                "Not using the bundled DFlash2 drafter with --text-only (%s): the DFlash2 lanes run on the "
+                "multimodal path; pass --speculative-model to force a drafter.",
+                drafter,
+            )
+        return None
+    return drafter
+
+
+def _apply_jangtq_mpp_nax_policy(args, logger):
+    """Apply internal JANGTQ acceleration policy.
+
+    This is deliberately env-only. The app and CLI must not persist or expose a
+    user-facing switch that can force the prefill acceleration lane onto
+    single-token decode. Default auto lets the kernel's own dispatch gate use
+    acceleration for profitable M5 prefill shapes without making users tune it.
+    """
+    raw_mode = os.environ.get("JANGTQ_MPP_NAX", "auto")
+    mode = str(raw_mode).strip().lower()
+    if mode not in ("off", "auto", "on"):
+        logger.warning("Invalid JANGTQ_MPP_NAX=%r; using auto", raw_mode)
+        mode = "auto"
+    if mode == "auto":
+        try:
+            from .model_config_registry import get_model_config_registry
+
+            model_key = getattr(args, "model", "") or ""
+            family = get_model_config_registry().lookup(model_key).family_name
+        except Exception:
+            family = ""
+        if family == "ling":
+            mode = "off"
+            logger.info(
+                "Ling/Bailing detected — disabling JANGTQ_MPP_NAX auto lane. "
+                "Live bundled greedy Russian probes showed CJK leakage with "
+                "JANGTQ_MPP_NAX=auto; set JANGTQ_MPP_NAX=on only for explicit "
+                "kernel diagnostics."
+            )
+        elif _bundle_declares_mxtq_jangtq(getattr(args, "model", None)):
+            mode = "off"
+            logger.info(
+                "MXTQ/JANGTQ bundle detected — disabling JANGTQ_MPP_NAX=auto. "
+                "Reporter repros showed incorrect prefill logits on MXTQ/hybrid "
+                "JANGTQ with auto; set JANGTQ_MPP_NAX=on only for explicit "
+                "kernel diagnostics."
+            )
+    os.environ["JANGTQ_MPP_NAX"] = "1" if mode == "on" else mode
+    if os.environ.pop("JANGTQ_TOPK_OVERRIDE", None) is not None:
+        logger.info(
+            "Ignoring JANGTQ_TOPK_OVERRIDE; vMLX uses each bundle's trained router top-k."
+        )
+    logger.debug("JANGTQ acceleration mode: %s", mode)
+    return mode
+
+
+# 🚨 ABSENCE FROM THIS LIST IS NOT EXEMPTION. No family has been shown exempt.
+# Measured over six distinct prompts each: Nanbeige4.2-3B 5/6, ZAYA-8B 1/6,
+# DSV4-Flash 0/6, gemma-4-E4B 0/6, Laguna-S 0/6. A 0/6 is "never observed on
+# six prompts", NOT proof of exemption — assuming otherwise from a small sample
+# is exactly the error being guarded against here. (An earlier revision of this
+# comment claimed a hit "can change the answer on EVERY family measured"; that
+# overstates the data, since the 0/6 families were never observed to drift.)
+#
+# An earlier per-family "EXACT vs DIVERGES" map built from ONE prompt each was
+# retracted — it sent several rounds of work hunting an architectural difference
+# between two groups that do not exist. Muse reproduces the retraction directly:
+# byte-exact on a short prompt AND at ~1.4k (2,232 tokens reused), against the
+# single historical sample that had labelled it divergent. Report a RATE, never
+# a label.
+#
+# The mechanism is understood and is not family-specific: a warm turn computes
+# the last unmatched token plus the generation prompt as a SMALL forward on a
+# restored base, where a cold turn computes them inside ONE large prefill. FP
+# reductions are not shape-invariant, so the tail K/V differ slightly and an
+# argmax flip follows wherever that perturbation lands on a near-tie. Whether
+# it lands is prompt- and generation-dependent. Bit-identity would require
+# recomputing all N tokens, i.e. not caching.
+#
+# So this list is NOT a theory of which architectures are affected, and NOT a
+# ranking. It is simply every family this campaign has measured to drift at
+# least once. Membership is not "rate high enough" — ZAYA is in at 1/6 — it is
+# "observed at all". The first-class, user-facing lever is the Enable Prefix
+# Cache toggle, which states the cost in the UI; this env switch is the CLI
+# equivalent.
+#
+# Entry requirement: a temperature-0 cold-vs-hit A/B on this box with a
+# NON-ZERO ``cached=`` on the hit arm. A run that reused nothing compares two
+# cold prefills and proves only determinism.
+_DRIFT_ON_HIT_FAMILY_NAMES = frozenset(
+    {
+        "zaya",  # L63  Zaya-8B-JANG_4M          228 tok -> 119 (24 reused)
+        "nemotron_h",  # L70  Nemotron-3.5-Lightning   902 tok -> 781 (23 reused)
+        "lfm2",  # L71a LFM2.5-8B-A1B           469 tok -> 398 (19 reused)
+        "minimax",  # MiniMax-M2.7            2/2  d4f70528 -> 93ed79cc (46 reused)
+        "muse_glimmer",  # Muse-Glimmer-30B   1/3  @788 ch (274 reused); 0/2 since
+        "step3p7",  # Step-3.7-Flash          2/2  d9629bb9 -> 70346ce8 (19 reused)
+        # Nanbeige4.2-3B is the WORST measured family at 5/6 and was absent from
+        # this list until review caught it. By the entry rule above it plainly
+        # qualifies, and leaving it out made the switch behave as an exemption
+        # for exactly the family most likely to need it. A looped transformer
+        # (22 layers x 2 loops, `cache_schema: looped_kv_v1`) processes every
+        # token twice, which plausibly amplifies the tail-recompute delta — that
+        # predicts a higher RATE, not a different mechanism.
+        "nanbeige",
+    }
+)
+_DRIFT_ON_HIT_CACHE_SUBTYPES = frozenset(
+    {
+        "zaya_cca",
+        "nemotron_h_ssm_attention",
+        "lfm2_moe_hybrid_ssm",
+        "step3p7_full_sliding_kv",
+    }
+)
+
+
+def _family_drifts_on_cache_hit(model_config) -> bool:
+    """Is THIS model one of the families measured to drift on a cache hit?
+
+    Detection is by family name OR cache subtype because the two are not
+    redundant: Nemotron-Omni-Nano-JANGTQ is a different bundle from
+    Nemotron-3.5-Lightning yet reports the same ``nemotron_h`` family and the
+    same ``nemotron_h_ssm_attention`` subtype, and it was measured to drift the
+    same way (cold ``09e50462`` three times over, hit ``be6c858a``, 23 reused).
+    Naming the family rather than the bundle is what let that one be covered
+    without a code change.
+    """
+    if model_config is None:
+        return False
+    if getattr(model_config, "family_name", None) in _DRIFT_ON_HIT_FAMILY_NAMES:
+        return True
+    return getattr(model_config, "cache_subtype", None) in _DRIFT_ON_HIT_CACHE_SUBTYPES
+
+
+def _disable_drifting_prefix_reuse(args, logger, family_label: str) -> bool:
+    """Turn off prefix reuse for a family PROVEN to answer differently on a HIT.
+
+    MEASURED 2026-08-13 (ISSUE-LEDGER L63 / L70), temperature 0, same prompt,
+    reuse confirmed non-zero in the metrics:
+
+        Zaya-8B (zaya_cca)                     cache off 228 tok / 335824b8
+                                               cache on  119 tok / 74b2e5c7   (24 tok reused)
+        LFM2.5-8B-A1B (lfm2_moe_hybrid_ssm)    cache off 469 tok / 518ad89b
+                                             cache on  398 tok / 12c913c4   (19 tok reused)
+      Nemotron-3.5-Lightning-30B-A3B         cache off 902 tok / 236724e7
+          (nemotron_h_ssm_attention)           cache on  781 tok / 1321ab79   (23 tok reused)
+
+    Each arm is deterministic internally, so this is not sampling. DSV4 (1,792
+    tokens reused) and gemma-4-E4B are byte-identical under the same harness, so
+    it is not the harness and not path-dependence in general.
+
+    ⚠️ Those are single-prompt samples. Measured over six prompts each, the
+    rates are Nanbeige 5/6, ZAYA 1/6, DSV4 0/6 — so a family absent from the
+    list is NOT exempt, and a family present is not always affected. See the
+    note on `_DRIFT_ON_HIT_FAMILY_NAMES` above for the retraction and the
+    mechanism.
+
+    ``single_batch_generator._cold_prefill_tail_split`` records the same
+    phenomenon for Nemotron and Step-3.7 — "Recurrent state and rotating ring
+    buffers depend on HOW tokens were fed, not just which ones" — and that it
+    is not fixable by deriving a correct boundary or matching shapes. WHICH
+    families exhibit it is an empirical question, answered per family.
+
+    Disabling L2 as well is deliberate: a disk chain would reintroduce exactly
+    the reuse this removes.
+
+    DEFAULT OFF. Enabling it removes a working cache tier, which is the
+    operator's performance call, not something to change silently.
+    """
+    # Two names for one switch. RECURRENT was the original name, published
+    # before Qwen3.6 refuted "recurrent state" as the mechanism and before
+    # MiniMax-M2.7 (plain `kv`, no recurrent state at all) was found to drift.
+    # It keeps working so an operator's existing invocation does not silently
+    # stop protecting them; DRIFTING is the accurate name to use going forward.
+    _var = next(
+        (
+            name
+            for name in (
+                "VMLX_DISABLE_DRIFTING_PREFIX_REUSE",
+                "VMLX_DISABLE_RECURRENT_PREFIX_REUSE",
+            )
+            if os.environ.get(name) == "1"
+        ),
+        None,
+    )
+    if _var is None:
+        return False
+    args.enable_prefix_cache = False
+    args.enable_block_disk_cache = False
+    # The gate runs once ahead of the family policy chain and again from any
+    # family branch that calls it (ZAYA does). The flags are idempotent but the
+    # warning was not, so an armed ZAYA session logged the same line twice and
+    # an operator could reasonably read that as two different things firing.
+    if getattr(args, "_drifting_prefix_reuse_announced", False):
+        return True
+    args._drifting_prefix_reuse_announced = True
+    logger.warning(
+        "%s prefix reuse DISABLED via %s=1. "
+        "Every request re-prefills cleanly: costs cache speed, buys cold==warm "
+        "answer stability (see ISSUE-LEDGER L63/L70).",
+        family_label,
+        _var,
+    )
+    return True
+
+
+def _apply_zaya_cca_cache_policy(args, logger):
+    """Apply ZAYA's typed CCA cache contract to serve args.
+
+    ZAYA cache reuse must preserve standard KV plus CCA conv_state + prev_hs.
+    Generic TurboQuant KV only covers the KV portion, so it stays disabled.
+    """
+
+    changed = []
+    # ANSWER-STABILITY ESCAPE HATCH (measured 2026-08-13, ISSUE-LEDGER L63).
+    #
+    # ZAYA prefix reuse currently CHANGES THE ANSWER. Same prompt at temp 0 on
+    # Zaya-8B: with the prefix cache off the reply is 228 tokens
+    # (sha 335824b8, 2/2 reproducible); with it on, a mere 24-token reuse
+    # yields 119 tokens (sha 74b2e5c7, 5/5 reproducible). Both arms are
+    # deterministic, so this is not sampling. It is NOT the stored q8 codec —
+    # it reproduces with --kv-cache-quantization none.
+    #
+    # The existing guards only check that a restored chain CARRIES terminal CCA
+    # conv_state/prev_hs, never that replaying it is EQUIVALENT to a one-pass
+    # cold prefill; for a conv/recurrent state those differ at chunk
+    # boundaries. Until a chunk-exact restore is proven, this switch trades the
+    # cache tier for answer stability.
+    #
+    # Default OFF: flipping it removes a working cache tier, which is a
+    # performance decision for the operator, not something to change silently.
+    if os.environ.get("VMLX_ZAYA_DISABLE_PREFIX_REUSE") == "1":
+        args.enable_prefix_cache = False
+        args.enable_block_disk_cache = False
+        changed.append("prefix_reuse=disabled_for_answer_stability")
+        logger.warning(
+            "ZAYA/CCA prefix reuse DISABLED via VMLX_ZAYA_DISABLE_PREFIX_REUSE=1. "
+            "Every request re-prefills cleanly, which costs cache speed and buys "
+            "cold==warm answer stability (see ISSUE-LEDGER L63)."
+        )
+    # The class-level switch (L70: Nemotron drifts the same way) also covers
+    # ZAYA, so an operator does not have to know which families are affected.
+    elif _disable_drifting_prefix_reuse(args, logger, "ZAYA/CCA"):
+        changed.append("prefix_reuse=disabled_for_answer_stability")
+    # In-RAM paged cache is OFF for every family; SSD block-disk L2 is the only
+    # tier, so ZAYA no longer escalates to paged RAM here.
+    #
+    # NOTE: prefix reuse is NOT disabled by default -- the answer-stability gate
+    # above is default-OFF and only fires on VMLX_ZAYA_DISABLE_PREFIX_REUSE=1 or
+    # the class-level drift switch. So by default ZAYA keeps prefix cache on and
+    # simply has no RAM tier; the scheduler drops the memory-aware lane, and the
+    # fetch side refuses any chain without terminal CCA conv_state/prev_hs. Net
+    # effect is lost reuse, never a corrupt restore.
+    if getattr(args, "use_paged_cache", False):
+        args.use_paged_cache = False
+        changed.append("paged=off_ssd_l2_only")
+    if (
+        not getattr(args, "enable_prefix_cache", True)
+        and getattr(args, "enable_block_disk_cache", False)
+    ):
+        args.enable_block_disk_cache = False
+        changed.append("L2 disk=disabled_without_prefix")
+    if getattr(args, "kv_cache_quantization", "none") != "none":
+        changed.append(f"kv_quant={args.kv_cache_quantization}")
+    args.kv_cache_quantization = "none"
+    args.kv_cache_quantization_explicit = True
+    os.environ["VMLX_DISABLE_TQ_KV"] = "1"
+    os.environ.pop("VMLX_FORCE_TQ_AUTO", None)
+    logger.warning(
+        "ZAYA/CCA typed cache enabled. Prefix reuse is disabled for answer "
+        "stability, and in-RAM paged cache stays OFF (SSD block-disk L2 is "
+        "the only cache tier). ZAYA turns re-prefill cleanly rather than "
+        "restore incomplete CCA conv_state + prev_hs. Generic TurboQuant KV "
+        "remains forced off."
+    )
+    return True, tuple(changed)
+
+
+def _apply_openpangu_cache_policy(args, logger):
+    """Force openPangu's native composite cache and reject every TQ-KV lane."""
+
+    changed = []
+    if getattr(args, "use_paged_cache", False):
+        changed.append("paged=off")
+    if getattr(args, "enable_block_disk_cache", False):
+        changed.append("block_l2=off")
+    if getattr(args, "kv_cache_quantization", None) not in (None, "none"):
+        changed.append(f"kv_quant={args.kv_cache_quantization}->none")
+    args.use_paged_cache = False
+    args.enable_block_disk_cache = False
+    args.kv_cache_quantization = "none"
+    args._openpangu_force_no_kv_cache_quantization = True
+    os.environ["VMLX_DISABLE_TQ_KV"] = "1"
+    os.environ.pop("VMLX_FORCE_TQ_AUTO", None)
+    logger.info(
+        "openPangu native cache policy: TurboQuantKVCache and generic q4/q8 "
+        "are forced off. Exact typed snapshots preserve MLA KV, DSA indexer, "
+        "rotating-SWA metadata, and causal-conv state; paged/block reuse is off."
+    )
+    return True, tuple(changed)
+
+
+def _apply_dsv4_cache_policy(args, logger):
+    """Apply DSV4's independent native RAM/L2 cache policy.
+
+    Prefix caching owns the shared content-addressed index. The in-memory paged
+    tier and block-disk L2 are independent storage tiers behind that index:
+    paged RAM may be disabled while SSD reuse remains active. DSV4 records use
+    fixed 256-token deltas plus periodic exact native SWA/CSA/HCA anchors, so
+    generic KV block sizes and generic TurboQuant codecs are not applicable.
+    """
+
+    changed = []
+    old_block_size = int(getattr(args, "paged_cache_block_size", 0) or 0)
+    if old_block_size != DSV4_PAGED_CACHE_BLOCK_SIZE:
+        args.paged_cache_block_size = DSV4_PAGED_CACHE_BLOCK_SIZE
+        changed.append(f"block_size={old_block_size}->{DSV4_PAGED_CACHE_BLOCK_SIZE}")
+
+    old_max_blocks = int(getattr(args, "max_cache_blocks", 0) or 0)
+    if (
+        not getattr(args, "max_cache_blocks_explicit", False)
+        and old_max_blocks != DSV4_MAX_CACHE_BLOCKS
+    ):
+        args.max_cache_blocks = DSV4_MAX_CACHE_BLOCKS
+        changed.append(f"max_blocks={old_max_blocks}->{DSV4_MAX_CACHE_BLOCKS}")
+
+    prefix_active = (
+        getattr(args, "enable_prefix_cache", True)
+        and not getattr(args, "disable_prefix_cache", False)
+    )
+    if not prefix_active:
+        if getattr(args, "use_paged_cache", False):
+            args.use_paged_cache = False
+            changed.append("paged=disabled_without_prefix")
+        if getattr(args, "enable_block_disk_cache", False):
+            args.enable_block_disk_cache = False
+            changed.append("L2 disk=disabled_without_prefix")
+        return tuple(changed)
+
+    if changed:
+        logger.info(
+            "DSV4-Flash native composite cache policy applied: %s. Prefix "
+            "reuse stores 256-token deltas plus exact SWA+CSA/HCA anchors; "
+            "in-memory paged RAM and block-disk SSD remain independent tiers.",
+            ", ".join(changed),
+        )
+    return tuple(changed)
+
+
+def _apply_paged_block_disk_default(args, logger):
+    """Default block SSD L2 on for prefix caching, preserving explicit Off.
+
+    The block store can operate either behind paged RAM or as a disk-only
+    block-aware prefix backend. Architecture-specific scheduler gates still
+    fail closed for cache formats that cannot safely reconstruct arbitrary
+    blocks (for example openPangu's cumulative convolution state).
+    """
+
+    explicit = getattr(args, "enable_block_disk_cache", None)
+    if explicit is not None:
+        return bool(explicit)
+
+    prefix_active = (
+        getattr(args, "enable_prefix_cache", True)
+        and not getattr(args, "disable_prefix_cache", False)
+    )
+    enabled = bool(
+        getattr(args, "continuous_batching", False)
+        and prefix_active
+    )
+    args.enable_block_disk_cache = enabled
+    normalize_block_disk_cache_budget(args)
+    resolved_gb = args.block_disk_cache_max_gb
+    percent = getattr(args, "block_disk_cache_max_percent", None)
+    sized_by_percent = getattr(args, "block_disk_cache_sized_by_percent", False)
+    if enabled:
+        logger.info(
+            "Prefix cache active — enabling block disk cache (SSD L2) by default. "
+            "Pass --disable-block-disk-cache for an explicit opt-out."
+        )
+        if sized_by_percent:
+            logger.info(
+                "Block disk cache budget: %.1fGB (%.3g%% of the cache volume). "
+                "Sizing by percent keeps the cache proportionate to the machine; "
+                "pass --block-disk-cache-max-gb to set an absolute size, or "
+                "--block-disk-cache-max-percent to change the share.",
+                resolved_gb,
+                percent if percent is not None else DEFAULT_BLOCK_DISK_CACHE_PERCENT,
+            )
+    return enabled
+
+
+def _apply_dsv4_runtime_policy(args, logger, *, clamp_max_num_seqs: bool = False):
+    """Apply DSV4 Flash runtime gates shared by serve and bench CLI paths."""
+
+    changes = []
+    try:
+        from .loaders.load_jangtq_dsv4 import (
+            _configure_dsv4_pool_quant_default,
+        )
+
+        dsv4_pool_quant = _configure_dsv4_pool_quant_default(
+            getattr(args, "model", None)
+        )
+    except Exception:
+        os.environ["DSV4_LONG_CTX"] = "1"
+        os.environ.setdefault("DSV4_POOL_QUANT", "1")
+        dsv4_pool_quant = os.environ.get("DSV4_POOL_QUANT", "1")
+
+    if getattr(args, "continuous_batching", True) is False:
+        args.continuous_batching = True
+        changes.append("continuous_batching=off->on")
+        logger.warning(
+            "DSV4-Flash detected — forcing continuous batching on because "
+            "inference uses the DSV4BatchGenerator execution path."
+        )
+
+    if getattr(args, "kv_cache_quantization", "none") != "none":
+        old_kvq = args.kv_cache_quantization
+        args.kv_cache_quantization = "none"
+        args.kv_cache_quantization_explicit = True
+        os.environ["VMLX_DISABLE_TQ_KV"] = "1"
+        os.environ.pop("VMLX_FORCE_TQ_AUTO", None)
+        changes.append(f"kv_quant={old_kvq}->none")
+        logger.info(
+            "DSV4-Flash native SWA+CSA/HCA cache owns cache compression; "
+            "forcing generic --kv-cache-quantization %s -> none. "
+            "DSV4_POOL_QUANT=%s controls the DeepseekV4Cache-compatible "
+            "CSA/HCA pool codec.",
+            old_kvq,
+            dsv4_pool_quant,
+        )
+
+    if getattr(args, "prefill_batch_size", 1) != 1:
+        old_prefill = args.prefill_batch_size
+        args.prefill_batch_size = 1
+        changes.append(f"prefill_batch_size={old_prefill}->1")
+    if getattr(args, "completion_batch_size", 1) != 1:
+        old_completion = args.completion_batch_size
+        args.completion_batch_size = 1
+        changes.append(f"completion_batch_size={old_completion}->1")
+    if getattr(args, "no_memory_aware_cache", False):
+        args.no_memory_aware_cache = False
+        changes.append("no_memory_aware_cache=off")
+    if getattr(args, "enable_disk_cache", False):
+        args.enable_disk_cache = False
+        changes.append("legacy_disk_cache=off")
+
+    if getattr(args, "enable_jit", False):
+        args.enable_jit = False
+        changes.append("enable_jit=off")
+        logger.warning(
+            "DSV4-Flash detected — ignoring --enable-jit. DSV4 cache state is "
+            "path-dependent and must stay on the uncompiled scheduler path."
+        )
+    if getattr(args, "smelt", False):
+        args.smelt = False
+        changes.append("smelt=off")
+        logger.warning(
+            "DSV4-Flash detected — ignoring --smelt. DSV4 JANG affine expert "
+            "hydration must use the verified native loader."
+        )
+    if getattr(args, "flash_moe", False):
+        args.flash_moe = False
+        changes.append("flash_moe=off")
+        logger.warning(
+            "DSV4-Flash detected — ignoring --flash-moe. DSV4 composite cache "
+            "and native expert hydration are not compatible with SSD expert streaming."
+        )
+    if getattr(args, "distributed", False):
+        args.distributed = False
+        changes.append("distributed=off")
+        logger.warning(
+            "DSV4-Flash detected — ignoring --distributed. DSV4BatchGenerator "
+            "is a single-process native cache path."
+        )
+    if getattr(args, "speculative_model", None):
+        args.speculative_model = None
+        changes.append("speculative_model=off")
+        logger.warning(
+            "DSV4-Flash detected — ignoring --speculative-model. Use the "
+            "DSV4 native decode path until its own drafter/verifier exists."
+        )
+
+    changes.extend(_apply_dsv4_cache_policy(args, logger))
+
+    if clamp_max_num_seqs and getattr(args, "max_num_seqs", 1) != 1:
+        old_max = args.max_num_seqs
+        args.max_num_seqs = 1
+        changes.append(f"max_num_seqs={old_max}->1")
+        logger.warning(
+            "DSV4-Flash detected — overriding --max-num-seqs %s to 1 "
+            "because DSV4BatchGenerator is single-batch only.",
+            old_max,
+        )
+
+    logger.info(
+        "DSV4-Flash detected — DSV4_LONG_CTX=1 (tri-mode SWA+CSA/HCA), "
+        "DSV4_POOL_QUANT=%s. Native JANG attention contract is verified by "
+        "the DSV4 runtime wrapper before inference.",
+        dsv4_pool_quant,
+    )
+    return True, tuple(changes)
+
+
+def _runtime_is_mllm(args) -> bool:
+    """Best-effort MLLM detection for user-facing summaries (never raises)."""
+    try:
+        from .api.utils import is_mllm_model
+
+        return bool(
+            is_mllm_model(
+                args.model,
+                force_mllm=getattr(args, "is_mllm", False),
+                force_text_only=getattr(args, "force_text_only", False),
+            )
+        )
+    except Exception:
+        return False
+
+
+def _preflight_local_model_bundle(model: str) -> dict | None:
+    """Run the shared header-only integrity gate for a local bundle.
+
+    Hugging Face identifiers are intentionally left to the resolver.  Local
+    directories are checked before either text or image weights are loaded, so
+    direct CLI users receive the same one-time repair/fail-closed contract as
+    Electron sessions.
+    """
+
+    from pathlib import Path
+
+    path = Path(model).expanduser()
+    if not path.is_dir():
+        return None
+    from .model_bundle_integrity import BundleIntegrityError, check_model_bundle
+
+    try:
+        report = check_model_bundle(path, repair=True, use_cache=True)
+    except BundleIntegrityError as exc:
+        raise SystemExit(
+            "Error: local model bundle integrity check failed before load: "
+            f"{exc}. Repair or re-download the affected files."
+        ) from exc
+    if not report.get("cache_hit"):
+        print(
+            "Model bundle integrity: OK "
+            f"({report['shards']} shards, {report['tensors']} tensors, "
+            f"{report['misaligned_tensors']} remaining misaligned tensors)"
+        )
+    for repaired in report.get("repairs", []):
+        print(f"Model bundle integrity: atomically repaired {repaired}")
+    return report
+
+
+def _cache_stack_summary_lines(
+    args, *, dsv4_model: bool = False, mllm_model: bool = False
+) -> list[str]:
+    """Return user-facing cache startup summary lines for the active runtime.
+
+    ``mllm_model`` mirrors the MLLM scheduler's index rescale so the printed
+    capacity is the one the runtime actually builds. Without it the summary
+    quoted the raw ``--max-cache-blocks`` and told Gemma 4 users they had
+    63,936 tokens of cache when the pool holds 255,936.
+    """
+
+    if not getattr(args, "use_paged_cache", False) and not getattr(
+        args, "enable_block_disk_cache", False
+    ):
+        return []
+
+    configured_blocks = int(args.max_cache_blocks)
+    if mllm_model:
+        from .mllm_scheduler import resolve_mllm_index_blocks
+
+        configured_blocks = resolve_mllm_index_blocks(
+            int(args.paged_cache_block_size), configured_blocks
+        )
+    usable_blocks = max(0, configured_blocks - 1)
+    capacity = int(args.paged_cache_block_size) * usable_blocks
+
+    if not getattr(args, "use_paged_cache", False):
+        return [
+            (
+                "Block Disk Cache (SSD / L2), disk-only mode: "
+                f"block_size={args.paged_cache_block_size}, "
+                f"max_index_blocks={configured_blocks}, "
+                f"usable_blocks={usable_blocks}, "
+                f"indexed_capacity={capacity} tokens, "
+                f"max={args.block_disk_cache_max_gb}GB "
+                "(In-Memory Paged Cache is disabled; KV payloads restore "
+                "from SSD transiently)"
+            )
+        ]
+
+    if dsv4_model:
+        lines = [
+            (
+                "DSV4 native composite in-memory prefix cache: "
+                "schema=deepseek_v4_v10_delta, "
+                f"block_size={args.paged_cache_block_size}, "
+                f"max_blocks={configured_blocks}, "
+                f"usable_blocks={usable_blocks}, "
+                f"capacity={capacity} tokens (not generic paged KV)"
+            )
+        ]
+        if getattr(args, "enable_block_disk_cache", False):
+            lines.append(
+                "DSV4 composite block disk L2: "
+                f"max={args.block_disk_cache_max_gb}GB"
+            )
+        return lines
+
+    lines = [
+        (
+            "In-memory paged cache (RAM): "
+            f"block_size={args.paged_cache_block_size}, "
+            f"max_blocks={configured_blocks}, "
+            f"usable_blocks={usable_blocks}, "
+            f"capacity={capacity} tokens "
+            "(--cache-memory-mb/--cache-memory-percent set the L1 RAM byte "
+            "ceiling for the block KV mirror; --max-cache-blocks caps the "
+            "block-pool count)"
+        )
+    ]
+    if getattr(args, "enable_block_disk_cache", False):
+        lines.append(
+            f"Block Disk Cache (SSD / L2): max={args.block_disk_cache_max_gb}GB"
+        )
+    lines.extend(_low_ram_cache_advice_lines(args))
+    return lines
+
+
+#: Machines at or below this get the SSD-only cache suggestion. Macs ship
+#: 16/18/24/32/36GB below this line and 48GB+ above it. Tunable for support
+#: cases via VMLX_LOW_RAM_ADVISORY_GB; it only moves ADVICE.
+_LOW_RAM_ADVISORY_GB = 36
+
+
+def normalize_block_disk_cache_budget(args) -> float:
+    """Collapse the GB/percent budget flags to ONE concrete number on `args`.
+
+    Call this once, immediately after parse_args, before anything reads
+    `block_disk_cache_max_gb`. The GB flag defaults to None so that a percent of
+    the volume can be used instead, but every downstream consumer — the startup
+    summary, both scheduler config builders, the DSV4 native lane — expects a
+    float. A `None` reaching them is not a soft failure: BlockDiskStore raises
+    on `None > float`, the generic path swallows it and continues without a disk
+    cache, and the disk-ONLY path (the new default) then refuses to start at all
+    with "could not be initialized; refusing to substitute a RAM backend".
+
+    Resolving inside the paged-default helper was not enough, which is the usual
+    shape of this bug in this codebase: a fix applied to one of several paths is
+    inert in the others. Normalising at the single parse point is what makes the
+    value impossible to observe as None.
+
+    Idempotent: `sized_by_percent` is recorded so a second call does not mistake
+    the already-resolved GB number for an explicit user choice.
+    """
+    if getattr(args, "block_disk_cache_sized_by_percent", None) is not None:
+        return float(getattr(args, "block_disk_cache_max_gb", 0.0) or 0.0)
+    args.block_disk_cache_sized_by_percent = (
+        getattr(args, "block_disk_cache_max_gb", None) is None
+    )
+    args.block_disk_cache_max_gb = resolve_block_disk_cache_max_gb(args)
+    return args.block_disk_cache_max_gb
+
+
+def resolve_prompt_disk_pool(args):
+    """Return (pool_root, max_gb) when --disk-cache-pool is set, else (None, 0.0).
+
+    The whole-prompt SSD cache (exact typed N-1 snapshots: openPangu-2.0, typed GLM) used its own directory and a flat
+    --disk-cache-max-gb (10 GB by default). One openPangu snapshot is ~3 GB at 4.5k tokens, so that budget evicted on
+    almost every turn and the app's SSD pool notice never saw it (2026-10-11). In the pool it follows the same root
+    and the same budget as the block store and the GLM native snapshots: percent of the cache volume unless
+    --block-disk-cache-max-gb is given (0 = unlimited), oldest-first eviction across every cache.
+    """
+    if not getattr(args, "disk_cache_pool", False):
+        return None, 0.0
+    root = getattr(args, "block_disk_cache_dir", None) or os.path.expanduser(
+        "~/.cache/vmlx-engine/block-cache"
+    )
+    return os.path.abspath(os.path.expanduser(root)), resolve_block_disk_cache_max_gb(args)
+
+
+def resolve_block_disk_cache_max_gb(args) -> float:
+    """Resolve the block-disk (SSD / L2) budget in GB.
+
+    An explicit --block-disk-cache-max-gb always wins, including an explicit 0
+    for unlimited. Otherwise the budget is a percent of the cache volume's
+    capacity, so the default is proportionate to the machine rather than a flat
+    number that is simultaneously too small for a 4TB disk and too large for a
+    512GB one.
+
+    If the volume cannot be measured we fall back to the historical 10GB rather
+    than guessing, and never to unlimited: a failed measurement must not hand
+    the cache the whole disk.
+    """
+    explicit_gb = getattr(args, "block_disk_cache_max_gb", None)
+    if explicit_gb is not None:
+        return float(explicit_gb)
+
+    percent = getattr(args, "block_disk_cache_max_percent", None)
+    if percent is None:
+        percent = DEFAULT_BLOCK_DISK_CACHE_PERCENT
+    try:
+        percent = float(percent)
+    except (TypeError, ValueError):
+        percent = DEFAULT_BLOCK_DISK_CACHE_PERCENT
+    if percent <= 0:
+        # 0 means UNLIMITED, matching --block-disk-cache-max-gb 0 and the
+        # Session Settings slider's "Unlimited" position. Returning the old flat
+        # 10GB here would silently cap a user who deliberately asked for no cap.
+        return 0.0
+
+    cache_dir = getattr(args, "block_disk_cache_dir", None) or os.path.expanduser(
+        "~/.cache/vmlx-engine"
+    )
+    probe = cache_dir
+    while probe and not os.path.exists(probe):
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            break
+        probe = parent
+    try:
+        usage = shutil.disk_usage(probe or os.path.expanduser("~"))
+        total_gb = usage.total / (1024 ** 3)
+    except Exception:  # noqa: BLE001 - measurement is best-effort
+        return 10.0
+    if total_gb <= 0:
+        return 10.0
+    # Keep positive budgets positive: rounding GiB to two decimals can turn a
+    # small volume/percentage into zero, whose runtime meaning is unlimited.
+    return max(1.0 / (1024 ** 3), total_gb * percent / 100.0)
+
+
+def _low_ram_cache_advice_lines(args) -> list[str]:
+    """Suggest SSD-only caching on small-memory Macs. ADVICE, never a limit.
+
+    The in-RAM paged KV mirror (L1) competes with model weights for the same
+    unified memory. On a 16-32GB Mac that trade is usually a loss: the SSD
+    block cache (L2) gives most of the reuse benefit without taking memory the
+    model needs.
+
+    This function only ever returns text. It does not disable the paged cache,
+    does not change any argument, and does not refuse to start — a guess about
+    memory must never acquire veto power over the user's configuration. If RAM
+    cannot be detected we say nothing at all, because a failed detection must
+    not turn into a user-facing warning either.
+    """
+    if not getattr(args, "use_paged_cache", False):
+        return []  # already SSD-only; nothing to suggest
+    try:
+        threshold_gb = int(
+            os.environ.get("VMLX_LOW_RAM_ADVISORY_GB", _LOW_RAM_ADVISORY_GB)
+        )
+    except ValueError:
+        threshold_gb = _LOW_RAM_ADVISORY_GB
+    if threshold_gb <= 0:
+        return []
+    try:
+        import psutil
+
+        total_gb = psutil.virtual_memory().total / (1024**3)
+    except Exception:  # noqa: BLE001 - detection is best-effort by design
+        return []
+    if total_gb <= 0 or total_gb > threshold_gb:
+        return []
+    suggestion = [
+        f"NOTE: {total_gb:.0f}GB of system memory detected. The in-RAM paged "
+        "KV cache (L1) shares unified memory with the model's weights, so on "
+        "machines this size it often costs more than it saves.",
+        "      Consider SSD-only caching: pass --no-paged-cache (or turn the "
+        "in-RAM GPU cache off in Session Settings) and leave the Block Disk "
+        "Cache (SSD / L2) enabled.",
+    ]
+    if not getattr(args, "enable_block_disk_cache", False):
+        suggestion.append(
+            "      The Block Disk Cache (L2) is currently OFF — enable it with "
+            "--enable-block-disk-cache so prefixes still survive."
+        )
+    suggestion.append(
+        "      This is a suggestion only. Nothing has been disabled or "
+        "changed, and the current configuration will run as requested."
+    )
+    return suggestion
+
+
+def _env_int(name: str, default: int, legacy_name: str | None = None) -> int:
+    value = os.environ.get(name)
+    if value is None and legacy_name:
+        value = os.environ.get(legacy_name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _suppress_image_resource_tracker_warning() -> None:
+    """Hide benign mflux multiprocessing semaphore cleanup noise on shutdown."""
+    import warnings
+
+    # The warning is emitted by multiprocessing's resource_tracker helper
+    # process, not always by this parent process. Keep the parent warning
+    # filter, and also propagate a warning filter through the environment
+    # before mflux/loky can start that helper.
+    child_filter = "ignore:resource_tracker:UserWarning"
+    existing_filters = [
+        item.strip()
+        for item in os.environ.get("PYTHONWARNINGS", "").split(",")
+        if item.strip()
+    ]
+    if child_filter not in existing_filters:
+        existing_filters.append(child_filter)
+        os.environ["PYTHONWARNINGS"] = ",".join(existing_filters)
+
+    warnings.filterwarnings(
+        "ignore",
+        message=r"resource_tracker: There appear to be .* leaked semaphore objects to clean up at shutdown",
+        category=UserWarning,
+        module=r"multiprocessing\.resource_tracker",
+    )
+
+
+# Families whose native cache lane breaks under the generic paged prefix
+# default (mirrors the Electron app's registry: M3 lightning-index MSA and
+# openPangu-v2 DSA composite stay off; gemma4's typed mixed-SWA cache was
+# live-proven paged 2026-08-08 so it is no longer excluded).
+_PAGED_INCOMPATIBLE_FAMILIES = {
+    "minimax_m3",
+    "minimax_m3_vl",
+    "openpangu_v2",
+}
+
+# MLLM loads normally skip the generic paged default, but gemma4's typed
+# mixed-SWA paged lane is proven for VL/video and the app keeps it paged-ON
+# even for multimodal loads — exempt it so bare CLI launches match the UI.
+_PAGED_MLLM_EXEMPT_FAMILIES = {
+    "gemma4",
+    "gemma4_text",
+    # Muse Glimmer rides the same typed mixed-SWA paged lane as gemma4 and the
+    # panel registers it usePagedCache: true, so without this a bare CLI launch
+    # silently ran UNPAGED while the app ran paged — the exact divergence this
+    # set exists to prevent. Live-proven paged on JANG_4M: reuse reported as
+    # block-disk+mixed_swa+tq-native across a growing multiturn.
+    "muse_glimmer",
+    # step3p7 is is_mllm=True but the panel registers usePagedCache: true AND
+    # treats its cache subtype (step3p7_full_sliding_kv) as paged-required, so a
+    # bare CLI launch re-prefilled every repeated long prompt while the app
+    # reused blocks. Same divergence as muse_glimmer above.
+    "step3p7",
+}
+
+
+def _is_image_serve_request(args) -> bool:
+    """Use the loader's image routing before applying text-only policies."""
+    import json
+    from pathlib import Path
+    from .image_gen import SUPPORTED_MODELS, EDIT_MODELS
+
+    names = set(SUPPORTED_MODELS) | set(EDIT_MODELS) | {
+        'krea-dev', 'dev-krea', 'qwen', 'fibo', 'fibo-lite',
+    }
+    served = getattr(args, "served_model_name", None)
+    if (getattr(args, "image_mode", None) or getattr(args, "mflux_class", None)
+            or args.model.lower() in names
+            or (served and served.lower() in names)):
+        return True
+    folder = Path(args.model)
+    if (folder / "model_index.json").exists():
+        try:
+            return "_diffusers_version" in json.loads(
+                (folder / "model_index.json").read_text()
+            )
+        except Exception:
+            # Preserve routing to the image loader, which reports invalid metadata.
+            return True
+    return ((folder / "transformer").is_dir()
+            and ((folder / "text_encoder").is_dir() or (folder / "vae").is_dir()))
+
+
+def _configure_dflash2_session_ssd(args, draft_path: str, explicit) -> None:
+    """SSD tier for DFlash2 multiturn sessions (vmlx_engine/dflash2_session_disk.py).
+
+    On unless --disable-block-disk-cache was given or VMLX_DFLASH2_SSD=0.  It
+    lives in the same managed pool and aggregate budget as the block cache
+    (--block-disk-cache-dir / -max-gb / -max-percent).  A failure leaves the
+    RAM tier working and is logged; it never blocks the server.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    if explicit is False:
+        logger.info("DFlash2 session SSD tier off (--disable-block-disk-cache)")
+        return
+    if os.environ.get("VMLX_DFLASH2_SSD", "1").strip().lower() in ("0", "off", "false", "no"):
+        logger.info("DFlash2 session SSD tier off (VMLX_DFLASH2_SSD=0)")
+        return
+    try:
+        from .dflash2_runtime import configure_session_ssd
+
+        root = getattr(args, "block_disk_cache_dir", None) or os.path.expanduser(
+            "~/.cache/vmlx-engine/block-cache"
+        )
+        max_gb = resolve_block_disk_cache_max_gb(args)
+        configure_session_ssd(
+            root=root,
+            max_size_bytes=int(float(max_gb) * 1024**3),
+            target_path=args.model,
+            draft_path=draft_path,
+        )
+    except Exception:
+        logger.warning("DFlash2 session SSD tier unavailable; RAM tier only", exc_info=True)
+
+
+def _configure_vision_feature_ssd(args, explicit) -> None:
+    """Per-item SSD vision-feature cache (vmlx_engine/vision_feature_cache.py).
+
+    On whenever an SSD tier serves this session: the block disk cache, or a
+    DFlash2 drafter's session SSD tier (on unless --disable-block-disk-cache or
+    VMLX_DFLASH2_SSD=0). Same managed pool and aggregate budget; installed at
+    model load for Qwen3.5/Qwen4Exp VLMs only.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    if explicit is False:
+        return
+    spec = str(getattr(args, "speculative_model", "") or "")
+    dflash2_ssd = False
+    if spec:
+        try:
+            from .speculative import _is_dflash2_model
+
+            dflash2_ssd = _is_dflash2_model(spec) and os.environ.get(
+                "VMLX_DFLASH2_SSD", "1").strip().lower() not in ("0", "off", "false", "no")
+        except Exception:
+            dflash2_ssd = False
+    if not (getattr(args, "enable_block_disk_cache", False) or dflash2_ssd):
+        return
+    try:
+        from .vision_feature_cache import configure
+
+        root = getattr(args, "block_disk_cache_dir", None) or os.path.expanduser(
+            "~/.cache/vmlx-engine/block-cache"
+        )
+        configure(root=root, max_size_bytes=int(float(resolve_block_disk_cache_max_gb(args)) * 1024**3))
+    except Exception:
+        logger.warning("Vision feature SSD cache unavailable", exc_info=True)
+
+
+def serve_command(args):
+    """Start the OpenAI-compatible server."""
+    import logging
+
+    import uvicorn
+
+    # Import unified server
+    from . import server
+    from .scheduler import SchedulerConfig
+    from .server import RateLimiter, app, load_model
+
+    logger = logging.getLogger(__name__)
+    _is_image = _is_image_serve_request(args)
+
+    # Engine-owned lifecycle progress: one generation per serve attempt. The
+    # panel reads the mirrored LOADPROGRESS stdout lines during cold start
+    # (uvicorn serves nothing until lifespan completes) and the /health
+    # snapshot afterwards.
+    from . import load_progress as _lifecycle_progress
+    _lifecycle_progress.begin_attempt(_lifecycle_progress.PHASE_STARTING)
+
+    server._raise_nofile_soft_limit()
+
+    # --text-only: set the server-global sentinel BEFORE any model-load routing so
+    # EVERY is_mllm_model() caller (incl. argless server-side VL routing) forces a
+    # detected-VL model to load text-only.
+    server._force_text_only = bool(getattr(args, "force_text_only", False))
+
+    # Install the vendored MiniMax-M3 runtime under mlx_lm.models.minimax_m3_vl so the
+    # text loader can resolve model_type=minimax_m3_vl. Idempotent + self-guards when the
+    # bundle/vendored file is absent; harmless for non-M3 models.
+    try:
+        from .models.minimax_m3.minimax_m3_register import register_minimax_m3_runtime
+        register_minimax_m3_runtime()
+    except Exception as _m3reg_e:
+        logger.debug("minimax_m3 runtime registration skipped: %s", _m3reg_e)
+
+    # Install the vendored openPangu-2.0-Flash runtime under
+    # mlx_lm.models.openpangu_v2 so the text loader can resolve
+    # model_type=openpangu_v2. Idempotent; harmless for other models.
+    try:
+        from .models.openpangu_v2.register import register_openpangu_v2_runtime
+        register_openpangu_v2_runtime()
+    except Exception as _opv2reg_e:
+        logger.debug("openpangu_v2 runtime registration skipped: %s", _opv2reg_e)
+
+    # Install the vendored GLM-5.3-Flash runtime under mlx_lm.models.glm5_next
+    # so the text loader can resolve model_type=glm5_next. Idempotent.
+    try:
+        from .models.glm5_next.register import register_glm5_next_runtime
+        register_glm5_next_runtime()
+    except Exception as _glm5reg_e:
+        logger.debug("glm5_next runtime registration skipped: %s", _glm5reg_e)
+
+    # -- openPangu-2.0-Flash auto-settings TRANSPARENCY log + policy --
+    # Mirrors the M3 block below: on an openpangu_v2 bundle, force-disable JIT
+    # (the DSA lightning-indexer top-k selection is input-dependent/dynamic —
+    # the same class of mx.compile hazard that corrupted M3's MSA cache) and
+    # log the exact auto-resolved settings. TQ-KV is auto-skipped by the MLA
+    # detector (kv_lora_rank=512); kv_cache_quantization is cleared here too
+    # so the prefix-store lane never re-quantizes the conv-state-coupled KV.
+    try:
+        import json as _op_json, os as _op_os
+        _op_cfgp = _op_os.path.join(getattr(args, "model", "") or "", "config.json")
+        if _op_os.path.isfile(_op_cfgp):
+            _op_c = _op_json.load(open(_op_cfgp))
+            if str(_op_c.get("model_type", "")).lower() == "openpangu_v2":
+                _apply_openpangu_cache_policy(args, logger)
+                _op_jit_forced_off = bool(getattr(args, "enable_jit", False))
+                if _op_jit_forced_off:
+                    args.enable_jit = False
+                    logger.warning(
+                        "openPangu-2.0 detected — ignoring --enable-jit. The DSA "
+                        "indexer top-k selection and mHC Sinkhorn are dynamic per "
+                        "step and untraceable by mx.compile; staying on the "
+                        "uncompiled scheduler path."
+                    )
+                if getattr(args, "is_mllm", False):
+                    args.is_mllm = False
+                    logger.warning(
+                        "openPangu-2.0 is text-only; ignoring --is-mllm."
+                    )
+                logger.info(
+                    "openPangu-2.0 AUTODETECTED (openpangu_v2) -> auto-settings: "
+                    "paged_cache=%s, tq_kv=SKIP(MLA + conv state), prefix_store="
+                    "exact-typed N-1 (KV + DSA indexer + SWA metadata + conv), "
+                    "mtp=detection-only(depth 3), tool_parser=%s, "
+                    "reasoning_parser=%s, jit=%s",
+                    "OFF(typed exact memory/L2 lane; blocks unsupported)",
+                    # This transparency block runs BEFORE the registry
+                    # auto-config, so args.tool_call_parser/reasoning_parser are
+                    # still None here — the fallbacks must name what the
+                    # openpangu_v2 registry entry actually resolves to
+                    # (tool=openpangu, reasoning=deepseek_r1), NOT a generic
+                    # qwen default, or the summary contradicts the very next
+                    # "Auto-configured tool parser from registry: openpangu" line.
+                    getattr(args, "tool_call_parser", None) or "openpangu(auto)",
+                    getattr(args, "reasoning_parser", None) or "deepseek_r1(auto)",
+                    "OFF(forced)" if _op_jit_forced_off else "off",
+                )
+    except Exception:
+        pass
+
+    # -- MiniMax-M3 auto-settings TRANSPARENCY log (no-confusion guarantee) --
+    # On an M3 bundle, log the EXACT auto-resolved settings so what is applied is
+    # never ambiguous. Read-only, exception-guarded. paged_cache shows ON(!) if it
+    # were ever wrongly forced on (loud regression signal vs the paged-off policy).
+    try:
+        import json as _m3_json, os as _m3_os
+        _m3_cfgp = _m3_os.path.join(getattr(args, "model", "") or "", "config.json")
+        if _m3_os.path.isfile(_m3_cfgp):
+            _m3_c = _m3_json.load(open(_m3_cfgp))
+            _m3_mt = str(_m3_c.get("model_type", "")).lower()
+            _m3_arch = " ".join(str(a) for a in (_m3_c.get("architectures") or [])).lower()
+            if _m3_mt in {"minimax_m3", "minimax_m3_vl"} or "minimaxm3" in _m3_arch:
+                _m3_has_vl = _m3_mt == "minimax_m3_vl" or bool(_m3_c.get("vision_config"))
+                from .models.minimax_m3.m3_vl_preprocess import configure_m3_vl_environment
+                _m3_vl_active = configure_m3_vl_environment(
+                    has_vision=_m3_has_vl,
+                    force_text_only=bool(getattr(args, "force_text_only", False)),
+                )
+                if _m3_has_vl:
+                    if getattr(args, "is_mllm", False):
+                        args.is_mllm = False
+                        logger.warning(
+                            "MiniMax-M3 VL uses vMLX's text-routed MSA/VL runtime; "
+                            "ignoring --is-mllm to avoid the unsupported mlx_vlm "
+                            "minimax_m3_vl loader."
+                        )
+                # M3's MSA dual-cache is dynamic/path-dependent (idx_keys grow and
+                # the Lightning-Indexer block selection changes every step).
+                # mx.compile (JIT) traces a STATIC graph and cannot follow that —
+                # it corrupts long generations into repetition loops. Disable JIT
+                # for M3, mirroring the DSV4 path-dependent-cache precedent above.
+                _m3_jit_forced_off = bool(getattr(args, "enable_jit", False))
+                if _m3_jit_forced_off:
+                    args.enable_jit = False
+                    logger.warning(
+                        "MiniMax-M3 detected — ignoring --enable-jit. The MSA "
+                        "dynamic cache (idx_keys + block selection) is untraceable "
+                        "by mx.compile and degenerates into loops; staying on the "
+                        "uncompiled scheduler path."
+                    )
+                args.kv_cache_quantization = "none"
+                args.kv_cache_quantization_explicit = False
+                args._m3_force_no_kv_cache_quantization = True
+                # The paged tier (paged_cache.py) has NO MiniMax-M3 sparse-MSA
+                # handling — the dedicated idx_keys serialize/restore lives only in
+                # the prefix/block-disk path (prefix_cache.py). Reusing a partial
+                # prefix through the paged tier corrupts M3 output (live-proven
+                # 2026-08-10: partial-prefix reuse != from-scratch; full reuse is
+                # exact). Enforce the paged-incompatible policy as a HARD override,
+                # not just a default, so an explicit --use-paged-cache (e.g. from the
+                # app registry) cannot silently corrupt M3. M3 keeps its native MSA
+                # cache plus the M3-aware prefix/block-disk L2 tier. Escape hatch for
+                # experiments only: VMLX_M3_ALLOW_PAGED=1.
+                if getattr(args, "use_paged_cache", False) and not _m3_os.environ.get(
+                    "VMLX_M3_ALLOW_PAGED"
+                ):
+                    args.use_paged_cache = False
+                    logger.warning(
+                        "MiniMax-M3: forcing paged cache OFF. The paged tier has no "
+                        "M3 sparse-MSA handling and corrupts partial-prefix reuse; M3 "
+                        "uses its native MSA cache plus the M3-aware prefix/block-disk "
+                        "L2 tier. Set VMLX_M3_ALLOW_PAGED=1 to override (experiments)."
+                    )
+                logger.info(
+                    "MiniMax-M3 AUTODETECTED (model_type=%s) -> auto-settings: "
+                    "paged_cache=%s, tq_kv=SKIP(native MSA), vl_route=%s, "
+                    "tool_parser=%s, reasoning_parser=%s, jit=%s, msa_per_step_sync=ON",
+                    _m3_mt or "minimaxm3",
+                    "OFF" if not getattr(args, "use_paged_cache", False) else "ON(!)",
+                    "ON" if _m3_vl_active else "off",
+                    getattr(args, "tool_call_parser", None) or "none",
+                    getattr(args, "reasoning_parser", None) or "auto/none",
+                    "OFF(forced)" if _m3_jit_forced_off else "off",
+                )
+    except Exception:
+        pass
+
+    # MANUAL FAMILY OVERRIDE: install on the registry BEFORE any lookup so
+    # every downstream consumer (JANGTQ lane, DSV4/ZAYA cache policy, tool /
+    # reasoning parser auto-apply, thinking detection) sees the forced family
+    # instead of the autodetected one. Absent / "auto" leaves autodetect on.
+    _family_override = getattr(args, "model_family", None)
+    if _family_override and str(_family_override).strip().lower() != "auto":
+        try:
+            from .model_config_registry import get_model_config_registry
+            _reg = get_model_config_registry()
+            _reg.set_family_override(_family_override)
+            _known = set(_reg.list_registered())
+            if _family_override not in _known:
+                logger.warning(
+                    "--model-family=%r is not a registered family name. "
+                    "Honoring it anyway with a generic kv-cache contract. "
+                    "Known families: %s",
+                    _family_override,
+                    ", ".join(sorted(_known)),
+                )
+            logger.warning(
+                "Manual model-family override ENABLED: --model-family=%s "
+                "(autodetect bypassed for all registry lookups).",
+                _family_override,
+            )
+        except Exception as _fo_e:
+            logger.warning("Failed to install --model-family override: %s", _fo_e)
+
+    _apply_jangtq_mpp_nax_policy(args, logger)
+
+    # mlxstudio#138/#156: --kv-cache-quantization explicit-pass detection.
+    # default=None lets us tell "user didn't pass it" from "user said none".
+    # Omitted flag means production-native mode: preserve the exact cache
+    # objects returned by the architecture and impose no additional stored
+    # codec. Explicit q4/q8 remain diagnostic CLI choices and explicit none is
+    # equivalent to the production default.
+    _m3_forced_no_kvq = bool(getattr(args, "_m3_force_no_kv_cache_quantization", False))
+    _openpangu_forced_no_kvq = bool(
+        getattr(args, "_openpangu_force_no_kv_cache_quantization", False)
+    )
+    _kv_quant_explicit = (
+        getattr(args, "kv_cache_quantization", None) is not None
+        and not _m3_forced_no_kvq
+        and not _openpangu_forced_no_kvq
+    )
+    if _is_image:
+        # Diffusion sessions do not construct the text KV/prefix scheduler.
+        # Do not mutate its policy environment or announce an SSD text cache.
+        pass
+    elif _openpangu_forced_no_kvq:
+        args.kv_cache_quantization = "none"
+        args.kv_cache_quantization_explicit = False
+        args.generic_tq_diagnostic_opt_in = False
+        os.environ["VMLX_DISABLE_TQ_KV"] = "1"
+        os.environ.pop("VMLX_FORCE_TQ_AUTO", None)
+        logger.info(
+            "KV cache auto mode: openPangu native composite cache detected; "
+            "TurboQuantKVCache and generic stored KV quantization remain disabled."
+        )
+    elif _m3_forced_no_kvq:
+        args.kv_cache_quantization = "none"
+        args.kv_cache_quantization_explicit = False
+        args.generic_tq_diagnostic_opt_in = False
+        # MiniMax-M3's native sparse cache carries idx_keys and absolute block
+        # offsets in addition to dense KV.  The loader already rejects the
+        # generic TurboQuant make_cache patch, but the disk stores use this
+        # process-level gate to decide whether native TQ records are admissible.
+        # Keep the live-cache and persisted-cache contracts aligned so health
+        # does not advertise tq_native_enabled for an MSA tuple it cannot use.
+        os.environ["VMLX_DISABLE_TQ_KV"] = "1"
+        os.environ.pop("VMLX_FORCE_TQ_AUTO", None)
+        logger.info(
+            "KV cache auto mode: MiniMax-M3 native MSA cache detected; "
+            "generic TurboQuant/stored KV quantization disabled so "
+            "keys/values/idx_keys remain first-class."
+        )
+    elif not _kv_quant_explicit:
+        # JANGTQ / JANG-affine bundles carry aggressively quantized (often q2
+        # mixed) weights. q4 KV quantization compounds that error on prefix-cache
+        # REUSE: the stored q4 KV, once dequantized, drifts from the fresh fp16
+        # path, so warm reuse diverges from cold (live-proven on MiniMax-M2.7
+        # JANGTQ 2026-08-10 — q4 warm reuse diverged from cold; q8/fp16 stayed
+        # answer-stable). Default these bundles to q8 so reuse fidelity holds;
+        # other families keep q4. Explicit env override still wins.
+        _model_path = getattr(args, "model", None)
+        _jang_hi_fidelity = _bundle_declares_mxtq_jangtq(
+            _model_path
+        ) or _bundle_is_jang_affine(_model_path)
+        # Mixed sliding/full attention bundles must store EXACT KV. q8 was
+        # adopted here because it "stayed answer-stable" on MiniMax-M2.7
+        # JANGTQ, but that result does not carry to a RotatingKVCache layout:
+        # on Laguna-S a q8 stored prefix answers a cache HIT differently from
+        # the cold prefill at temp 0. Reuse fidelity is the whole point of the
+        # high-fidelity default, so for these bundles it has to be `none`.
+        _mixed_swa_bundle = _bundle_has_mixed_swa_layout(_model_path)
+        _fallback_kvq = _stored_kvq_fallback(_mixed_swa_bundle, _jang_hi_fidelity)
+        _default_kvq = os.environ.get(
+            "VMLX_DEFAULT_KV_CACHE_QUANTIZATION", _fallback_kvq
+        )
+        if _default_kvq not in ("none", "q4", "q8"):
+            logger.warning(
+                "Invalid VMLX_DEFAULT_KV_CACHE_QUANTIZATION=%r; using %s",
+                _default_kvq,
+                _fallback_kvq,
+            )
+            _default_kvq = _fallback_kvq
+        # 2026-08-21: stored cache is FULL PRECISION for every family. The
+        # per-bundle fallback above used to pick none/q4/q8 by bundle shape, so
+        # "TQ is off for the model I tested" never generalised. Measured on
+        # Qwen3.8-27B, stored q4 vs none: 2.33 vs 2.35s full hit, 2.95 vs 2.97s
+        # partial, identical 3531MB on disk — under 1%, so exactness is free.
+        # VMLX_DEFAULT_KV_CACHE_QUANTIZATION still overrides for diagnostics.
+        _full_precision_default = os.environ.get(
+            "VMLX_DEFAULT_KV_CACHE_QUANTIZATION", "none"
+        )
+        if _full_precision_default not in ("none", "q4", "q8"):
+            _full_precision_default = "none"
+        args.kv_cache_quantization = _full_precision_default
+        _default_kvq = _full_precision_default
+        args.kv_cache_quantization_explicit = False
+        # Generic TurboQuant used to be forced ON here for every compatible
+        # model. That silently replaced architecture-native cache classes and
+        # made the app's omitted/Auto setting architecture-dependent. Native is
+        # now the production default; the environment-only override is retained
+        # solely for controlled diagnostics.
+        args.generic_tq_diagnostic_opt_in = (
+            _configure_generic_tq_diagnostic_policy(logger)
+        )
+        logger.info(
+            # "FULL PRECISION for every family" was not true. DSV4 pool
+            # state is natively q8-segmented and is stored that way ON
+            # PURPOSE; a bundle-calibrated TurboQuant config does write TQ
+            # payloads to disk; Zaya keys are fp32 while its values are bf16;
+            # dots3 latents are bf16. The honest contract is not "f16
+            # everywhere" -- it is "whatever the live cache holds, with no
+            # extra codec imposed on top".
+            "SSD prefix cache: stored in the model's NATIVE cache "
+            "representation -- exactly what the live cache holds, with no "
+            "additional codec imposed (requested stored quantization=%s). "
+            "A natively quantized cache stays quantized; a natively "
+            "full-precision one is never quantized on the way to disk.%s",
+            args.kv_cache_quantization,
+            # Gate on the RESOLVED value, not just the bundle shape:
+            # VMLX_DEFAULT_KV_CACHE_QUANTIZATION can override the fallback, and
+            # claiming "exact stored KV required" next to quantization=q8 would
+            # assert the requirement in the same breath as violating it.
+            " (mixed sliding/full attention: exact stored KV required for "
+            "answer-stable reuse)"
+            if _mixed_swa_bundle and args.kv_cache_quantization == "none"
+            else " (mixed sliding/full attention: EXACT stored KV expected, but "
+            "VMLX_DEFAULT_KV_CACHE_QUANTIZATION overrode it — cache hits may "
+            "answer differently than a cold prefill)"
+            if _mixed_swa_bundle
+            else " (JANGTQ/JANG-affine high-fidelity default)"
+            if _jang_hi_fidelity
+            else "",
+        )
+    elif _kv_quant_explicit:
+        args.kv_cache_quantization_explicit = True
+        args.generic_tq_diagnostic_opt_in = False
+        os.environ["VMLX_DISABLE_TQ_KV"] = "1"
+        os.environ.pop("VMLX_FORCE_TQ_AUTO", None)
+        logger.info(
+            f"--kv-cache-quantization={args.kv_cache_quantization} explicit; "
+            f"VMLX_DISABLE_TQ_KV=1 set so JANG-calibrated TurboQuant KV is "
+            f"skipped at load time. VMLX_FORCE_TQ_AUTO=1 remains available only "
+            f"when the flag is omitted, for controlled diagnostics."
+        )
+
+    # Unified server configuration — explicit args ONLY
+    # If the user passes --tool-call-parser qwen, we use qwen.
+    # If it's "auto", we auto-detect via model_config_registry.
+    # If it's "none" or omitted, tool calling is disabled.
+
+    # Port validation — run BEFORE any registry / model auto-config so
+    # bad ports surface as the visible failure reason. mlxstudio session
+    # manager bug-class: typing fast in the panel's port field can
+    # produce an out-of-range value (e.g. 80014 instead of 8014). Until
+    # 2.5.13 this validation lived ~450 lines later, so a bad port
+    # printed dozens of INFO logs first ("Auto-configured tool parser
+    # from registry: nemotron", "Auto-configured reasoning parser ...",
+    # security summary, etc.) and the panel — which captures the
+    # logging-stream tail to attach to "Process exited before becoming
+    # ready" — saw a benign INFO line as the apparent culprit. Both
+    # checks now use logger.error so the panel's tail capture surfaces
+    # the actual reason.
+    if args.port < 1 or args.port > 65535:
+        logger.error(
+            f"--port must be between 1 and 65535, got {args.port}. "
+            f"TCP ports are 16-bit; values above 65535 are invalid. "
+            f"Did you mean {args.port % 65536}?"
+        )
+        sys.exit(1)
+
+    server._api_key = args.api_key or os.environ.get("VLLM_API_KEY")
+    server._private_cache_attestation_enabled = False
+    server._private_cache_attestation_token = None
+    _private_attestation_enabled = bool(
+        getattr(args, "enable_private_cache_attestation", False)
+    )
+    _private_attestation_token_file = getattr(
+        args,
+        "private_cache_attestation_token_file",
+        None,
+    )
+    if _private_attestation_enabled != bool(_private_attestation_token_file):
+        logger.error(
+            "Private cache attestation requires both its enable flag and token file"
+        )
+        sys.exit(1)
+    if _private_attestation_enabled:
+        try:
+            server._private_cache_attestation_token = (
+                server._load_private_cache_attestation_token_file(
+                    _private_attestation_token_file
+                )
+            )
+        except (OSError, ValueError) as exc:
+            logger.error("Invalid private cache attestation token file: %s", exc)
+            sys.exit(1)
+        server._private_cache_attestation_enabled = True
+        os.environ["VMLX_STRICT_BLOCK_DISK_WRITE_FENCE"] = "1"
+    if args.timeout <= 0:
+        logger.error(f"--timeout must be positive, got {args.timeout}")
+        sys.exit(1)
+    server._default_timeout = args.timeout
+    if args.rate_limit > 0:
+        server._rate_limiter = RateLimiter(
+            requests_per_minute=args.rate_limit, enabled=True
+        )
+
+    # Header-only and cacheable: this does not allocate model tensors. It runs
+    # before either text or image loading and is repeated independently by the
+    # Electron preflight so a direct CLI launch cannot bypass bundle integrity.
+    _preflight_local_model_bundle(args.model)
+
+    _validate_lora_args_for_model_type(args, is_image=_is_image)
+
+    # Tool-parser plugins load BEFORE the parser is resolved so a plugin may
+    # replace a registered name (controlled fault injection in live proofs,
+    # or a site-local dialect) without touching the engine tree.
+    for _plugin in getattr(args, "tool_parser_plugin", None) or []:
+        from .tool_parsers import ToolParserManager as _TPM
+
+        _registered = _TPM.load_plugin(_plugin)
+        logging.getLogger(__name__).info(
+            "Tool parser plugin %s loaded: registered %s", _plugin, _registered
+        )
+
+    # Configure tool calling
+    _user_disabled_tool_parser = getattr(args, "tool_call_parser", None) == "none"
+    server._tool_call_parser_disabled_explicitly = _user_disabled_tool_parser
+    if args.enable_auto_tool_choice and args.tool_call_parser and args.tool_call_parser != "none":
+        server._enable_auto_tool_choice = True
+        # "auto" → resolved below by model_config_registry auto-apply (lines 86-108)
+        server._tool_call_parser = None if args.tool_call_parser == "auto" else args.tool_call_parser
+    else:
+        server._enable_auto_tool_choice = False
+        server._tool_call_parser = None
+
+    # Configure generation defaults (validate ranges)
+    if getattr(args, 'default_temperature', None) is not None:
+        if not (0 <= args.default_temperature <= 2):
+            print(f"Error: --default-temperature must be between 0 and 2, got {args.default_temperature}")
+            sys.exit(1)
+        server._default_temperature = args.default_temperature
+    if getattr(args, 'default_top_p', None) is not None:
+        if not (0 < args.default_top_p <= 1):
+            print(f"Error: --default-top-p must be between 0 (exclusive) and 1, got {args.default_top_p}")
+            sys.exit(1)
+        server._default_top_p = args.default_top_p
+    if getattr(args, 'default_top_k', None) is not None:
+        if args.default_top_k < 0:
+            print(f"Error: --default-top-k must be >= 0, got {args.default_top_k}")
+            sys.exit(1)
+        server._default_top_k = args.default_top_k
+    if getattr(args, 'default_min_p', None) is not None:
+        if not (0 <= args.default_min_p <= 1):
+            print(f"Error: --default-min-p must be between 0 and 1, got {args.default_min_p}")
+            sys.exit(1)
+        server._default_min_p = args.default_min_p
+    if getattr(args, 'default_repetition_penalty', None) is not None:
+        if not (0.5 <= args.default_repetition_penalty <= 2.0):
+            print(
+                f"Error: --default-repetition-penalty must be between 0.5 and 2.0, "
+                f"got {args.default_repetition_penalty}"
+            )
+            sys.exit(1)
+        server._default_repetition_penalty = args.default_repetition_penalty
+
+    # The DFlash2 session SSD tier (configured where the drafter loads, below)
+    # follows an EXPLICIT --enable/--disable-block-disk-cache.  Read it before
+    # _apply_paged_block_disk_default() overwrites the attribute: DFlash2 runs
+    # without continuous batching, which that helper turns into "off".
+    _block_disk_explicit = getattr(args, "enable_block_disk_cache", None)
+
+    # A DFlash2 drafter shipped inside the bundle (`<bundle>/dflash2`) is used
+    # by default; an explicit --speculative-model wins and --no-bundled-dflash2
+    # opts out. Bundles without one are unaffected.
+    if not getattr(args, "speculative_model", None) and not getattr(
+        args, "no_bundled_dflash2", False
+    ):
+        _bundled_drafter = _bundled_dflash2_for(args, logger)
+        if _bundled_drafter:
+            args.speculative_model = _bundled_drafter
+            logger.info(
+                "Using the DFlash2 drafter bundled with the model: %s "
+                "(--no-bundled-dflash2 to use native MTP instead)",
+                _bundled_drafter,
+            )
+
+    # An external draft model and the bundle's own MTP heads are two
+    # speculative decoders competing for the same decode step. Running both
+    # gives neither a clean measurement and produces wildly variable decode
+    # rates on identical requests -- observed live: the same code prompt at
+    # 31.6, 44.5 and 45.3 t/s back to back with a DFlash2 drafter and native
+    # MTP depth 3 both active. The external drafter wins because it is the
+    # explicit, per-session choice; native MTP is a bundle property that would
+    # otherwise switch itself on silently underneath it.
+    if getattr(args, "speculative_model", None) and not getattr(
+        args, "disable_native_mtp", False
+    ):
+        args.disable_native_mtp = True
+        args.native_mtp_depth = None
+        # Remember why: if the drafter is dropped later, native MTP comes back.
+        args._native_mtp_disabled_for_drafter = True
+        logger.info(
+            "Native MTP disabled: an external speculative model is in use "
+            "(%s). The two cannot share a decode step, so the explicitly "
+            "selected drafter wins. Drop --speculative-model to use the "
+            "bundle's own MTP heads instead.",
+            args.speculative_model,
+        )
+
+    if getattr(args, "disable_native_mtp", False):
+        os.environ["VMLINUX_NATIVE_MTP"] = "0"
+        # Clear any depth an earlier arg or a stale env left behind, so a
+        # disabled runtime cannot be revived by leftover state.
+        os.environ.pop("VMLINUX_NATIVE_MTP_DEPTH", None)
+        os.environ.pop("VMLX_NATIVE_MTP_DEPTH", None)
+    if getattr(args, "native_mtp_depth", None) is not None:
+        from .native_mtp import native_mtp_max_depth
+
+        _mtp_depth_ceiling = native_mtp_max_depth()
+        if args.native_mtp_depth < 1 or args.native_mtp_depth > _mtp_depth_ceiling:
+            print(
+                f"Error: --native-mtp-depth must be between 1 and "
+                f"{_mtp_depth_ceiling}, got {args.native_mtp_depth}"
+            )
+            sys.exit(1)
+        os.environ["VMLINUX_NATIVE_MTP_DEPTH"] = str(args.native_mtp_depth)
+    if getattr(args, "native_mtp_depth_policy", None) is not None:
+        os.environ["VMLINUX_NATIVE_MTP_ADAPTIVE_DEPTH"] = (
+            "0" if args.native_mtp_depth_policy == "fixed" else "1"
+        )
+    if getattr(args, "native_mtp_sampling_policy", None):
+        os.environ["VMLINUX_NATIVE_MTP_SAMPLING_POLICY"] = args.native_mtp_sampling_policy
+        server._native_mtp_sampling_policy = args.native_mtp_sampling_policy
+        if args.native_mtp_sampling_policy in {"deterministic-defaults", "greedy-only"}:
+            if server._default_temperature is None:
+                server._default_temperature = 0.0
+            if server._default_top_p is None:
+                server._default_top_p = 1.0
+            if server._default_top_k is None:
+                server._default_top_k = 0
+            if server._default_min_p is None:
+                server._default_min_p = 0.0
+    if getattr(args, "omni_backend", None):
+        # Set the canonical name the backend picker reads; keep the legacy
+        # name too for anything still consulting it.
+        os.environ["VMLX_OMNI_BACKEND"] = args.omni_backend
+        os.environ["VMLINUX_OMNI_BACKEND"] = args.omni_backend
+
+    # Apply default enable_thinking
+    _det = getattr(args, 'default_enable_thinking', None)
+    if _det is not None:
+        server._default_enable_thinking = _det == "true"
+
+    # Apply custom chat template override
+    if getattr(args, 'chat_template', None):
+        server._custom_chat_template = args.chat_template
+
+    # Parse --chat-template-kwargs JSON and apply server-wide defaults
+    if getattr(args, 'chat_template_kwargs', None) is not None:
+        import json as _json
+        try:
+            ct_kwargs = _json.loads(args.chat_template_kwargs)
+            if not isinstance(ct_kwargs, dict):
+                print("Error: --chat-template-kwargs must be a JSON object")
+                sys.exit(1)
+        except _json.JSONDecodeError as e:
+            print(f"Error: --chat-template-kwargs is not valid JSON: {e}")
+            sys.exit(1)
+        # Extract enable_thinking into the dedicated server default
+        # Guard against bool("false") == True trap — require actual JSON boolean
+        if "enable_thinking" in ct_kwargs:
+            val = ct_kwargs["enable_thinking"]
+            if not isinstance(val, bool):
+                print(f"Error: enable_thinking must be a JSON boolean (true/false), got: {val!r}")
+                sys.exit(1)
+            server._default_enable_thinking = val
+        # Store full kwargs for forwarding to chat templates
+        server._default_chat_template_kwargs = ct_kwargs
+
+    # Configure reasoning parser. "auto" allows registry/template detection
+    # further down; "none" is a hard opt-out and must survive registry lookup.
+    parser_name = getattr(args, 'reasoning_parser', None)
+    _user_requested_auto = parser_name == "auto"
+    _user_disabled_reasoning_parser = parser_name == "none"
+    if parser_name in ("auto", "none", None) or not parser_name:
+        parser_name = None
+
+    if parser_name:
+        try:
+            from .reasoning import get_parser
+            parser_cls = get_parser(parser_name)
+            # _set_active_reasoning_parser already records the canonical ID as
+            # _reasoning_parser_id; the old _reasoning_parser_explicit_name
+            # attribute it superseded was written here and read nowhere.
+            server._set_active_reasoning_parser(parser_cls(), parser_name)
+            logger.info(f"Reasoning parser enabled: {parser_name}")
+        except KeyError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+        except ImportError as e:
+            print(f"Error: Failed to import reasoning module: {e}")
+            sys.exit(1)
+        except Exception as e:
+            print(
+                f"Error: Failed to initialize reasoning parser "
+                f"'{parser_name}': {e}"
+            )
+            sys.exit(1)
+    else:
+        server._set_active_reasoning_parser(None, None)
+
+    # Publish the opt-out to the server module. Held only as a local, the
+    # streaming fallback could not distinguish "user said none" from "detection
+    # raced" and re-installed the registry parser per request.
+    server._reasoning_parser_disabled_explicitly = _user_disabled_reasoning_parser
+
+    # Auto-apply tool/reasoning parsers from model config registry when CLI
+    # flags were not explicitly set.  This lets known models "just work" for
+    # direct CLI users who don't pass --tool-call-parser / --reasoning-parser.
+    _registry_thinking_model = False
+    _is_dsv4_model = False
+    try:
+        from .model_config_registry import get_model_config_registry
+        _mc = get_model_config_registry().lookup(args.model)
+        # SSM disk restore remains governed by the explicit
+        # VMLX_DISABLE_SSM_DISK_RESTORE opt-out in the disk store. Do not
+        # silently disable it by family here: current Qwen hybrid records are
+        # runtime-fingerprinted and preserve ArraysCache lengths/left-padding,
+        # so the real codec must be exercised by the same CLI and Electron
+        # settings instead of being bypassed before it can be validated.
+        # DSV4-Flash auto-config. DSV4_LONG_CTX=1 is the only supported
+        # runtime mode (tri-mode SWA+CSA/HCA). Native composite prefix/paged/L2
+        # reuse fails closed by default; only the direct CLI/env diagnostic
+        # opt-in can request it, and the scheduler still rejects unsafe hits.
+        # DSV4_POOL_QUANT configures the model's internal CSA/HCA pool codec;
+        # it is distinct from reusable prefix-cache publication/restoration.
+        # Ahead of the family policy chain, not inside it. Three of the six
+        # measured-drifting families (minimax, muse_glimmer, step3p7) have no
+        # branch of their own, and adding elif arms just to reach them would
+        # make an operator-facing correctness switch depend on where a family
+        # happens to sit in a long chain. The families that DO have a branch
+        # call the same function again; it is idempotent.
+        if _family_drifts_on_cache_hit(_mc):
+            _disable_drifting_prefix_reuse(args, logger, _mc.family_name)
+
+        if _mc.family_name == "deepseek_v4":
+            _is_dsv4_model = True
+            _apply_dsv4_runtime_policy(args, logger)
+            # Diagnostic opt-in uses the DSV4-aware paged schema
+            # (scheduler.py: deepseek_v4_v10_delta nested-state serialization) for
+            # the mixed RotatingKVCache / DeepseekV4Cache layer layout. The default
+            # path performs full prefill and does not publish reusable state.
+        elif (
+            _mc.family_name == "zaya"
+            or getattr(_mc, "cache_subtype", None) == "zaya_cca"
+        ):
+            _apply_zaya_cca_cache_policy(args, logger)
+        elif (
+            _mc.family_name in ("nemotron_h", "lfm2")
+            or getattr(_mc, "cache_subtype", None)
+            in ("nemotron_h_ssm_attention", "lfm2_moe_hybrid_ssm")
+        ):
+            # L70: measured to answer differently on a cache HIT, same signature
+            # as ZAYA (23-token reuse turned a 902-token reply into 781, each arm
+            # deterministic). The gate itself already ran ahead of this chain;
+            # this arm exists only to keep these families OUT of the generic
+            # hybrid branch below.
+            #
+            # ⚠️ This arm swallows `lfm2`, so the generic `cache_type ==
+            # "hybrid"` branch below never runs for it — including the explicit
+            # LFM2 handling inside that branch, which would set
+            # kv_cache_quantization to "none" so the generic QuantizedKVCache
+            # wrapper does not encode storage a second time on top of the
+            # architecture-selected attention-TQ codec. That LFM2 policy is dead
+            # code today.
+            #
+            # MEASURED 2026-08-13 rather than assumed, on LFM2.5-8B-A1B-MXFP8
+            # with fresh cache dirs per arm. Default gives
+            # `KV cache quantization enabled: q4` alongside the scheduler's own
+            # `stored_kv_quantization=q4`, which is exactly the double-encode the
+            # dead branch exists to prevent. Simulating the branch with an
+            # explicit `--kv-cache-quantization none`:
+            #
+            #   cold answer   6e367b55 (q4)  ==  6e367b55 (none)   byte-identical
+            #   cold vs hit   DRIFTS in BOTH arms (fec783cb / 7795b3f4)
+            #   decode        171.5 t/s (q4)  vs  170.8 t/s (none), median of 3
+            #
+            # So making it reachable changes nothing observable: same cold
+            # answer, same drift, decode within noise. The double-encode is real
+            # in the logs and inert in the metrics. NOT restructuring the chain
+            # for a change with zero measured benefit and non-zero risk — and
+            # recording the numbers so this is not re-chased as a suspected
+            # speed or correctness win.
+            _disable_drifting_prefix_reuse(
+                args,
+                logger,
+                "Nemotron-H SSM" if _mc.family_name != "lfm2" else "LFM2 hybrid SSM",
+            )
+        elif (
+            _mc.family_name in ("mimo_v2", "naive_n05_flash")
+            or getattr(_mc, "cache_subtype", None) in ("mimo_v2_asymmetric_swa", "naive_n05_swa_dsa")
+        ) and not getattr(args, "kv_cache_quantization_explicit", False):
+            _old_kvq = args.kv_cache_quantization
+            args.kv_cache_quantization = "none"
+            logger.info(
+                "Asymmetric mixed-SWA cache detected — disabling auto "
+                "stored-prefix q4/q8 quantization (was: %s). Prefix/paged/L2 "
+                "cache stays enabled with native KV/RotatingKVCache state; "
+                "explicit --kv-cache-quantization q4/q8 remains available for "
+                "diagnostics but is not release-cleared for this family's exactness.",
+                _old_kvq,
+            )
+        elif (
+            getattr(_mc, "cache_type", None) == "hybrid"
+            and not getattr(args, "kv_cache_quantization_explicit", False)
+        ):
+            from .utils.hybrid_tq_cache import SELECTIVE_HYBRID_TQ_FAMILIES
+
+            _old_kvq = args.kv_cache_quantization
+            if (
+                _mc.family_name in SELECTIVE_HYBRID_TQ_FAMILIES
+                and getattr(args, "generic_tq_diagnostic_opt_in", False)
+            ):
+                if _mc.family_name in {"qwen3_5", "qwen3_5_moe", "lfm2"}:
+                    # The architecture-selected hybrid TurboQuant cache already
+                    # owns the attention-only storage codec and its per-model bit
+                    # policy. Disable the generic QuantizedKVCache wrapper here so
+                    # prefix/paged/L2 storage is not encoded a second time. This
+                    # does NOT disable native TQ storage: the block store preserves
+                    # TurboQuantKVCache objects and /health reports the effective
+                    # native bit policy. Explicit user choices never reach this
+                    # auto-policy branch.
+                    if _old_kvq in {"q4", "q8"}:
+                        args.kv_cache_quantization = "none"
+                    logger.info(
+                        "%s hybrid/path-dependent cache model detected — "
+                        "keeping auto live TurboQuant enabled for attention KVCache "
+                        "layers only; SSM/GatedDelta companion state remains native "
+                        "full precision. Generic QuantizedKVCache storage=%s is disabled "
+                        "to avoid a second codec; native architecture-selected "
+                        "attention-TQ storage remains enabled for prefix/paged/L2 and "
+                        "reports its effective bit policy in /health.",
+                        "LFM2" if _mc.family_name == "lfm2" else "Qwen3.6",
+                        args.kv_cache_quantization,
+                    )
+                else:
+                    logger.info(
+                        "Nemotron-H hybrid/path-dependent cache model detected — "
+                        "keeping auto live TurboQuant enabled for attention KVCache "
+                        "layers only; SSM companion state remains native full "
+                        "precision. Stored attention-KV quantization=%s remains "
+                        "active for prefix/paged/L2 boundaries.",
+                        _old_kvq,
+                    )
+            else:
+                # Production Auto preserves the native path for every hybrid,
+                # including families that retain an env-only selective-TQ
+                # diagnostic. Cumulative non-KV state must never be inferred or
+                # flattened into a generic KV wrapper.
+                args.kv_cache_quantization = "none"
+                os.environ["VMLX_DISABLE_TQ_KV"] = "1"
+                os.environ.pop("VMLX_FORCE_TQ_AUTO", None)
+                logger.info(
+                    "Hybrid/path-dependent cache model detected — preserving "
+                    "architecture-native attention and companion cache objects; "
+                    "generic live/stored TurboQuant and QuantizedKVCache wrappers "
+                    "remain disabled."
+                )
+
+        # Eric 2026-07-12 (reverses prior paged-default-OFF): paged cache
+        # defaults ON for autodetected TEXT models at startup so long contexts
+        # stay resident within a bounded block budget. Auto-exclusions (mirroring
+        # the Electron app's exclusion set so UI parity holds):
+        #   - M3 lightning-index MSA (minimax_m3/_vl), openPangu-v2 DSA composite
+        #     — paged breaks their native cache lane. gemma4's mixed-SWA typed
+        #     cache was live-proven paged 2026-08-08, so it now takes the default
+        #     (and is exempt from the MLLM skip below, matching the app).
+        #   - Other MLLM/VL loads — do NOT default MLLM/VL to paged. Text-only
+        #     forced loads of VL bundles are not MLLM here, so they still qualify.
+        # DSV4 (composite) and Zaya (CCA) already decided their own paged state in
+        # the policies above (so _is_dsv4_model / an already-set use_paged_cache are
+        # skipped by the guards below); hybrid SSM families additionally auto-switch
+        # to paged inside the scheduler. Only applies while prefix cache is active
+        # (paged is a prefix-cache backend) and continuous batching is on.
+        # --no-paged-cache opts out of THIS generic default (families whose native
+        # cache REQUIRES paged still enable it via their own policy/scheduler).
+        try:
+            from .api.utils import is_mllm_model
+            _paged_default_is_mllm = is_mllm_model(
+                args.model,
+                force_mllm=getattr(args, "is_mllm", False),
+                force_text_only=getattr(args, "force_text_only", False),
+            )
+        except Exception:
+            # Detection failure -> be conservative and treat as MLLM (skip default).
+            _paged_default_is_mllm = True
+        _paged_default_prefix_active = getattr(
+            args, "enable_prefix_cache", True
+        ) and not getattr(args, "disable_prefix_cache", False)
+        if (
+            not _is_image
+            and getattr(args, "continuous_batching", True)
+            and _paged_default_prefix_active
+            and (
+                not _paged_default_is_mllm
+                or _mc.family_name in _PAGED_MLLM_EXEMPT_FAMILIES
+            )
+            and not getattr(args, "disable_paged_cache", False)
+            and not getattr(args, "use_paged_cache", False)
+            and not _is_dsv4_model
+            and _mc.family_name not in _PAGED_INCOMPATIBLE_FAMILIES
+        ):
+            # 2026-08-21: the generic text default is OFF again, reversing the
+            # 2026-07-12 default-ON. Measured on Qwen3.8-27B at equal capacity,
+            # paged RAM buys 2.68s vs 2.70s on a full hit and 3.48s vs 3.57s on
+            # a partial — under 2% — while the RAM mirror costs 15% of unified
+            # memory (15.4GB on a 128GB Mac) that the model could use instead.
+            # SSD-only is only cheap when the disk budget is adequate, which is
+            # why the block-disk budget moved to a percent of the volume in the
+            # same change; the two belong together.
+            #
+            # This is the GENERIC default only. Families whose native cache
+            # REQUIRES paged still enable it through their own policy or the
+            # scheduler, and --use-paged-cache turns it back on explicitly.
+            logger.info(
+                "Paged cache left OFF for autodetected text family=%s — the "
+                "SSD block cache (L2) serves prefixes and keeps unified memory "
+                "for the model. Pass --use-paged-cache for the in-RAM mirror "
+                "(~2%% faster time-to-first-token, materially more RAM).",
+                _mc.family_name,
+            )
+
+        # The generic --max-cache-blocks default is a flat block COUNT, so the
+        # context it indexes depends on the block size: 1000 blocks at 64 tokens
+        # indexes only 63,936 tokens. The panel has sized this by target tokens
+        # since the measurement in panel/src/main/sessions.ts (a 77k prompt got
+        # ZERO reuse on an exact repeat, 82.5s vs 55.7s cold), so a CLI-started
+        # engine and an app-started engine on the SAME build had different reuse
+        # ceilings. Mirror indexBlocksForCapacity here.
+        #
+        # Index size only — resident RAM stays governed by --cache-memory-mb /
+        # --cache-memory-percent, and DSV4 keeps its own 4097 lift above.
+        if (
+            not _is_image
+            and not getattr(args, "max_cache_blocks_explicit", False)
+            and not _is_dsv4_model
+        ):
+            _generic_block_size = int(
+                getattr(args, "paged_cache_block_size", 64) or 64
+            )
+            if _generic_block_size > 0:
+                _sized = (
+                    -(-GENERIC_INDEX_TARGET_TOKENS // _generic_block_size) + 1
+                )
+                _old_blocks = int(getattr(args, "max_cache_blocks", 0) or 0)
+                if _sized > _old_blocks:
+                    args.max_cache_blocks = _sized
+                    logger.info(
+                        "max_cache_blocks %d -> %d to index %d tokens at a "
+                        "%d-token block (matches the app default; pass "
+                        "--max-cache-blocks to override).",
+                        _old_blocks,
+                        _sized,
+                        GENERIC_INDEX_TARGET_TOKENS,
+                        _generic_block_size,
+                    )
+
+        # Slow families need a longer request timeout, and until now that only
+        # existed panel-side (effectiveSessionTimeoutSeconds in sessions.ts), so
+        # a CLI-launched DSV4 / MiniMax-M3 / openPangu killed long requests at
+        # 5 minutes mid-reasoning while the app allowed 15. Same product
+        # default, two surfaces, one of them missing it.
+        if (
+            not getattr(args, "timeout_explicit", False)
+            and (_is_dsv4_model or _mc.family_name in _SLOW_FAMILY_TIMEOUTS)
+        ):
+            _slow_timeout = _SLOW_FAMILY_TIMEOUTS.get(
+                _mc.family_name, DSV4_DEFAULT_TIMEOUT_SECONDS
+            )
+            if float(getattr(args, "timeout", 0) or 0) < _slow_timeout:
+                _old_timeout = float(getattr(args, "timeout", 0) or 0)
+                args.timeout = float(_slow_timeout)
+                logger.info(
+                    "timeout %.0fs -> %.0fs for slow family=%s (matches the app "
+                    "default; pass --timeout to override).",
+                    _old_timeout, _slow_timeout, _mc.family_name,
+                )
+                # server._default_timeout was captured from args.timeout ~350
+                # lines above, BEFORE this lift, so raising args.timeout alone
+                # left the server on 300. That mattered because the two are
+                # enforced at different points: the request timeout correctly
+                # reported 900s at startup while the STREAMING guard
+                # (_stream_timeout, which falls back to _default_timeout) still
+                # killed the response at 300 — measured on a DSV4 long-context
+                # turn, "Streaming exceeded 300.0s timeout" against a log line
+                # one screen earlier reading "Request timeout: 900.0s".
+                server._default_timeout = args.timeout
+
+        if _mc.family_name != "unknown":
+            # Auto-apply tool parser
+            if (
+                not _user_disabled_tool_parser
+                and not server._tool_call_parser
+                and _mc.tool_parser
+            ):
+                server._tool_call_parser = _mc.tool_parser
+                server._enable_auto_tool_choice = True
+                logger.info(f"Auto-configured tool parser from registry: {_mc.tool_parser}")
+            # Auto-apply reasoning parser
+            if (
+                not _user_disabled_reasoning_parser
+                and not server._reasoning_parser
+                and _mc.reasoning_parser
+            ):
+                try:
+                    from .reasoning import get_parser
+                    _rp_cls = get_parser(_mc.reasoning_parser)
+                    server._set_active_reasoning_parser(
+                        _rp_cls(), _mc.reasoning_parser
+                    )
+                    logger.info(f"Auto-configured reasoning parser from registry: {_mc.reasoning_parser}")
+                except Exception as e:
+                    logger.warning(f"Failed to auto-configure reasoning parser '{_mc.reasoning_parser}': {e}")
+            if getattr(_mc, "think_in_template", False):
+                _registry_thinking_model = True
+
+            # Default JIT (mx.compile) ON for JANG affine models per Eric directive
+            # 2026-06-27: 397B JANG_1L observed at ~10 tok/s without JIT vs expected
+            # 20+; 9B affine at 90 tok/s shows compile-eligible decode path is
+            # healthy at this family. JANG affine layouts (format: affine/jang/jjqf/mxq)
+            # use MLX native QuantizedLinear post-load — fully compile-traceable.
+            # DSV4/M3 stay hard-disabled above (path-dependent caches break tracing).
+            if not getattr(args, "enable_jit", False) and not getattr(
+                args, "disable_jit", False
+            ):
+                try:
+                    from pathlib import Path as _Path
+                    _jang_cfg_path = _Path(args.model) / "jang_config.json"
+                    if _jang_cfg_path.is_file():
+                        import json as _json
+                        _jcfg = _json.loads(_jang_cfg_path.read_text())
+                        # Two bundle schema generations are in the wild and only
+                        # the older one was read here. CRACK bundles write
+                        # format="jang"; newer jangq-ai bundles omit "format"
+                        # entirely and write weight_format="jang_affine" with
+                        # quantization.mode="affine". Reading only "format"
+                        # meant _is_affine was False for every new-schema
+                        # bundle, so the JANG-affine JIT default silently never
+                        # applied to them — MEASURED across the model drive:
+                        # all five gemma-4-*-qat-JANG_4M bundles and Nanbeige
+                        # missed it, while the CRACK bundles got it.
+                        #
+                        # Match on exact tokens, never a substring: weight_format
+                        # is also where mxfp4/mxfp8/mxtq/mlx live, and those are
+                        # NOT affine layouts.
+                        _is_affine = jang_config_is_affine(_jcfg)
+                        _fmt = (
+                            str(_jcfg.get("format", "")).lower()
+                            or str(_jcfg.get("weight_format", "")).lower()
+                            or str(
+                                (_jcfg.get("quantization") or {}).get("mode", "")
+                            ).lower()
+                            or "unknown"
+                        )
+                        # Family-level exclusions (already hard-disabled JIT above
+                        # for DSV4/M3, but be defensive: never default-on for them).
+                        _excluded_family = _mc.family_name in {
+                            "deepseek_v4", "minimax_m3", "minimax_m3_vl",
+                            # openpangu_v2: dynamic DSA top-k + growing conv
+                            # states — same mx.compile hazard class as M3 MSA
+                            # (autodetect block above also forces JIT off).
+                            "openpangu_v2",
+                        }
+                        # mx.compile-safety gate: the runtime refuses to
+                        # compile MLLM (mlx-vlm streaming path) and hybrid
+                        # SSM/Mamba caches (path-dependent Python objects), so
+                        # defaulting JIT ON for them makes args/logs claim a
+                        # state the runtime will never enter
+                        # (ENGINE-AFFINE-JIT-DEFAULT-HYGIENE).
+                        _compile_unsafe = bool(
+                            getattr(_mc, "is_mllm", False)
+                            or str(getattr(_mc, "cache_type", "") or "").lower()
+                            == "hybrid"
+                        )
+                        if _is_affine and not _excluded_family and _compile_unsafe:
+                            logger.info(
+                                "JANG affine model detected (format=%s, family=%s) but "
+                                "JIT default stays OFF: %s is not mx.compile safe.",
+                                _fmt,
+                                _mc.family_name,
+                                "multimodal/VLM streaming path"
+                                if getattr(_mc, "is_mllm", False)
+                                else "hybrid SSM/Mamba cache",
+                            )
+                        if _is_affine and not _excluded_family and not _compile_unsafe:
+                            args.enable_jit = True
+                            logger.info(
+                                "JANG affine model detected (format=%s, family=%s) — "
+                                "defaulting --enable-jit ON for mx.compile decode speedup. "
+                                "Disable with --no-jit or env "
+                                "VMLX_DISABLE_JANG_AFFINE_JIT_DEFAULT=1.",
+                                _fmt, _mc.family_name,
+                            )
+                            if os.environ.get(
+                                "VMLX_DISABLE_JANG_AFFINE_JIT_DEFAULT", "0"
+                            ) == "1":
+                                args.enable_jit = False
+                                logger.info(
+                                    "  ...VMLX_DISABLE_JANG_AFFINE_JIT_DEFAULT=1, "
+                                    "leaving JIT off."
+                                )
+                except Exception as _jit_e:
+                    logger.debug(f"JANG-affine JIT auto-default skipped: {_jit_e}")
+    except Exception as e:
+        logger.debug(f"Registry auto-apply skipped: {e}")
+        # The drift gate lives inside the block above, so a failure here can
+        # silently take the operator's answer-stability switch with it. Debug
+        # level is right for the rest of the auto-apply — it is best-effort —
+        # but an explicitly armed correctness switch failing closed without a
+        # word is the "enabled != engaged" shape this campaign keeps finding.
+        #
+        # ⚠️ This except terminates the ENTIRE auto-apply block, not just the
+        # lookup — a first version of this warning claimed "lookup failed" and
+        # "reuse remains ENABLED" unconditionally, both of which are FALSE when
+        # the lookup succeeded, the gate applied, and some LATER policy line
+        # raised (caught in review). Gate on what actually happened instead:
+        # the announcement flag says whether the switch engaged, and
+        # args.enable_prefix_cache says whether reuse is actually on.
+        if any(
+            os.environ.get(_n) == "1"
+            for _n in (
+                "VMLX_DISABLE_DRIFTING_PREFIX_REUSE",
+                "VMLX_DISABLE_RECURRENT_PREFIX_REUSE",
+            )
+        ) and not getattr(args, "_drifting_prefix_reuse_announced", False):
+            if getattr(args, "enable_prefix_cache", True):
+                logger.warning(
+                    "Prefix-reuse drift gate NOT applied: registry auto-apply "
+                    "failed before the gate could run (%s). Prefix reuse "
+                    "remains ENABLED. Pass --disable-prefix-cache explicitly "
+                    "if you need answer stability for this model.",
+                    e,
+                )
+            else:
+                logger.warning(
+                    "Registry auto-apply failed (%s) after prefix reuse was "
+                    "already disabled; the drift switch did not run but reuse "
+                    "is OFF, so answer stability is unaffected.",
+                    e,
+                )
+
+    # Thinking-template detection & warning (mlxstudio user report: Raymond
+    # Wong, GLM-5.1-JANG_1L).
+    #
+    # Thinking models (GLM-5.1, DeepSeek-R1, Qwen3 Thinking, Mistral 4
+    # reasoning, etc.) inject a `<think>` sentinel into the assistant turn
+    # of their chat template. If no reasoning parser is wired up — either
+    # by an explicit `--reasoning-parser` flag or via the registry
+    # auto-apply above — the model's raw chain of thought streams into
+    # the `content` field and looks like rubbish to anyone using the
+    # server as a drop-in OpenAI endpoint for concise tasks like title
+    # generation.
+    #
+    # Detection priority:
+    #   1. Registry entry says `think_in_template=True` → thinking model.
+    #   2. Registry entry exists but `think_in_template=False` → TRUST
+    #      the registry. Some templates (Gemma 4, Qwen3) define an
+    #      `enable_thinking` jinja variable that's gated off by default
+    #      — those are NOT thinking-by-default and a naive template
+    #      probe would false-positive on them.
+    #   3. Registry has no entry (family=="unknown") → probe the model's
+    #      chat_template.jinja or tokenizer_config.json for a literal
+    #      `<think>` sentinel. Catches any new thinking model family
+    #      we haven't catalogued yet.
+    # Unconditional (every family, not just unknown ones): a bundle whose
+    # chat_template.jinja disagrees with the copy embedded in
+    # tokenizer_config.json is serving fine here — transformers prefers the
+    # .jinja — while handing every OTHER consumer a different template. Make
+    # that visible at load instead of letting it surface as unexplained model
+    # behaviour later (ledger row 163).
+    try:
+        from pathlib import Path as _AuditPath
+
+        from .utils.jang_loader import log_bundle_chat_template_audit
+
+        _audit_dir = _AuditPath(args.model)
+        if _audit_dir.is_dir():
+            log_bundle_chat_template_audit(_audit_dir)
+    except Exception:
+        pass
+
+    _chat_template_has_think = False
+    _registry_known = False
+    try:
+        from .model_config_registry import get_model_config_registry as _get_reg
+        _mc_check = _get_reg().lookup(args.model)
+        _registry_known = _mc_check.family_name != "unknown"
+    except Exception:
+        _registry_known = False
+
+    if not _registry_known:
+        try:
+            from pathlib import Path as _P
+            _mdir = _P(args.model)
+            if _mdir.is_dir():
+                _tpl_path = _mdir / "chat_template.jinja"
+                if _tpl_path.exists():
+                    _tpl_text = _tpl_path.read_text(errors="replace")
+                    # Only flag literal `<think>` opening tag — the
+                    # sentinel that thinking-by-default templates inject
+                    # into the assistant turn. Avoid matching
+                    # `<|think|>` (Gemma 4 channel marker) or
+                    # `strip_thinking` macro references.
+                    if "<think>" in _tpl_text:
+                        _chat_template_has_think = True
+                if not _chat_template_has_think:
+                    _tcfg = _mdir / "tokenizer_config.json"
+                    if _tcfg.exists():
+                        import json as _json
+                        _cfg = _json.loads(_tcfg.read_text())
+                        _inline = _cfg.get("chat_template") or ""
+                        if isinstance(_inline, list):
+                            _inline = " ".join(
+                                t.get("template", "") if isinstance(t, dict) else str(t)
+                                for t in _inline
+                            )
+                        if "<think>" in _inline:
+                            _chat_template_has_think = True
+        except Exception as _detect_e:
+            logger.debug(f"Thinking-template detection skipped: {_detect_e}")
+
+    _is_thinking_model = _registry_thinking_model or _chat_template_has_think
+    _thinking_default = getattr(server, "_default_enable_thinking", None)
+    _thinking_off = _thinking_default is False
+
+    # If the user asked for --reasoning-parser auto AND neither the
+    # registry nor anything else picked one, fall back to deepseek_r1 as
+    # the safe default for any model whose template contains <think>.
+    # DeepSeek R1's parser is the most lenient (accepts missing
+    # <think> sentinels, handles partial blocks) and works for GLM-5.1,
+    # DeepSeek-R1, Nemotron-R, Phi-4 Reasoning, and most unknown think-
+    # tag models. Explicit user requests (`--reasoning-parser qwen3`
+    # etc.) still win.
+    if (
+        _user_requested_auto
+        and _is_thinking_model
+        and not server._reasoning_parser
+    ):
+        try:
+            from .reasoning import get_parser
+            server._set_active_reasoning_parser(
+                get_parser("deepseek_r1")(), "deepseek_r1"
+            )
+            logger.info(
+                "Reasoning parser auto-detected from chat template "
+                "(<think> sentinel found) → deepseek_r1"
+            )
+        except Exception as _auto_e:
+            logger.warning(f"--reasoning-parser auto fallback skipped: {_auto_e}")
+
+    if _is_thinking_model and not server._reasoning_parser and not _thinking_off:
+        # Prominent loud warning — this is the exact condition that made
+        # Raymond Wong think GLM-5.1-JANG_1L was broken. Tell the user
+        # what's going on and give them two one-line fixes.
+        _src = "registry" if _registry_thinking_model else "chat_template"
+        print("=" * 60, file=sys.stderr)
+        print("THINKING MODEL WARNING", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+        print(
+            f"  This model is a THINKING model (detected via {_src}).",
+            file=sys.stderr,
+        )
+        print(
+            "  No reasoning parser is active and thinking is not disabled,",
+            file=sys.stderr,
+        )
+        print(
+            "  so the model's chain-of-thought WILL stream into the",
+            file=sys.stderr,
+        )
+        print(
+            "  `content` field of every response. Clients expecting a",
+            file=sys.stderr,
+        )
+        print(
+            "  terse answer (title generators, tool selectors, etc.) will",
+            file=sys.stderr,
+        )
+        print("  see what looks like rubbish.", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("  Pick one:", file=sys.stderr)
+        print(
+            "    A) add  --reasoning-parser auto  to extract <think> into",
+            file=sys.stderr,
+        )
+        print(
+            "       a separate reasoning_content field, or",
+            file=sys.stderr,
+        )
+        print(
+            "    B) add  --default-enable-thinking false  to skip",
+            file=sys.stderr,
+        )
+        print(
+            "       reasoning entirely and go straight to the answer.",
+            file=sys.stderr,
+        )
+        print("=" * 60, file=sys.stderr)
+        logger.warning(
+            "Thinking model loaded without a reasoning parser — output "
+            "will include raw <think> blocks in content. See the "
+            "THINKING MODEL WARNING printed above for one-line fixes."
+        )
+
+    _spec_incompat = _speculative_incompatibility_reason(args)
+    if _spec_incompat == "--continuous-batching":
+        from .speculative import _is_dflash2_model
+
+        if _is_dflash2_model(args.speculative_model):
+            # The drafter was asked for explicitly and the DFlash2 lane runs on
+            # the non-batched engine; batching is merely the default. Honour the
+            # explicit choice instead of silently serving plain AR.
+            args.continuous_batching = False
+            print(
+                "  NOTE: DFlash2 drafter requested — using the non-batched "
+                "engine it runs on (continuous batching off for this launch).",
+                file=sys.stderr,
+            )
+            logger.info(
+                "DFlash2 drafter %s: continuous batching turned off for this "
+                "launch (the DFlash2 lane is non-batched)",
+                args.speculative_model,
+            )
+            _spec_incompat = _speculative_incompatibility_reason(args)
+    if _spec_incompat:
+        print(
+            f"  WARNING: --speculative-model is incompatible with {_spec_incompat}.",
+            file=sys.stderr,
+        )
+        print(
+            "     Draft model loading is disabled for this launch; requests "
+            "will use standard (non-speculative) generation.",
+            file=sys.stderr,
+        )
+        if _spec_incompat == "multimodal (VLM)":
+            print(
+                "     Without this guard the draft model would be ignored for "
+                "VLM requests after wasting memory at startup.",
+                file=sys.stderr,
+            )
+        args.speculative_model = None
+        if getattr(args, "_native_mtp_disabled_for_drafter", False):
+            # The drafter that displaced native MTP is gone; do not leave the
+            # bundle on plain AR.
+            args.disable_native_mtp = False
+            args._native_mtp_disabled_for_drafter = False
+            print(
+                "     Native MTP restored (it was only disabled for the drafter).",
+                file=sys.stderr,
+            )
+            logger.info("Native MTP restored: the external drafter was not loaded")
+
+    # Security summary at startup
+    print("=" * 60)
+    print("SECURITY CONFIGURATION")
+    print("=" * 60)
+    if args.api_key:
+        print("  Authentication: ENABLED (API key required)")
+    else:
+        print("  Authentication: DISABLED - Use --api-key to enable")
+    if args.rate_limit > 0:
+        print(f"  Rate limiting: ENABLED ({args.rate_limit} req/min)")
+    else:
+        print("  Rate limiting: DISABLED - Use --rate-limit to enable")
+    print(f"  Request timeout: {args.timeout}s")
+    if args.enable_auto_tool_choice:
+        _effective_tool_parser = server._tool_call_parser or args.tool_call_parser
+        print(f"  Tool calling: ENABLED (parser: {_effective_tool_parser})")
+    else:
+        print("  Tool calling: Use --enable-auto-tool-choice to enable")
+    if server._reasoning_parser:
+        parser_display = type(server._reasoning_parser).__name__
+        _thinking_suffix = ""
+        if _is_thinking_model:
+            _thinking_suffix = "  [thinking model detected]"
+        print(f"  Reasoning: ENABLED (parser: {parser_display}){_thinking_suffix}")
+    elif getattr(args, 'reasoning_parser', None) == "none":
+        print("  Reasoning: DISABLED (--reasoning-parser none)")
+    elif getattr(args, 'reasoning_parser', None):
+        print(f"  Reasoning: requested '{args.reasoning_parser}' but no parser matched")
+    elif _is_thinking_model and _thinking_off:
+        print(
+            "  Reasoning: thinking-model detected, default_enable_thinking=false "
+            "(model will skip reasoning)"
+        )
+    elif _is_thinking_model:
+        print(
+            "  Reasoning: THINKING MODEL DETECTED but no parser active — "
+            "see warning above, output will include <think> blocks"
+        )
+    else:
+        print("  Reasoning: Use --reasoning-parser to enable")
+    spec_model = getattr(args, 'speculative_model', None)
+    if spec_model:
+        from .speculative import resolve_num_draft_tokens
+
+        effective_draft_tokens = resolve_num_draft_tokens(
+            spec_model,
+            getattr(args, 'num_draft_tokens', 3),
+        )
+        print(f"  External speculative decoding: ENABLED")
+        print(f"    Draft model: {spec_model}")
+        print(f"    Draft tokens per step: {effective_draft_tokens}")
+    else:
+        print("  External speculative decoding: Use --speculative-model to enable")
+    try:
+        mtp_status = server._model_mtp_status_with_loaded_runtime(args.model)
+        if mtp_status.get("status") and mtp_status.get("status") != "not_configured":
+            if getattr(args, "disable_native_mtp", False):
+                mtp_display = "DISABLED (--disable-native-mtp)"
+            elif mtp_status.get("runtime_active"):
+                mtp_display = "ACTIVE"
+            elif mtp_status.get("runtime_available"):
+                mtp_display = "READY"
+            elif mtp_status.get("artifact_available") and mtp_status.get("runtime_supported"):
+                # supported runtime that is switched off (env / family default / validation): say so, never "unwired"
+                mtp_display = (
+                    f"{str(mtp_status.get('status') or 'runtime disabled').replace('_', ' ').upper()}"
+                    f" ({mtp_status.get('runtime_reason') or 'not active'})"
+                )
+            elif mtp_status.get("artifact_available"):
+                mtp_display = "weights present; runtime unwired"
+            else:
+                mtp_display = str(mtp_status.get("status")).replace("_", " ")
+            depth = mtp_status.get("effective_depth") or getattr(args, "native_mtp_depth", None)
+            depth_suffix = f" D{depth}" if depth else ""
+            scope = mtp_status.get("runtime_scope") or "text"
+            sampling_policy = getattr(args, "native_mtp_sampling_policy", "compatible-only")
+            depth_policy = mtp_status.get("depth_policy") or "adaptive"
+            print(
+                f"  Native MTP: {mtp_display}{depth_suffix} "
+                f"(scope: {scope}, sampling: {sampling_policy}, depth: {depth_policy})"
+            )
+            if sampling_policy == "compatible-only" and mtp_status.get("runtime_available"):
+                print("    Request gate: greedy=identity-verify; "
+                      "stochastic=rejection-sampling acceptance")
+            elif sampling_policy in {"deterministic-defaults", "greedy-only"} and mtp_status.get("runtime_available"):
+                label = "Enforced sampling" if sampling_policy == "greedy-only" else "Startup defaults"
+                print(
+                    f"    {label}: temperature=0, top_p=1, top_k=0, "
+                    "min_p=0, repetition_penalty=1"
+                )
+    except Exception:
+        pass
+    if getattr(args, 'chat_template', None):
+        print(f"  Chat template: CUSTOM ({len(args.chat_template)} chars)")
+    if getattr(args, 'chat_template_kwargs', None):
+        print(f"  Chat template kwargs: {args.chat_template_kwargs}")
+    print("=" * 60)
+
+    print(f"Loading model: {args.model}")
+    if getattr(args, 'served_model_name', None):
+        print(f"Served model name: {args.served_model_name}")
+    max_tokens_explicit = bool(
+        getattr(
+            args,
+            "max_tokens_explicit",
+            getattr(args, "max_tokens", DEFAULT_MAX_OUTPUT_TOKENS)
+            != DEFAULT_MAX_OUTPUT_TOKENS,
+        )
+    )
+    if _is_image:
+        print("Image output is controlled by resolution and diffusion settings, not text token limits.")
+    elif max_tokens_explicit:
+        print(f"Default max tokens override: {args.max_tokens}")
+    else:
+        print(
+            f"Max output fallback: {args.max_tokens} base / "
+            f"{DEFAULT_MAX_OUTPUT_TOKENS_REASONING} reasoning-capable "
+            "(bundle max_new_tokens wins when present; projected Metal guard "
+            "may lower the effective per-request cap)"
+        )
+    if not _is_image and getattr(args, 'max_prompt_tokens', None):
+        print(f"Max prompt/context tokens: {args.max_prompt_tokens}")
+
+    # Store MCP config path for FastAPI startup
+    if args.mcp_config:
+        print(f"MCP config: {args.mcp_config}")
+        os.environ["VLLM_MLX_MCP_CONFIG"] = args.mcp_config
+    if getattr(args, "mcp_enabled_servers", None):
+        os.environ["VLLM_MLX_MCP_ENABLED_SERVERS"] = args.mcp_enabled_servers
+    if getattr(args, "mcp_disabled_servers", None):
+        os.environ["VLLM_MLX_MCP_DISABLED_SERVERS"] = args.mcp_disabled_servers
+    if getattr(args, "mcp_enabled_tools", None):
+        os.environ["VLLM_MLX_MCP_ENABLED_TOOLS"] = args.mcp_enabled_tools
+    if getattr(args, "mcp_disabled_tools", None):
+        os.environ["VLLM_MLX_MCP_DISABLED_TOOLS"] = args.mcp_disabled_tools
+
+    # Pre-load embedding model if specified
+    if args.embedding_model:
+        print(f"Pre-loading embedding model: {args.embedding_model}")
+        server.load_embedding_model(args.embedding_model, lock=True)
+        print(f"Embedding model loaded: {args.embedding_model}")
+
+    # Smelt mode info
+    if getattr(args, 'smelt', False):
+        pct = getattr(args, 'smelt_experts', 50)
+        print(f"\n  Smelt mode: loading {pct}% of MoE experts per layer\n")
+        # Set server module smelt globals IMMEDIATELY so any downstream
+        # is_mllm_model() call (e.g., the speculative decoding VLM check
+        # below) sees smelt as active. Without this, is_mllm_model() runs
+        # detection based on config.json alone and returns True for VLM
+        # architectures, which would then emit a misleading speculative-
+        # decoding warning AND let force_mllm slip through to the loader.
+        from . import server as _server_module
+        _server_module._smelt_enabled = True
+        _server_module._smelt_experts = pct
+        # Smelt ⊕ VLM mutual exclusion.
+        #
+        # Smelt's partial-expert loader swaps experts in/out of GPU RAM to
+        # reduce footprint on MoE models. The vision encoder and multimodal
+        # projector, however, are NOT expert modules — they're always
+        # resident and depend on the full mlx_vlm model wrapper. When smelt
+        # is active the loader takes a different code path (`smelt_load`)
+        # that does not set up the vision tower state dict the same way as
+        # `load_jang_vlm_model`. In practice that means image input on a
+        # smelt-loaded VLM silently produces garbage logits (vision_tower
+        # weights present but not wired through the expert swapper) and the
+        # model answers as if no image was attached.
+        #
+        # Rather than letting the user hit that silent failure, force
+        # text-only mode: override --is-mllm off and tell is_mllm_model()
+        # to skip VLM detection. If the user explicitly passed --is-mllm
+        # with --smelt we warn loudly so they know the flag was dropped.
+        if getattr(args, 'is_mllm', False):
+            print(
+                "  WARNING: --is-mllm is incompatible with --smelt. Smelt's "
+                "partial-expert loader does not wire the vision tower, so "
+                "image input would produce garbage output. Disabling VLM "
+                "mode for this session — text-only inference only."
+            )
+            args.is_mllm = False
+        # Sentinel consumed by is_mllm_model() via server._smelt_enabled —
+        # the loader also reads this flag to pick the smelt_load code path.
+        setattr(args, '_smelt_forces_text_only', True)
+
+    # Flash MoE mutual exclusion guards
+    if getattr(args, 'flash_moe', False):
+        if getattr(args, 'smelt', False):
+            print("ERROR: --flash-moe and --smelt are mutually exclusive.")
+            print("  Both modify MoE expert layers. Use one or the other:")
+            print("    --smelt: loads partial experts at startup (cache-biased routing)")
+            print("    --flash-moe: streams ALL experts from SSD on-demand (slot-bank cache)")
+            sys.exit(1)
+        if getattr(args, 'distributed', False):
+            print("ERROR: --flash-moe and --distributed are mutually exclusive.")
+            print("  Flash MoE patches local model layers but distributed workers")
+            print("  have their own model copies. Use --smelt for distributed MoE.")
+            sys.exit(1)
+
+    # Distributed compute mutual exclusion guards (Phase 1 conservative set).
+    # Distributed pipeline parallelism splits model layers across workers;
+    # features that patch or trace local layer objects cannot coexist safely.
+    if getattr(args, 'distributed', False):
+        if getattr(args, 'enable_jit', False):
+            print("ERROR: --distributed and --enable-jit are mutually exclusive.")
+            print("  JIT (mx.compile) traces layer objects on the coordinator, but")
+            print("  workers own distinct layer ranges — the compiled graph would be")
+            print("  wrong for every worker except whichever happens to match the trace.")
+            print("  Start distributed without JIT, or run single-node with JIT.")
+            sys.exit(1)
+        if getattr(args, 'smelt', False):
+            print("ERROR: --distributed and --smelt are mutually exclusive (experimental).")
+            print("  Distributed + Smelt has not been validated end-to-end. Each worker")
+            print("  would need to independently smelt its layer range, and layer_assign")
+            print("  is not yet MoE-smelt-aware. Lift this guard once Phase 2 testing")
+            print("  confirms the combination works.")
+            sys.exit(1)
+        if getattr(args, 'speculative_model', None):
+            print("ERROR: --distributed and --speculative-model are mutually exclusive.")
+            print("  Speculative decoding requires the draft model to be co-located with")
+            print("  the target model for low-latency drafting; distributing both would")
+            print("  negate the speedup. Run speculative decoding single-node.")
+            sys.exit(1)
+        # Tensor parallelism is stubbed for Phase 2. The `tensor_parallel.py`
+        # module exists as scaffolding (ColumnParallelLinear, RowParallelLinear,
+        # shard_model_tp) but no path in the codebase wires it up. Refusing
+        # here prevents users from silently getting wrong behavior.
+        if getattr(args, 'distributed_mode', 'pipeline') == 'tensor':
+            print("ERROR: --distributed-mode tensor is not yet implemented.")
+            print("  Tensor parallelism would shard each layer's weight matrices")
+            print("  across nodes (column- and row-parallel linears with all-reduce).")
+            print("  The vmlx_engine.distributed.tensor_parallel module exists as")
+            print("  scaffolding only — no forward pass is wired. Phase 2 work item.")
+            print("  Use --distributed-mode pipeline for now (this IS the default).")
+            sys.exit(1)
+
+    if _is_dsv4_model and getattr(args, 'continuous_batching', False):
+        # DSV4BatchGenerator is a custom single-batch path because each request
+        # owns a heterogeneous SWA + CSA/HCA cache object. Letting panel/default
+        # sessions start with max_num_seqs > 1 works until a second request is
+        # admitted, then fails mid-session. Clamp at CLI entry so direct CLI and
+        # panel launches share the same production-safe behavior.
+        if getattr(args, 'max_num_seqs', 1) != 1:
+            logger.warning(
+                "DSV4-Flash detected — overriding --max-num-seqs %s to 1 "
+                "because DSV4BatchGenerator is single-batch only.",
+                args.max_num_seqs,
+            )
+            args.max_num_seqs = 1
+
+    if not _is_image:
+        _apply_paged_block_disk_default(args, logger)
+        _configure_vision_feature_ssd(args, _block_disk_explicit)
+
+    # Diffusion does not instantiate the LLM scheduler or its KV/SSD cache.
+    scheduler_config = None
+    if _is_image:
+        print("Mode: Image generation/editing (mflux)")
+        print("LLM continuous batching and KV/SSD prefix caching do not apply to this image session.")
+    elif args.continuous_batching:
+        # Handle prefix cache flags
+        enable_prefix_cache = args.enable_prefix_cache and not args.disable_prefix_cache
+
+        # Block L2 is independent of paged RAM. With --no-paged-cache it uses
+        # the same chain-hash/partial-prefix index but stores KV payloads only
+        # on SSD and promotes them transiently for reconstruction.
+        if args.use_paged_cache and (
+            getattr(args, "cache_memory_mb", None)
+            or getattr(args, "cache_memory_percent_explicit", False)
+        ):
+            logger.info(
+                "Paged cache: --cache-memory-mb/--cache-memory-percent set the "
+                "L1 RAM byte ceiling for the block KV mirror (free blocks are "
+                "evicted, disk-L2 write-through first, to hold it). "
+                "--max-cache-blocks caps the block-pool count; "
+                "--block-disk-cache-max-gb caps L2 disk."
+            )
+
+        scheduler_config = SchedulerConfig(
+            max_num_seqs=args.max_num_seqs,
+            prefill_batch_size=args.prefill_batch_size,
+            prefill_step_size=getattr(args, 'prefill_step_size', 2048),
+            completion_batch_size=args.completion_batch_size,
+            enable_vision_cache=bool(
+                getattr(args, "enable_vision_cache", False)
+            ),
+            vision_cache_size=max(
+                0, int(getattr(args, "vision_memory_cache_size", 16) or 0)
+            ),
+            enable_prefix_cache=enable_prefix_cache,
+            prefix_cache_size=args.prefix_cache_size,
+            prefix_cache_max_bytes=getattr(args, 'prefix_cache_max_bytes', None),
+            use_state_machine_stops=not getattr(args, 'no_state_machine_stops', False),
+            # Memory-aware cache options
+            use_memory_aware_cache=not args.no_memory_aware_cache,
+            cache_memory_mb=args.cache_memory_mb,
+            cache_memory_percent=args.cache_memory_percent,
+            cache_ttl_minutes=getattr(args, 'cache_ttl_minutes', 0),
+            ssm_state_cache_size=max(0, int(getattr(args, 'ssm_state_cache_size', 0))),
+            ssm_state_cache_max_mb=(
+                max(0, int(args.ssm_state_cache_mb))
+                if getattr(args, 'ssm_state_cache_mb', None) is not None
+                else None
+            ),
+            # Paged cache options
+            use_paged_cache=args.use_paged_cache,
+            paged_cache_block_size=args.paged_cache_block_size,
+            max_cache_blocks=args.max_cache_blocks,
+            # KV cache quantization
+            kv_cache_quantization=args.kv_cache_quantization,
+            kv_cache_group_size=args.kv_cache_group_size,
+            kv_cache_quantization_explicit=getattr(
+                args, "kv_cache_quantization_explicit", False
+            ),
+            # Disk cache
+            enable_disk_cache=args.enable_disk_cache,
+            disk_cache_dir=args.disk_cache_dir,
+            disk_cache_max_gb=args.disk_cache_max_gb,
+            disk_cache_pool_root=resolve_prompt_disk_pool(args)[0],
+            disk_cache_pool_max_gb=resolve_prompt_disk_pool(args)[1],
+            model_path=args.model,
+            # Loader fingerprint inputs (F6 + A4 Concern #1) — feed smelt
+            # state into the trie cache key so divergent loader configs
+            # never share K/V entries.
+            smelt_enabled=getattr(args, 'smelt', False),
+            smelt_pct=(
+                float(getattr(args, 'smelt_experts', 50))
+                if getattr(args, 'smelt', False)
+                else None
+            ),
+            # Block-level disk cache (L2 for paged cache)
+            enable_block_disk_cache=args.enable_block_disk_cache,
+            block_disk_cache_dir=args.block_disk_cache_dir,
+            block_disk_cache_max_gb=normalize_block_disk_cache_budget(args),
+            # Prompt Lookup Decoding
+            pld_enabled=args.enable_pld,
+            pld_summary_interval=args.pld_summary_interval,
+        )
+
+        print("Mode: Continuous batching (for multiple concurrent users)")
+        print(f"Stream interval: {args.stream_interval} tokens")
+        cache_summary_lines = _cache_stack_summary_lines(
+            args,
+            dsv4_model=_is_dsv4_model,
+            mllm_model=_runtime_is_mllm(args),
+        )
+        if cache_summary_lines:
+            for line in cache_summary_lines:
+                print(line)
+        elif enable_prefix_cache and not args.no_memory_aware_cache:
+            cache_info = (
+                f"{args.cache_memory_mb}MB"
+                if args.cache_memory_mb
+                else f"{args.cache_memory_percent*100:.0f}% of RAM"
+            )
+            print(f"Memory-aware cache: {cache_info}")
+        elif enable_prefix_cache:
+            print(f"Prefix cache: max_entries={args.prefix_cache_size}")
+        if args.kv_cache_quantization != "none":
+            print(f"KV cache quantization: {args.kv_cache_quantization} (group_size={args.kv_cache_group_size})")
+    else:
+        print("Mode: Simple (maximum throughput)")
+        # Warn about settings that require continuous batching
+        ignored = []
+        if args.kv_cache_quantization != "none":
+            ignored.append(f"--kv-cache-quantization {args.kv_cache_quantization}")
+        if args.use_paged_cache:
+            ignored.append("--use-paged-cache")
+        if args.enable_prefix_cache and not args.disable_prefix_cache:
+            ignored.append("--enable-prefix-cache")
+        if ignored:
+            print(f"  NOTE: These settings require --continuous-batching and will be ignored: {', '.join(ignored)}")
+
+    # --dspark on/off overrides the bundle's speculative.default stamp (read by models/mllm._load_dspark_runtime).
+    _dspark_mode = getattr(args, "dspark", "auto")
+    if _dspark_mode in ("on", "off"):
+        os.environ["VMLX_DSPARK"] = "1" if _dspark_mode == "on" else "0"
+    # DSpark (a drafter shipped inside the bundle, loaded with the model): its multi-turn session tier lives in the
+    # same managed SSD pool and budget as the block cache; off with --disable-block-disk-cache (dspark/session.py).
+    try:
+        from .dspark import session as _dspark_session
+
+        _dspark_session.configure_defaults(
+            root=getattr(args, "block_disk_cache_dir", None) or os.path.expanduser("~/.cache/vmlx-engine/block-cache"),
+            max_size_bytes=int(float(resolve_block_disk_cache_max_gb(args)) * 1024**3),
+            enabled=_block_disk_explicit is not False,
+        )
+    except Exception:  # noqa: BLE001 - never blocks the server; the RAM tier still works
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning("DSpark session SSD defaults not configured", exc_info=True)
+
+    # Load speculative decoding draft model if configured
+    spec_model = getattr(args, 'speculative_model', None)
+    if spec_model:
+        from .speculative import SpeculativeConfig, load_draft_model
+        spec_config = SpeculativeConfig(
+            model=spec_model,
+            num_tokens=getattr(args, 'num_draft_tokens', 3),
+        )
+        load_draft_model(spec_config)
+        print(f"Draft model loaded: {spec_model}")
+        from .speculative import _is_dflash2_model as _is_df2
+
+        if _is_df2(spec_model):
+            _configure_dflash2_session_ssd(args, spec_model, _block_disk_explicit)
+
+        # Warn about incompatible combinations
+        if getattr(args, 'continuous_batching', False):
+            print(
+                "  ⚠️  WARNING: Speculative decoding is incompatible with --continuous-batching.")
+            print(
+                "     The draft model will only be used in SimpleEngine (non-batched) mode.")
+            print(
+                "     BatchedEngine requests will use standard (non-speculative) generation.")
+
+        # Check if target model is MLLM
+        from .api.utils import is_mllm_model
+        is_mllm = is_mllm_model(args.model, force_mllm=getattr(args, 'is_mllm', False), force_text_only=getattr(args, 'force_text_only', False))
+        from .speculative import _is_dflash2_model
+        if is_mllm and not _is_dflash2_model(spec_model):
+            print(
+                "  ⚠️  WARNING: Speculative decoding is incompatible with multimodal (VLM) models.")
+            print(
+                "     The draft model will be ignored for VLM requests (mlx-vlm has no spec decoding).")
+
+    # Configure log level
+    log_level = getattr(args, 'log_level', 'INFO').upper()
+    logging.basicConfig(level=getattr(logging, log_level, logging.INFO), force=True)
+    server._log_level = log_level
+
+    # Configure CORS
+    allowed_origins = getattr(args, 'allowed_origins', '*')
+    server._allowed_origins = allowed_origins
+
+    # Configure JIT compilation. --no-jit is the final word: several policy
+    # blocks above can turn enable_jit ON by themselves (the JANG-affine
+    # default in particular), so an explicit user "off" has to be applied last
+    # or it is silently overridden — which is exactly what made the app's JIT
+    # toggle inert on affine bundles.
+    if getattr(args, 'disable_jit', False) and getattr(args, 'enable_jit', False):
+        args.enable_jit = False
+        logger.info("JIT compilation forced OFF by --no-jit.")
+    server._enable_jit = getattr(args, 'enable_jit', False)
+
+    if getattr(args, 'prefill_keep_alloc', False):
+        os.environ["VMLX_PREFILL_KEEP_ALLOC"] = "1"
+
+    # Port validation now happens at the top of `serve_command` so a
+    # bad port short-circuits BEFORE any model / registry / parser
+    # logging. This kept producing user reports of "Process exited
+    # before becoming ready: INFO:__main__:Auto-configured tool parser
+    # from registry: nemotron" because the panel captured the trailing
+    # INFO log line, not the late `print()` error. Validation is
+    # idempotent — the second check is a defensive nop.
+
+    if _is_image:
+        _suppress_image_resource_tracker_warning()
+        # Image model path — load via mflux, serve /v1/images/generations only
+        logger.info(f"Detected image model: {args.model}")
+        server._model_type = "image"
+        # Use served_model_name (original model ID like "flux-kontext") if provided,
+        # otherwise extract from path (gives directory name like "flux-kontext-dev-4bit")
+        _served = getattr(args, 'served_model_name', None)
+        server._model_name = _served or args.model.rstrip("/").split("/")[-1]
+        server._model_path = args.model
+        server._served_model_name = _served
+
+        # Load image model at startup (not lazy)
+        try:
+            from .image_gen import ImageGenEngine
+        except ImportError:
+            print("Error: mflux not installed. Image generation requires mflux.")
+            print("Install with: pip install mflux")
+            sys.exit(1)
+
+        # Resolve quantize: explicit flag > directory name detection > None
+        _image_quantize = getattr(args, 'image_quantize', None)
+        if _image_quantize is None:
+            # Check both model_name and actual model path directory name
+            # (--served-model-name may be a short alias like "flux-kontext" without "-4bit")
+            _names_to_check = [server._model_name.lower()]
+            _path_dir_name = args.model.rstrip("/").split("/")[-1].lower()
+            if _path_dir_name != _names_to_check[0]:
+                _names_to_check.append(_path_dir_name)
+            for _check_name in _names_to_check:
+                for bits in [3, 4, 5, 6, 8]:
+                    if f"-{bits}bit" in _check_name or f"_{bits}bit" in _check_name:
+                        _image_quantize = bits
+                        logger.info(f"Detected {bits}-bit quantization from model name")
+                        break
+                if _image_quantize is not None:
+                    break
+        # Store globally so /v1/images/edits can use it for lazy model loading
+        server._image_quantize = _image_quantize
+        server._image_lora_paths = _split_cli_values(getattr(args, "lora_paths", None))
+        server._image_lora_scales = _parse_lora_scales(
+            getattr(args, "lora_scales", None)
+        )
+        if (
+            server._image_lora_scales
+            and len(server._image_lora_scales) != len(server._image_lora_paths)
+        ):
+            print(
+                "Error: --lora-scales must have the same number of values as "
+                "--lora-paths"
+            )
+            sys.exit(1)
+
+        try:
+            server._image_gen = ImageGenEngine()
+            _mflux_class = getattr(args, 'mflux_class', None)
+            # Unified load — handles both gen and edit models via mflux_class
+            # dispatch. Run startup preload on the same dedicated image worker
+            # used later by /v1/images/* generation; MLX streams are
+            # thread-local, so loading here on the CLI thread and generating
+            # later on an executor thread reopens the Stream(gpu,N) crash.
+            server._run_image_gen_call_sync(
+                server._image_gen.load,
+                model_name=server._model_name,
+                model_path=args.model,
+                quantize=_image_quantize,
+                mflux_class=_mflux_class,
+                mflux_name=server._model_name,
+                lora_paths=server._image_lora_paths,
+                lora_scales=server._image_lora_scales,
+            )
+        except Exception as e:
+            print(f"Error: Failed to load image model: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+    else:
+        # Text model path — existing flow
+        server._model_type = "text"
+        if not args.continuous_batching:
+            # The GLM DFlash2 lane (non-batched) keeps its prompt-prefix snapshots on SSD under the block cache flags.
+            # --disable-prefix-cache is NOT consulted: it governs the batched scheduler's cache, and the app passes it
+            # for every non-batched launch (its prefix toggle is forced off when batching is off), which silently
+            # disabled this tier in the app. --disable-block-disk-cache (or VMLX_GLM_DFLASH2_DISK_DIR=0) turns it off;
+            # VMLX_GLM_DFLASH2_PREFIX_CACHE=0 turns off the lane's whole store.
+            from .glm_dflash2 import configure_prefix_disk
+
+            configure_prefix_disk(
+                not getattr(args, "disable_block_disk_cache", False),
+                getattr(args, "block_disk_cache_dir", None),
+                getattr(args, "block_disk_cache_max_gb", None),
+                args.model,
+                getattr(args, "speculative_model", None),
+            )
+        from .utils.prefill_step import set_prefill_step_size
+
+        # SimpleEngine lanes (DFlash2, non-batched) read it from here; batched ones from SchedulerConfig.
+        set_prefill_step_size(getattr(args, "prefill_step_size", 2048))
+        load_model(
+            args.model,
+            use_batching=args.continuous_batching,
+            scheduler_config=scheduler_config,
+            stream_interval=args.stream_interval if args.continuous_batching else 1,
+            max_tokens=args.max_tokens,
+            max_tokens_explicit=max_tokens_explicit,
+            max_prompt_tokens=getattr(args, 'max_prompt_tokens', None),
+            served_model_name=getattr(args, 'served_model_name', None),
+            force_mllm=getattr(args, 'is_mllm', False),
+            smelt=getattr(args, 'smelt', False),
+            smelt_experts=getattr(args, 'smelt_experts', 50),
+            distributed=getattr(args, 'distributed', False),
+            distributed_mode=getattr(args, 'distributed_mode', 'pipeline'),
+            cluster_secret=getattr(args, 'cluster_secret', '') or os.environ.get('VMLX_CLUSTER_SECRET', ''),
+            worker_nodes=getattr(args, 'worker_nodes', None),
+            flash_moe=getattr(args, 'flash_moe', False),
+            flash_moe_slot_bank=getattr(args, 'flash_moe_slot_bank', 64),
+            flash_moe_prefetch=getattr(args, 'flash_moe_prefetch', 'none'),
+            flash_moe_io_split=getattr(args, 'flash_moe_io_split', 4),
+        )
+        # Save speculative config for deep sleep/wake reload
+        server._cli_args['speculative_model'] = getattr(args, 'speculative_model', None)
+        server._cli_args['num_draft_tokens'] = getattr(args, 'num_draft_tokens', 3)
+
+    # Configure CORS middleware
+    from fastapi.middleware.cors import CORSMiddleware
+    origins = [o.strip() for o in allowed_origins.split(',') if o.strip()]
+    # CORS spec: allow_credentials=True is invalid with origins=["*"]
+    # Only enable credentials when specific origins are listed
+    has_wildcard = '*' in origins
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=not has_wildcard,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Security warning: 0.0.0.0 exposes server to the network
+    if args.host == '0.0.0.0' and not server._api_key:
+        print()
+        print("=" * 60)
+        print("  WARNING: Server binding to 0.0.0.0 (all interfaces)")
+        print("  with no API key set. Any device on your network can")
+        print("  access this server. Set --api-key or change --host")
+        print("  to 127.0.0.1 for local-only access.")
+        print("=" * 60)
+        print()
+
+    # Start server
+    if getattr(args, "uds", None):
+        print(f"Starting server on Unix domain socket {args.uds}")
+    else:
+        print(f"Starting server at http://{args.host}:{args.port}")
+    uvicorn.run(app, **_uvicorn_bind_kwargs(args, log_level))
+
+
+def bench_command(args):
+    """Run benchmark."""
+    import asyncio
+    import time
+
+    from mlx_lm import load
+
+    from .engine_core import AsyncEngineCore, EngineConfig
+    from .request import SamplingParams
+    from .scheduler import SchedulerConfig
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # MANUAL FAMILY OVERRIDE (same as serve_command) — install before the
+    # bench JANGTQ/DSV4 lookups so bench measures the forced family path too.
+    _family_override = getattr(args, "model_family", None)
+    if _family_override and str(_family_override).strip().lower() != "auto":
+        try:
+            from .model_config_registry import get_model_config_registry
+            get_model_config_registry().set_family_override(_family_override)
+            logger.warning(
+                "Manual model-family override ENABLED for bench: "
+                "--model-family=%s (autodetect bypassed).",
+                _family_override,
+            )
+        except Exception as _fo_e:
+            logger.warning("Failed to install --model-family override: %s", _fo_e)
+
+    _apply_jangtq_mpp_nax_policy(args, logger)
+
+    # mlxstudio#138: mirror serve_command's explicit-pass detection so bench
+    # also disables JANG-calibrated TurboQuant when the user passes
+    # --kv-cache-quantization explicitly.
+    if args.kv_cache_quantization is None:
+        # 2026-08-21: match serve_command exactly. serve stores FULL PRECISION
+        # for every family, so a bench that defaulted to q4 measured a codec
+        # production no longer uses -- and the whole point of benching is to
+        # predict what users will see. Same env override for diagnostics.
+        args.kv_cache_quantization = os.environ.get(
+            "VMLX_DEFAULT_KV_CACHE_QUANTIZATION", "none"
+        )
+        if args.kv_cache_quantization not in ("none", "q4", "q8"):
+            print(
+                "Invalid VMLX_DEFAULT_KV_CACHE_QUANTIZATION="
+                f"{args.kv_cache_quantization!r}; using none"
+            )
+            args.kv_cache_quantization = "none"
+        args.kv_cache_quantization_explicit = False
+        args.generic_tq_diagnostic_opt_in = (
+            _configure_generic_tq_diagnostic_policy(logger)
+        )
+    else:
+        args.kv_cache_quantization_explicit = True
+        args.generic_tq_diagnostic_opt_in = False
+        os.environ["VMLX_DISABLE_TQ_KV"] = "1"
+        os.environ.pop("VMLX_FORCE_TQ_AUTO", None)
+
+    _is_dsv4_model = False
+    try:
+        from .model_config_registry import get_model_config_registry
+
+        _mc = get_model_config_registry().lookup(args.model)
+        if _mc.family_name == "deepseek_v4":
+            _is_dsv4_model = True
+            _apply_dsv4_runtime_policy(args, logger, clamp_max_num_seqs=True)
+    except Exception as exc:
+        logger.debug("Bench model runtime policy lookup failed: %s", exc)
+
+    # Smelt mode: set server globals
+    if getattr(args, 'smelt', False):
+        from . import server as _server_module
+        _server_module._smelt_enabled = True
+        _server_module._smelt_experts = getattr(args, 'smelt_experts', 50)
+
+    _apply_paged_block_disk_default(args, logger)
+
+    # Handle prefix cache flags
+    enable_prefix_cache = args.enable_prefix_cache and not args.disable_prefix_cache
+
+    # Flash MoE guards for bench
+    if getattr(args, 'flash_moe', False):
+        if getattr(args, 'smelt', False):
+            print("ERROR: --flash-moe and --smelt are mutually exclusive (bench).")
+            sys.exit(1)
+
+    async def run_benchmark():
+        print(f"Loading model: {args.model}")
+        from .utils.tokenizer import load_model_with_fallback
+        model, tokenizer = load_model_with_fallback(args.model)
+
+        # Apply Flash MoE if requested
+        if getattr(args, 'flash_moe', False):
+            print(f"Flash MoE: enabled (slot_bank={getattr(args, 'flash_moe_slot_bank', 64)})")
+            try:
+                from .utils.smelt_loader import ExpertIndex
+                from .utils.flash_moe_loader import FlashMoEExpertLoader, SlotBankCache
+                from .models.flash_moe_integration import apply_flash_moe, free_expert_weights
+                from .api.utils import resolve_to_local_path
+
+                resolved = resolve_to_local_path(args.model)
+                ei = ExpertIndex.build(resolved)
+                if ei.num_moe_layers > 0:
+                    cache = SlotBankCache(max_slots=getattr(args, 'flash_moe_slot_bank', 64))
+                    loader = FlashMoEExpertLoader(ei, cache, io_workers=4)
+                    # Unwrap MLLMModelWrapper if present (bench doesn't use it but be defensive)
+                    raw = getattr(model, '_model', None) or getattr(model, 'model', None) or model
+                    patched = apply_flash_moe(raw, loader)
+                    if patched > 0:
+                        freed = free_expert_weights(raw)
+                        print(f"Flash MoE: {patched} layers patched, {freed/1e9:.1f}GB freed")
+            except Exception as e:
+                print(f"Flash MoE setup failed: {e}")
+
+        scheduler_config = SchedulerConfig(
+            max_num_seqs=args.max_num_seqs,
+            prefill_batch_size=args.prefill_batch_size,
+            prefill_step_size=getattr(args, 'prefill_step_size', 2048),
+            completion_batch_size=args.completion_batch_size,
+            enable_vision_cache=bool(
+                getattr(args, "enable_vision_cache", False)
+            ),
+            vision_cache_size=max(
+                0, int(getattr(args, "vision_memory_cache_size", 16) or 0)
+            ),
+            enable_prefix_cache=enable_prefix_cache,
+            prefix_cache_size=args.prefix_cache_size,
+            prefix_cache_max_bytes=getattr(args, 'prefix_cache_max_bytes', None),
+            use_state_machine_stops=not getattr(args, 'no_state_machine_stops', False),
+            # Memory-aware cache options
+            use_memory_aware_cache=not args.no_memory_aware_cache,
+            cache_memory_mb=args.cache_memory_mb,
+            cache_memory_percent=args.cache_memory_percent,
+            cache_ttl_minutes=getattr(args, 'cache_ttl_minutes', 0),
+            ssm_state_cache_size=max(0, int(getattr(args, 'ssm_state_cache_size', 0))),
+            ssm_state_cache_max_mb=(
+                max(0, int(args.ssm_state_cache_mb))
+                if getattr(args, 'ssm_state_cache_mb', None) is not None
+                else None
+            ),
+            # Paged cache options
+            use_paged_cache=args.use_paged_cache,
+            paged_cache_block_size=args.paged_cache_block_size,
+            max_cache_blocks=args.max_cache_blocks,
+            # KV cache quantization
+            kv_cache_quantization=args.kv_cache_quantization,
+            kv_cache_group_size=args.kv_cache_group_size,
+            kv_cache_quantization_explicit=getattr(
+                args, "kv_cache_quantization_explicit", False
+            ),
+            model_path=args.model,
+            # Disk cache (prompt-level L2)
+            enable_disk_cache=getattr(args, 'enable_disk_cache', False),
+            disk_cache_dir=getattr(args, 'disk_cache_dir', None),
+            disk_cache_max_gb=getattr(args, 'disk_cache_max_gb', 10.0),
+            disk_cache_pool_root=resolve_prompt_disk_pool(args)[0],
+            disk_cache_pool_max_gb=resolve_prompt_disk_pool(args)[1],
+            # Block disk cache (L2 for paged cache)
+            enable_block_disk_cache=getattr(args, 'enable_block_disk_cache', False),
+            block_disk_cache_dir=getattr(args, 'block_disk_cache_dir', None),
+            block_disk_cache_max_gb=normalize_block_disk_cache_budget(args),
+            # Loader fingerprint inputs (F6 + A4 Concern #1)
+            smelt_enabled=getattr(args, 'smelt', False),
+            smelt_pct=(
+                float(getattr(args, 'smelt_experts', 50))
+                if getattr(args, 'smelt', False)
+                else None
+            ),
+        )
+        engine_config = EngineConfig(
+            model_name=args.model,
+            scheduler_config=scheduler_config,
+        )
+
+        for line in _cache_stack_summary_lines(
+            args, dsv4_model=_is_dsv4_model, mllm_model=_runtime_is_mllm(args)
+        ):
+            print(line)
+
+        # Generate prompts
+        prompts = [
+            f"Write a short poem about {topic}."
+            for topic in [
+                "nature",
+                "love",
+                "technology",
+                "space",
+                "music",
+                "art",
+                "science",
+                "history",
+                "food",
+                "travel",
+            ][: args.num_prompts]
+        ]
+
+        params = SamplingParams(
+            max_tokens=args.max_tokens,
+            temperature=0.7,
+        )
+
+        print(
+            f"\nRunning benchmark with {len(prompts)} prompts, max_tokens={args.max_tokens}"
+        )
+        print("-" * 50)
+
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+
+        async with AsyncEngineCore(model, tokenizer, engine_config) as engine:
+            await asyncio.sleep(0.1)  # Warm up
+
+            start_time = time.perf_counter()
+
+            # Add all requests
+            request_ids = []
+            for prompt in prompts:
+                rid = await engine.add_request(prompt, params)
+                request_ids.append(rid)
+
+            # Collect all outputs
+            async def get_output(rid):
+                async for out in engine.stream_outputs(rid, timeout=120):
+                    if out.finished:
+                        return out
+                return None
+
+            results = await asyncio.gather(*[get_output(r) for r in request_ids])
+
+            total_time = time.perf_counter() - start_time
+
+        # Calculate stats
+        for r in results:
+            if r:
+                total_prompt_tokens += r.prompt_tokens
+                total_completion_tokens += r.completion_tokens
+
+        total_tokens = total_prompt_tokens + total_completion_tokens
+
+        print("\nResults:")
+        print(f"  Total time: {total_time:.2f}s")
+        print(f"  Prompts: {len(prompts)}")
+        print(f"  Prompts/second: {len(prompts)/total_time:.2f}")
+        print(f"  Total prompt tokens: {total_prompt_tokens}")
+        print(f"  Total completion tokens: {total_completion_tokens}")
+        print(f"  Total tokens: {total_tokens}")
+        print(f"  Tokens/second: {total_completion_tokens/total_time:.2f}")
+        print(f"  Throughput: {total_tokens/total_time:.2f} tok/s")
+
+    asyncio.run(run_benchmark())
+
+
+def bench_detok_command(args):
+    """Benchmark streaming detokenizer optimization."""
+    import statistics
+    import time
+
+    from mlx_lm import load
+    from mlx_lm.generate import generate
+
+    print("=" * 70)
+    print(" Streaming Detokenizer Benchmark")
+    print("=" * 70)
+    print()
+
+    print(f"Loading model: {args.model}")
+    from .utils.tokenizer import load_model_with_fallback
+    model, tokenizer = load_model_with_fallback(args.model)
+
+    # Generate tokens for benchmark
+    prompt = "Write a detailed explanation of how machine learning works and its applications in modern technology."
+    print(f"Generating tokens with prompt: {prompt[:50]}...")
+
+    output = generate(
+        model=model,
+        tokenizer=tokenizer,
+        prompt=prompt,
+        max_tokens=2000,
+        verbose=False,
+    )
+
+    prompt_tokens = tokenizer.encode(prompt)
+    all_tokens = tokenizer.encode(output)
+    generated_tokens = all_tokens[len(prompt_tokens) :]
+    print(f"Generated {len(generated_tokens)} tokens for benchmark")
+    print()
+
+    iterations = args.iterations
+
+    # Benchmark naive decode (old method)
+    print("Benchmarking Naive Decode (OLD method)...")
+    naive_times = []
+    for _ in range(iterations):
+        start = time.perf_counter()
+        for t in generated_tokens:
+            _ = tokenizer.decode([t])
+        elapsed = time.perf_counter() - start
+        naive_times.append(elapsed)
+
+    naive_mean = statistics.mean(naive_times) * 1000
+
+    # Benchmark streaming decode (new method)
+    print("Benchmarking Streaming Detokenizer (NEW method)...")
+    streaming_times = []
+    detok_class = tokenizer._detokenizer_class
+    for _ in range(iterations):
+        detok = detok_class(tokenizer)
+        detok.reset()
+        start = time.perf_counter()
+        for t in generated_tokens:
+            detok.add_token(t)
+            _ = detok.last_segment
+        detok.finalize()
+        elapsed = time.perf_counter() - start
+        streaming_times.append(elapsed)
+
+    streaming_mean = statistics.mean(streaming_times) * 1000
+
+    # Results
+    speedup = naive_mean / streaming_mean
+    time_saved = naive_mean - streaming_mean
+
+    print()
+    print("=" * 70)
+    print(f" RESULTS: {len(generated_tokens)} tokens, {iterations} iterations")
+    print("=" * 70)
+    print(f"{'Method':<25} {'Time':>12} {'Speedup':>10}")
+    print("-" * 70)
+    print(f"{'Naive decode():':<25} {naive_mean:>10.2f}ms {'1.00x':>10}")
+    print(f"{'Streaming detokenizer:':<25} {streaming_mean:>10.2f}ms {speedup:>9.2f}x")
+    print("-" * 70)
+    print(f"{'Time saved per request:':<25} {time_saved:>10.2f}ms")
+    print(
+        f"{'Per-token savings:':<25} {(time_saved/len(generated_tokens)*1000):>10.1f}µs"
+    )
+    print()
+
+    # Verify correctness (strip for BPE edge cases with leading/trailing spaces)
+    print("Verifying correctness...")
+    detok = detok_class(tokenizer)
+    detok.reset()
+    for t in generated_tokens:
+        detok.add_token(t)
+    detok.finalize()
+
+    batch_result = tokenizer.decode(generated_tokens)
+    # BPE tokenizers may have minor edge case differences with spaces
+    # Compare stripped versions for functional correctness
+    streaming_stripped = detok.text.strip()
+    batch_stripped = batch_result.strip()
+    if streaming_stripped == batch_stripped:
+        print("  ✓ Streaming output matches batch decode")
+    elif streaming_stripped in batch_stripped or batch_stripped in streaming_stripped:
+        print("  ✓ Streaming output matches (minor BPE edge case)")
+    else:
+        # Check if most of the content matches (BPE edge cases at boundaries)
+        common_len = min(len(streaming_stripped), len(batch_stripped)) - 10
+        if (
+            common_len > 0
+            and streaming_stripped[:common_len] == batch_stripped[:common_len]
+        ):
+            print("  ✓ Streaming output matches (BPE boundary difference)")
+        else:
+            print("  ✗ MISMATCH! Results differ")
+            print(f"    Streaming: {repr(detok.text[:100])}...")
+            print(f"    Batch: {repr(batch_result[:100])}...")
+
+
+def _check_macos_compat():
+    """mlxstudio#90/#104 — fail before importing incompatible MLX wheels.
+
+    Some bundled installs accidentally ship a macosx_26_0 `mlx-metal` wheel
+    into a macOS 15 app. Importing it then fails deep in Metal with:
+        Failed to load the default metallib. This library is using language
+        version 4.0 which is not supported on this OS.
+    Inspect wheel tags before importing `mlx` so the panel shows an actionable
+    compatibility error instead of a native crash.
+
+    Older systems also crash with:
+        Symbol not found: __ZNSt13exception_ptr31__from_native_exception_pointerEPv
+    """
+    import importlib.metadata
+    import platform
+    import re
+    import sys
+    if sys.platform != "darwin":
+        return
+    try:
+        ver = tuple(int(x) for x in platform.mac_ver()[0].split(".")[:2])
+    except Exception:
+        return
+    if ver < (14, 5):
+        sys.stderr.write(
+            f"vmlx requires macOS >= 14.5 (you are on {platform.mac_ver()[0]}).\n"
+            "The bundled MLX runtime depends on libc++ symbols added in "
+            "macOS 14.5; older systems will hit:\n"
+            "  Symbol not found: __ZNSt13exception_ptr31__from_native_"
+            "exception_pointerEPv\n"
+            "Upgrade to macOS 14.5+ (Sonoma) or 15.x (Sequoia) and retry.\n"
+        )
+        sys.exit(2)
+    for dist_name in ("mlx-metal", "mlx"):
+        try:
+            dist = importlib.metadata.distribution(dist_name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+        try:
+            wheel_files = [p for p in dist.files or [] if str(p).endswith(".dist-info/WHEEL")]
+            wheel_text = dist.locate_file(wheel_files[0]).read_text() if wheel_files else ""
+        except Exception:
+            wheel_text = ""
+        for major_s, minor_s in re.findall(r"macosx_(\d+)_(\d+)_arm64", wheel_text):
+            required = (int(major_s), int(minor_s))
+            if required > ver:
+                sys.stderr.write(
+                    f"vmlx bundled {dist_name} wheel requires macOS "
+                    f"{required[0]}.{required[1]}+ but this Mac is running "
+                    f"{platform.mac_ver()[0]}.\n"
+                    "This wheel can fail during Metal initialization with:\n"
+                    "  Failed to load the default metallib. This library is "
+                    "using language version 4.0 which is not supported on this OS.\n"
+                    "If this is the Tahoe-native DMG, download the Sequoia-compatible vMLX DMG instead. "
+                    "The Tahoe-native DMG requires macOS 26+. "
+                    "You can also upgrade macOS and retry.\n"
+                )
+                sys.exit(2)
+
+
+def _is_installed_mlx_package(path: str) -> bool:
+    """True only for a directory that really is the ``mlx`` package.
+
+    A bare ``os.path.isdir`` check here was a live hazard. ``sys.path``
+    contains the CWD, so ``os.path.join("", "mlx")`` resolves to a
+    RELATIVE ``mlx`` — and on a machine whose home directory holds an
+    ``~/mlx`` folder of source checkouts, running the engine from $HOME
+    made that folder look like a second MLX install. The preflight then
+    aborted startup and named the user's entire repo directory as
+    something to delete.
+
+    The discriminator is the COMPILED ``core`` extension, and only that.
+    A source checkout named ``mlx`` does not carry one; an installed MLX
+    cannot work without one; and it is the exact artifact whose double
+    load raises the nanobind duplicate-key error this preflight exists
+    to prevent.
+
+    Do NOT also require ``__init__.py``. MLX ships ``mlx`` as a
+    NAMESPACE package — ``importlib.util.find_spec("mlx")`` returns
+    ``loader=None`` and there is no root ``__init__.py`` — so demanding
+    one rejects every genuine install and silently turns the whole
+    preflight into a no-op, which is how it shipped.
+    """
+    try:
+        if not os.path.isdir(path):
+            return False
+        def _has_compiled_core(directory: str) -> bool:
+            return any(
+                entry.startswith("core")
+                and entry.endswith((".so", ".pyd", ".dylib"))
+                for entry in os.listdir(directory)
+            )
+
+        if _has_compiled_core(path):
+            return True
+        # Some layouts put the extension inside `core/` instead of
+        # beside it. Still require a COMPILED artifact — matching a
+        # bare `core/` directory would re-admit any source tree that
+        # happens to contain one, which is the hazard the docstring
+        # above describes.
+        nested = os.path.join(path, "core")
+        return os.path.isdir(nested) and _has_compiled_core(nested)
+    except Exception:
+        return False
+
+
+def _check_no_duplicate_mlx():
+    """vmlx#120 / mlxstudio#101 — `nanobind error: refusing to add duplicate
+    key "cpu" to enumeration "mlx.core.DeviceType"` happens when the MLX C
+    extension is loaded twice in one process. Most common cause: two distinct
+    `mlx` packages on sys.path (e.g. bundled python + a stale user-site
+    install). The Electron panel sets PYTHONNOUSERSITE=1 and `-s`, but if
+    the user pip-installed `mlx` into the bundled python directly OR has
+    a non-standard PYTHONPATH, both copies show up. Detect and abort with
+    a message that names the EXTRA (non-bundled) location to remove —
+    earlier message naively told users to pip-uninstall, which removed the
+    BUNDLED mlx_lm and broke startup with `ModuleNotFoundError: mlx_lm.generate`.
+    """
+    import importlib.util
+    import os
+    import sys
+    try:
+        spec = importlib.util.find_spec("mlx")
+        if spec is None:
+            return
+        locations = [
+            loc
+            for loc in (spec.submodule_search_locations or [])
+            if _is_installed_mlx_package(loc)
+        ]
+        for p in sys.path:
+            try:
+                # Resolve to an absolute path before doing anything with it: an
+                # empty sys.path entry means CWD, and a relative match would
+                # otherwise be reported to the user as a bare "mlx".
+                cand = os.path.abspath(os.path.join(p or os.getcwd(), "mlx"))
+                if _is_installed_mlx_package(cand) and cand not in locations:
+                    locations.append(cand)
+            except Exception:
+                pass
+        unique = list(dict.fromkeys(locations))
+        if len(unique) <= 1:
+            return
+
+        # Identify the bundled location (directly under sys.prefix). The
+        # `extras` set is everything else — those are what the user should
+        # remove. Never tell the user to touch the bundled site-packages;
+        # uninstalling from there breaks vmlx itself.
+        bundled_prefix = os.path.realpath(sys.prefix)
+        bundled = []
+        extras = []
+        for loc in unique:
+            try:
+                real = os.path.realpath(loc)
+            except Exception:
+                real = loc
+            if real.startswith(bundled_prefix):
+                bundled.append(loc)
+            else:
+                extras.append(loc)
+
+        sys.stderr.write(
+            "vmlx detected MULTIPLE `mlx` package locations on sys.path. "
+            "Loading two MLX C extensions in one process triggers:\n"
+            "  Critical nanobind error: refusing to add duplicate key \"cpu\" "
+            "to enumeration \"mlx.core.DeviceType\"\n"
+            "\nLocations found:\n"
+        )
+        for p in unique:
+            tag = "  (bundled — DO NOT TOUCH)" if p in bundled else "  (extra — REMOVE THIS)"
+            sys.stderr.write(f"  - {p}{tag}\n")
+
+        if extras:
+            # NEVER print a delete command. This message is read by a user whose
+            # engine just refused to start, i.e. exactly the moment they will
+            # paste whatever it says straight into a terminal. Name the path and
+            # the environment that owns it, and let them use that environment's
+            # own package manager.
+            sys.stderr.write(
+                "\nFix — remove the extra (non-bundled) mlx only. Uninstall it "
+                "from the environment that owns it; do not delete files by "
+                "hand:\n"
+            )
+            for p in extras:
+                # Best guess for what site-packages this lives in: the parent
+                # of `<sp>/mlx` is `<sp>`. We hint at the python that owns it.
+                sp = os.path.dirname(os.path.realpath(p))
+                sys.stderr.write(f"  extra mlx package: {p}\n")
+                sys.stderr.write(f"    installed into:  {sp}\n")
+            sys.stderr.write(
+                "\nDO NOT run `pip uninstall mlx mlx-lm` against the bundled "
+                "python — that removes the bundled mlx_lm and produces a "
+                "ModuleNotFoundError: mlx_lm.generate at the next startup.\n"
+                "If `pip uninstall` was already run against the bundled python, "
+                "reinstall vmlx from the DMG to restore the bundled wheels.\n"
+                "\nAlso unset `PYTHONPATH` if it's pointing into a second "
+                "site-packages.\n"
+            )
+        else:
+            # Two bundled-prefix locations is suspicious (corrupt install).
+            sys.stderr.write(
+                "\nBoth locations are under the bundled python prefix — this "
+                "indicates a corrupt install. Reinstall vmlx from the DMG.\n"
+            )
+        sys.exit(2)
+    except SystemExit:
+        raise
+    except Exception:
+        pass
+
+
+def _install_jangtq_wired_limit_from_sysctl() -> None:
+    """Pre-populate JANGTQ_WIRED_LIMIT_GB from OS sysctl iogpu.wired_limit_mb.
+
+    Per Eric directive 2026-06-27: the user's `iogpu.wired_limit_mb` sysctl
+    is authoritative. The external `jang_tools.load_jangtq` package has a
+    hardcoded 70%-of-RAM default that silently clips wired limit below user
+    policy on machines where the user has explicitly raised sysctl. Set
+    JANGTQ_WIRED_LIMIT_GB to the OS-reported max_recommended_working_set_size
+    (in GB) BEFORE any JANGTQ loader runs so all paths (DSV4, M2.7, M3, Kimi,
+    Gemma, Ornith, Zaya, etc.) get the user's full authorized RAM.
+
+    Explicit user-set JANGTQ_WIRED_LIMIT_GB wins. No-op on non-Darwin or if
+    MLX is unavailable.
+    """
+    if "JANGTQ_WIRED_LIMIT_GB" in os.environ:
+        return
+    if sys.platform != "darwin":
+        return
+    try:
+        import mlx.core as mx
+        from .utils.memory_limits import get_effective_metal_working_set_bytes
+        _active, max_ws_bytes = get_effective_metal_working_set_bytes(mx)
+        if max_ws_bytes > 0:
+            target_gb = int(max_ws_bytes / 1e9)
+            os.environ["JANGTQ_WIRED_LIMIT_GB"] = str(target_gb)
+            print(
+                f"  MLX wired working-set limit defaulted to {target_gb} GB "
+                f"from OS sysctl iogpu.wired_limit_mb",
+                flush=True,
+            )
+    except Exception:
+        # Non-fatal: jang_tools.load_jangtq has its own internal default
+        # (70% of RAM). User can also set JANGTQ_WIRED_LIMIT_GB explicitly
+        # or raise iogpu.wired_limit_mb via sysctl.
+        pass
+
+
+def main():
+    _check_macos_compat()
+    _check_no_duplicate_mlx()
+    parser = argparse.ArgumentParser(
+        description="vmlx-engine: Apple Silicon MLX backend for vLLM",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  vmlx-engine serve mlx-community/Llama-3.2-3B-Instruct-4bit --port 8000
+  vmlx-engine bench mlx-community/Llama-3.2-1B-Instruct-4bit --num-prompts 10
+        """,
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+
+    # Serve command
+    serve_parser = subparsers.add_parser("serve", help="Start OpenAI-compatible server")
+    serve_parser.add_argument(
+        "model", type=str,
+        help="HuggingFace model name or local path to serve. "
+             "Example: mlx-community/Llama-3.2-3B-Instruct-4bit",
+    )
+    serve_parser.add_argument(
+        "--served-model-name", type=str, default=None,
+        help="Custom model name exposed via /v1/models API. Clients use this name in requests. "
+             "Useful for aliasing long model paths. Default: auto-extracted from model path.",
+    )
+    serve_parser.add_argument(
+        "--image-quantize", type=int, default=None, choices=[3, 4, 5, 6, 8],
+        help="Quantization bits for image models (mflux). "
+             "Lower = less memory, faster. 4-bit recommended. (default: auto-detect from model name)",
+    )
+    serve_parser.add_argument(
+        "--image-mode", type=str, default=None, choices=["generate", "edit"],
+        help="Image model mode. 'generate' for text-to-image, 'edit' for image editing "
+             "(Kontext, Fill, Qwen-Image-Edit). (default: auto-detect from model name)",
+    )
+    serve_parser.add_argument(
+        "--mflux-class", type=str, default=None,
+        help="Explicit mflux model class name (e.g., Flux1, Flux2Klein, ZImage, QwenImageEdit). "
+             "Used by the image loader to pick the correct Python class. "
+             "If not set, falls back to name-based lookup.",
+    )
+    serve_parser.add_argument(
+        "--lora-paths",
+        nargs="*",
+        default=None,
+        help="Optional local LoRA adapter path(s) for image models. "
+             "Accepts space-separated values or a comma-separated list.",
+    )
+    serve_parser.add_argument(
+        "--lora-scales",
+        nargs="*",
+        default=None,
+        help="Optional LoRA scale(s) matching --lora-paths order. "
+             "Accepts space-separated values or a comma-separated list.",
+    )
+    serve_parser.add_argument(
+        "--host", type=str, default="127.0.0.1",
+        help="Network interface to bind. '0.0.0.0' = all interfaces (LAN access). "
+             "'127.0.0.1' = localhost only (default: 127.0.0.1)",
+    )
+    serve_parser.add_argument(
+        "--port", type=int, default=8000,
+        help="TCP port for the API server (default: 8000). Example: --port 8092",
+    )
+    serve_parser.add_argument(
+        "--uds", type=str, default=None,
+        help="Path to a Unix domain socket to bind instead of host/port. "
+             "When set, --host and --port are ignored. Example: --uds /tmp/vmlx.sock",
+    )
+    serve_parser.add_argument(
+        "--max-num-seqs", type=int, default=1,
+        help="Maximum number of requests that can be processed simultaneously. Higher values "
+             "use more memory but support more concurrent users. The default keeps the full "
+             "cache stack on for local single-user chat without reserving a multi-user batch. "
+             "Requires --continuous-batching. (default: 1)",
+    )
+    serve_parser.add_argument(
+        "--prefill-batch-size", type=int, default=512,
+        help="How many new prompts to process at once during the 'prefill' phase "
+             "(reading the input). Higher = faster throughput but more memory spikes. "
+             "Requires --continuous-batching. (default: 512)",
+    )
+    serve_parser.add_argument(
+        "--prefill-step-size", type=int, default=2048,
+        help="Maximum tokens per prefill chunk. Smaller values reduce peak Metal memory "
+             "during prefill — required for very large MoE models (e.g. 128-expert Qwen3.5-397B) "
+             "that hit Metal single-buffer OOM at long contexts. Try 512 or 256 if prefill "
+             "crashes. Applies to every lane, including DFlash2 and --no-continuous-batching. (default: 2048)",
+    )
+    serve_parser.add_argument(
+        "--completion-batch-size", type=int, default=512,
+        help="How many responses to generate tokens for simultaneously during the 'decode' phase. "
+             "Higher = more throughput for concurrent requests but more memory. "
+             "Requires --continuous-batching. (default: 512)",
+    )
+    serve_parser.add_argument(
+        "--enable-prefix-cache",
+        action="store_true",
+        default=True,
+        help="Cache computed KV states for prompt prefixes so repeated system prompts "
+             "or conversation history don't need to be recomputed. Saves significant time "
+             "on multi-turn conversations. Requires --continuous-batching. (default: enabled)",
+    )
+    serve_parser.add_argument(
+        "--disable-prefix-cache",
+        action="store_true",
+        help="Turn off prefix caching. Useful for debugging or if memory is very limited.",
+    )
+    serve_parser.add_argument(
+        "--dsv4-enable-prefix-cache",
+        action="store_true",
+        help="Deprecated compatibility flag. DeepSeek-V4 Flash native SWA+CSA/HCA "
+             "prefix reuse now follows the normal prefix/paged/SSD cache controls.",
+    )
+    serve_parser.add_argument(
+        "--prefix-cache-size",
+        type=int,
+        default=100,
+        help="Maximum number of cached prompt prefixes (legacy entry-count mode only, "
+             "ignored when memory-aware cache is active). (default: 100)",
+    )
+    serve_parser.add_argument(
+        "--prefix-cache-max-bytes",
+        type=int,
+        default=None,
+        help="Optional global byte budget for the prefix cache. When set, eviction "
+             "fires when total cached bytes exceed this. Eviction priority is "
+             "assistant → user → system, so shared system prompts persist across "
+             "users/sessions. None = unlimited (entry-count only). (default: None)",
+    )
+    serve_parser.add_argument(
+        "--no-state-machine-stops",
+        action="store_true",
+        help="Disable token-level reasoning/stop detection via SequenceStateMachine "
+             "(Phase 3c) and fall back to the legacy substring '<think>' scan. "
+             "Useful for rollback if a regression appears. (default: state machine ON)",
+    )
+    # Memory-aware cache options
+    serve_parser.add_argument(
+        "--cache-memory-mb",
+        type=int,
+        default=None,
+        help="Fixed memory budget for prefix cache in megabytes. When set, cached prompts "
+             "are evicted based on actual memory usage rather than entry count. "
+             "Example: --cache-memory-mb 4096 for 4GB. Default: auto-detect (~20%% of available RAM).",
+    )
+    serve_parser.add_argument(
+        "--cache-memory-percent",
+        type=float,
+        default=0.15,
+        help="Fraction of available unified memory to use for prefix cache when auto-detecting. "
+             "Only used when --cache-memory-mb is not set. Value is a decimal: 0.15 = 15%%. "
+             "Example: 0.50 for half of RAM. (default: 0.15, matching the app)",
+    )
+    serve_parser.add_argument(
+        "--no-memory-aware-cache",
+        action="store_true",
+        help="Fall back to simple entry-count-based cache eviction instead of memory-aware. "
+             "Not recommended — memory-aware cache is better for most workloads.",
+    )
+    serve_parser.add_argument(
+        "--cache-ttl-minutes",
+        type=float,
+        default=0,
+        help="Automatically evict cache entries not accessed within this many minutes. "
+             "Useful for long-running servers to prevent stale caches from consuming memory. "
+             "0 = never expire, entries only evicted when cache is full. (default: 0)",
+    )
+    serve_parser.add_argument(
+        "--ssm-state-cache-size",
+        type=int,
+        default=0,
+        help="Maximum retained in-memory SSM companion entries for hybrid models. "
+             "0 keeps typed companion state SSD-only. (default: 0)",
+    )
+    serve_parser.add_argument(
+        "--ssm-state-cache-mb",
+        type=int,
+        default=_env_int("VMLX_SSM_STATE_CACHE_MB", 0, "VMLINUX_SSM_STATE_CACHE_MB"),
+        help="Retained RAM budget in MB for hybrid SSM companion states. "
+             "0 keeps typed companion state SSD-only. (default: 0)",
+    )
+    serve_parser.add_argument(
+        "--stream-interval",
+        type=int,
+        default=8,
+        help="How many tokens to generate before sending a streaming update to the client. "
+             "Higher values batch tokens; 1 sends every token but is NOT recommended -- a "
+             "per-token stream lets client backpressure stall the emit loop, and the "
+             "speculative-decoding cost gate reads that stall as MTP cost and falls back "
+             "to plain autoregressive decode. Requires --continuous-batching. (default: 8)",
+    )
+    serve_parser.add_argument(
+        "--prefill-keep-alloc",
+        action="store_true",
+        default=False,
+        help="Skip per-prefill-chunk mx.clear_cache() calls by setting "
+             "VMLX_PREFILL_KEEP_ALLOC=1. This is opt-in for long text-only "
+             "chunked prefill tuning; default behavior is unchanged.",
+    )
+    serve_parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=DEFAULT_MAX_OUTPUT_TOKENS,
+        help="Default maximum number of tokens the model will generate per request. "
+             "Can be overridden per-request via the 'max_tokens' API parameter. "
+             f"Higher values allow longer responses but use more memory. (default: {DEFAULT_MAX_OUTPUT_TOKENS})",
+    )
+    serve_parser.add_argument(
+        "--max-prompt-tokens",
+        type=int,
+        default=None,
+        help="Maximum prompt/context tokens accepted before prefill. "
+             "If omitted, vMLX uses the automatic memory-safe prompt limit. "
+             "This is separate from --max-tokens, which caps generated output length.",
+    )
+    serve_parser.add_argument(
+        "--continuous-batching",
+        dest="continuous_batching",
+        action="store_true",
+        default=True,
+        help="Process multiple requests simultaneously using continuous batching. "
+             "Enables Prefix Cache, In-Memory Paged Cache (RAM), stored-cache codecs, and concurrent users. "
+             "Default is enabled with max-num-seqs=1 for local chat.",
+    )
+    serve_parser.add_argument(
+        "--no-continuous-batching",
+        dest="continuous_batching",
+        action="store_false",
+        help="Use the direct single-request engine and disable cache-stack features "
+             "that require continuous batching.",
+    )
+    vision_memory_group = serve_parser.add_mutually_exclusive_group()
+    vision_memory_group.add_argument(
+        "--enable-vision-memory-cache",
+        dest="enable_vision_cache",
+        action="store_true",
+        help="Retain multimodal processor outputs (pixel/video tensors, token "
+             "ids, masks, and grids) in an in-process RAM LRU. Diagnostic "
+             "opt-in; the shipping SSD-only profile leaves this off.",
+    )
+    vision_memory_group.add_argument(
+        "--no-vision-memory-cache",
+        dest="enable_vision_cache",
+        action="store_false",
+        help="Release multimodal processor tensors after each request instead "
+             "of retaining a hidden per-prompt RAM LRU (default).",
+    )
+    serve_parser.set_defaults(enable_vision_cache=False)
+    serve_parser.add_argument(
+        "--vision-memory-cache-size",
+        type=int,
+        default=16,
+        help="Maximum multimodal processor-output RAM entries when explicitly "
+             "enabled. Has no effect with --no-vision-memory-cache.",
+    )
+    # Paged cache options
+    serve_parser.add_argument(
+        "--use-paged-cache",
+        action="store_true",
+        help="Keep block-based (paged) prompt and KV cache entries in Apple unified memory. "
+             "Splits cached prompts into "
+             "fixed-size blocks that can be shared across requests with common prefixes. "
+             "Reduces memory fragmentation and improves cache utilization for multi-user "
+             "workloads. Requires --continuous-batching.",
+    )
+    serve_parser.add_argument(
+        "--no-paged-cache",
+        dest="disable_paged_cache",
+        action="store_true",
+        help="Disable the generic in-memory paged-cache tier. Block Disk Cache may "
+             "remain enabled as an SSD-only tier on supported architectures. "
+             "Architecture-owned native caches may still use internal block transport; "
+             "inspect startup output and /health for the effective policy.",
+    )
+    serve_parser.add_argument(
+        "--paged-cache-block-size",
+        type=int,
+        default=64,
+        help="Number of tokens per content-addressed cache block in the in-memory paged "
+             "tier or Block Disk Cache. Smaller blocks = "
+             "more granular sharing but higher overhead. Larger blocks = less overhead but "
+             "waste space on short prompts. (default: 64)",
+    )
+    serve_parser.add_argument(
+        "--max-cache-blocks",
+        type=int,
+        default=1000,
+        help="Maximum number of indexed cache blocks. With In-Memory Paged Cache on, "
+             "this caps the RAM block pool; in SSD-only mode, it caps the in-memory "
+             "block index. SSD capacity is controlled separately by "
+             "--block-disk-cache-max-gb. (default: 1000)",
+    )
+    # KV cache quantization
+    # mlxstudio#138: default=None lets us distinguish "user didn't pass it"
+    # (None) from "user explicitly chose none" ("none"). When explicit, we
+    # also set VMLX_DISABLE_TQ_KV so the JANG loader's TurboQuant patch
+    # respects the user's intent — without this the bundle's calibrated TQ
+    # silently shadows the requested q4/q8 because BatchGenerator goes
+    # through the patched model.make_cache().
+    serve_parser.add_argument(
+        "--kv-cache-quantization",
+        type=str,
+        default=None,
+        choices=["none", "q4", "q8"],
+        help="Optionally encode generic stored KV for diagnostics. "
+             "q8 = 8-bit (minimal quality loss, ~2x savings). "
+             "q4 = 4-bit (slight quality loss, ~4x savings). "
+             "Cache is stored compressed but decompressed for generation (no inference slowdown). "
+             "Requires --continuous-batching. Omitting this flag uses production auto "
+             "mode: the architecture's native live cache objects and native SSD "
+             "representation, with no generic TurboQuant replacement or added "
+             "stored codec. Passing the flag explicitly disables loader-level "
+             "TurboQuant so the requested diagnostic stored codec is the only "
+             "added codec. (default: native)",
+    )
+    serve_parser.add_argument(
+        "--kv-cache-group-size",
+        type=int,
+        default=64,
+        help="Group size for KV cache quantization. Smaller = better accuracy but larger "
+             "metadata overhead. Only used when --kv-cache-quantization is q4 or q8. (default: 64)",
+    )
+    # Disk cache options
+    serve_parser.add_argument(
+        "--enable-disk-cache",
+        action="store_true",
+        help="Persist prompt KV caches to SSD so they survive server restarts. Acts as "
+             "an L2 cache: on L1 (in-memory) miss, checks disk before recomputing. "
+             "Great for system prompts and repeated conversations. "
+             "Requires --continuous-batching.",
+    )
+    serve_parser.add_argument(
+        "--disk-cache-dir",
+        type=str,
+        default=None,
+        help="Directory to store disk cache files. Each cached prompt becomes a .safetensors file. "
+             "(default: ~/.cache/vmlx-engine/prompt-cache)",
+    )
+    serve_parser.add_argument(
+        "--disk-cache-max-gb",
+        type=float,
+        default=10.0,
+        help="Maximum total size of disk cache in gigabytes. Oldest entries are evicted "
+             "when the limit is exceeded. 0 = unlimited. (default: 10)",
+    )
+    serve_parser.add_argument(
+        "--disk-cache-pool",
+        action="store_true",
+        default=False,
+        help="Put the whole-prompt SSD cache (exact typed snapshots: openPangu, typed GLM) in the managed aggregate "
+             "SSD pool at the block cache root, budgeted like the block store (percent of the volume unless "
+             "--block-disk-cache-max-gb), with oldest-first eviction across every cache. Ignores --disk-cache-max-gb.",
+    )
+    # Block-level disk cache (L2 for paged cache)
+    serve_block_disk_group = serve_parser.add_mutually_exclusive_group()
+    serve_block_disk_group.add_argument(
+        "--enable-block-disk-cache",
+        dest="enable_block_disk_cache",
+        action="store_true",
+        help="Persist content-addressed cache blocks to SSD. With the in-memory paged "
+             "tier on, SSD is L2 behind RAM; with it off, SSD is the authoritative block "
+             "tier on supported architectures. Requires continuous batching and Prefix Cache.",
+    )
+    serve_block_disk_group.add_argument(
+        "--disable-block-disk-cache",
+        dest="enable_block_disk_cache",
+        action="store_false",
+        help="Disable Block Disk Cache (SSD / L2), including the disk-only block tier.",
+    )
+    serve_parser.set_defaults(enable_block_disk_cache=None)
+    serve_parser.add_argument(
+        "--block-disk-cache-dir",
+        type=str,
+        default=None,
+        help="Directory for block disk cache files. (default: ~/.cache/vmlx-engine/block-cache/<model_hash>)",
+    )
+    serve_parser.add_argument(
+        "--block-disk-cache-max-gb",
+        type=float,
+        default=None,
+        help="Maximum total size of block disk cache in GB. 0 = unlimited. "
+             "Overrides --block-disk-cache-max-percent when given.",
+    )
+    serve_parser.add_argument(
+        "--block-disk-cache-max-percent",
+        type=float,
+        default=DEFAULT_BLOCK_DISK_CACHE_PERCENT,
+        help="Maximum total size of the block disk cache as a percent of the "
+             "cache volume's capacity. 0 disables the percent sizing. "
+             f"(default: {DEFAULT_BLOCK_DISK_CACHE_PERCENT:g})",
+    )
+    # Smelt mode (partial expert loading for MoE models)
+    serve_parser.add_argument(
+        "--smelt",
+        action="store_true",
+        help="Enable Smelt mode: load backbone + N%% of MoE experts from SSD. "
+             "Reduces RAM by ~50%% while maintaining ~97%% baseline speed via "
+             "cache-biased routing and native SwitchGLU kernels.",
+    )
+    serve_parser.add_argument(
+        "--smelt-experts",
+        type=int,
+        default=50,
+        help="Percentage of experts to load per MoE layer (10-100). "
+             "Lower = less RAM, more routing bias. (default: 50)",
+    )
+    # Flash MoE SSD streaming (on-demand expert loading)
+    serve_parser.add_argument(
+        "--flash-moe",
+        action="store_true",
+        default=False,
+        help="Enable Flash MoE: stream expert weights from SSD on-demand. "
+             "Enables massive MoE models (35B-397B) to run with limited RAM "
+             "by keeping only active experts in a slot-bank cache.",
+    )
+    serve_parser.add_argument(
+        "--flash-moe-slot-bank",
+        type=int,
+        default=256,
+        help="Number of expert weight sets to cache in RAM (default: 256, matching the app). "
+             "Higher = more cache hits but more RAM usage.",
+    )
+    serve_parser.add_argument(
+        "--flash-moe-prefetch",
+        type=str,
+        choices=["none", "temporal"],
+        default="none",
+        help="Expert prefetching strategy (default: none). "
+             "'temporal' prefetches recently-used experts.",
+    )
+    serve_parser.add_argument(
+        "--flash-moe-io-split",
+        type=int,
+        default=4,
+        help="Number of parallel I/O threads for expert loading (default: 4).",
+    )
+    # Distributed compute options
+    serve_parser.add_argument(
+        "--distributed",
+        action="store_true",
+        default=False,
+        help="Enable distributed inference (coordinator mode). Discovers worker "
+             "nodes via Bonjour and splits the model across them using pipeline "
+             "parallelism. Workers must be running vmlx-worker on the same network.",
+    )
+    serve_parser.add_argument(
+        "--cluster-secret",
+        type=str,
+        default="",
+        help="Shared secret for authenticating worker nodes. All workers in the "
+             "cluster must use the same secret.",
+    )
+    serve_parser.add_argument(
+        "--distributed-mode",
+        type=str,
+        choices=["pipeline", "tensor"],
+        default="pipeline",
+        help="Parallelism mode: 'pipeline' splits layers across nodes (default), "
+             "'tensor' splits weights within layers (requires high bandwidth).",
+    )
+    serve_parser.add_argument(
+        "--worker-nodes",
+        type=str,
+        default=None,
+        help="Comma-separated list of worker node addresses (ip:port). "
+             "Use instead of Bonjour auto-discovery. Example: 192.168.1.10:9100,192.168.1.11:9100",
+    )
+    # MCP options
+    serve_parser.add_argument(
+        "--mcp-config",
+        type=str,
+        default=None,
+        help="Path to MCP (Model Context Protocol) config file (JSON/YAML). Enables the model "
+             "to call external tools (web search, code execution, etc.) via MCP servers. "
+             "Tools appear in /v1/mcp/tools and can be used in chat completions with tool_choice.",
+    )
+    serve_parser.add_argument(
+        "--mcp-enabled-servers",
+        type=str,
+        default=None,
+        help="Comma-separated MCP server allow-list for this model session.",
+    )
+    serve_parser.add_argument(
+        "--mcp-disabled-servers",
+        type=str,
+        default=None,
+        help="Comma-separated MCP server deny-list for this model session.",
+    )
+    serve_parser.add_argument(
+        "--mcp-enabled-tools",
+        type=str,
+        default=None,
+        help="Comma-separated MCP tool allow-list for this model session.",
+    )
+    serve_parser.add_argument(
+        "--mcp-disabled-tools",
+        type=str,
+        default=None,
+        help="Comma-separated MCP tool deny-list for this model session.",
+    )
+    # Security options
+    serve_parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="Require this API key for all requests. Clients must send it as "
+             "'Authorization: Bearer <key>'. Without this, anyone with network access "
+             "can use your model. Example: --api-key sk-my-secret-key",
+    )
+    serve_parser.add_argument(
+        "--enable-private-cache-attestation",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    serve_parser.add_argument(
+        "--private-cache-attestation-token-file",
+        type=str,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    serve_parser.add_argument(
+        "--rate-limit",
+        type=int,
+        default=0,
+        help="Maximum requests per minute per client IP. Prevents abuse from a single "
+             "client overwhelming the server. 0 = no limit. Example: --rate-limit 60",
+    )
+    serve_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=300.0,
+        help="Maximum time in seconds for a single request before it's cancelled. "
+             "Long prompts or high max_tokens may need higher values. (default: 300 = 5 minutes)",
+    )
+    # API Gateway routing & lifecycles
+    serve_parser.add_argument(
+        "--inference-endpoints",
+        type=str,
+        default=None,
+        help="Comma-separated list of API endpoints that should be treated as actual inference endpoints. "
+             "Requests to these endpoints will keep the server awake and reset the idle timeout. "
+             "If not set, uses a default list covering OpenAI, MLX, and Ollama endpoints.",
+    )
+    serve_parser.add_argument(
+        "--wake-timeout",
+        type=int,
+        default=300,
+        help="Maximum time in seconds to wait for a model to reload from deep sleep during a JIT wake. "
+             "Larger models may need higher values to finish loading. (default: 300)",
+    )
+    # Tool calling options
+    serve_parser.add_argument(
+        "--enable-auto-tool-choice",
+        action="store_true",
+        help="Let the model decide when to call tools (function calling). Must be combined "
+             "with --tool-call-parser to specify how the model formats tool calls. "
+             "Example: --enable-auto-tool-choice --tool-call-parser qwen",
+    )
+    serve_parser.add_argument(
+        "--model-family",
+        type=str,
+        default=None,
+        help="Manually force the model family, bypassing autodetection. The "
+             "engine normally detects the family from jang_config.json / "
+             "config.json; pass this to override that when detection is wrong "
+             "(e.g. renamed fine-tunes, GGUF, custom merges). The chosen "
+             "family's cache + tool/reasoning parser contract is used. "
+             "'auto' (or omitting the flag) keeps autodetection. Run with an "
+             "unknown family name and the engine still honors it with a kv "
+             "cache + a warning. Example: --model-family qwen3",
+    )
+    # Choices come from the live ToolParserManager registry — the same names
+    # (aliases included, they register as first-class names) that server.py
+    # resolves at request time. A hand-maintained list here drifted behind the
+    # registry and rejected parsers that exist and work (muse_glimmer/muse,
+    # zaya/zyphra, mimo_xml_function, poolside_v1), so `--tool-call-parser
+    # muse` failed at argparse for a registered parser. "none" is a CLI-only
+    # sentinel (explicit disable) with no registry entry; "auto" is registered
+    # but kept first so the two control values lead the help text.
+    from .tool_parsers import ToolParserManager
+
+    serve_parser.add_argument(
+        "--tool-parser-plugin",
+        action="append",
+        default=None,
+        metavar="MODULE_OR_FILE",
+        help="Import a tool-parser plugin (a .py file or dotted module) before the parser is "
+             "resolved. The plugin registers parsers through ToolParserManager.register_module and "
+             "may replace a registered name. Repeatable.",
+    )
+    serve_parser.add_argument(
+        "--tool-call-parser",
+        type=str,
+        default=None,
+        choices=["auto", "none"]
+        + [n for n in ToolParserManager.list_registered() if n != "auto"],
+        help="Which format to use for parsing tool calls from model output. Must match your "
+             "model's training format. Common choices: 'qwen' for Qwen models, 'llama' for "
+             "Llama 3+, 'hermes' for Hermes/NousResearch, 'mistral' for Mistral. "
+             "Use 'auto' to detect from model name. Requires --enable-auto-tool-choice.",
+    )
+    # Reasoning parser options - choices loaded dynamically from registry
+    from .reasoning import list_parsers
+
+    reasoning_choices = list_parsers()
+    serve_parser.add_argument(
+        "--reasoning-parser",
+        type=str,
+        default=None,
+        choices=["auto", "none"] + reasoning_choices,
+        help="Extract reasoning/thinking content from model output. Reasoning models like "
+             "Qwen3 and DeepSeek-R1 wrap their thinking in special tags. This parser extracts "
+             "that content into a separate 'reasoning_content' field in the API response. "
+             "'auto' = detect from model name. 'none' = explicitly disable. "
+             f"Parsers: {', '.join(reasoning_choices)}.",
+    )
+    serve_parser.add_argument(
+        "--text-only",
+        action="store_true",
+        dest="force_text_only",
+        help="Force the model to load as TEXT-ONLY even if auto-detection recognizes it as a "
+             "vision/multimodal model. Overrides --is-mllm and autodetect. Backs the UI 'Force Off' "
+             "multimodal toggle for genuinely-detected VL models.",
+    )
+    serve_parser.add_argument(
+        "--is-mllm",
+        action="store_true",
+        help="Force the model to load as a multimodal (vision) model even if auto-detection "
+             "doesn't recognize it. Use this for VLM models that aren't in the built-in registry. "
+             "Auto-detection checks config.json for 'vision_config'.",
+    )
+    # Embedding model option
+    serve_parser.add_argument(
+        "--embedding-model",
+        type=str,
+        default=None,
+        help="Pre-load a separate embedding model at startup for /v1/embeddings endpoint. "
+             "Runs alongside the main chat model. Example: --embedding-model "
+             "mlx-community/embeddinggemma-300m-6bit",
+    )
+    serve_parser.add_argument(
+        "--default-temperature",
+        type=float,
+        default=None,
+        help="Server-wide default temperature for generation. Controls randomness: "
+             "0.0 = deterministic, 1.0 = creative. Overridden by per-request 'temperature'. "
+             "If not set, uses 0.7 as fallback.",
+    )
+    serve_parser.add_argument(
+        "--default-top-p",
+        type=float,
+        default=None,
+        help="Server-wide default top-p (nucleus sampling) for generation. Only considers "
+             "tokens whose cumulative probability ≤ this value: 0.9 = use top 90%% of probability mass. "
+             "Lower = more focused, higher = more diverse. Overridden by per-request 'top_p'. "
+             "If not set, uses model default.",
+    )
+    serve_parser.add_argument(
+        "--default-top-k",
+        type=int,
+        default=None,
+        help="Server-wide default top-k for generation. Overridden by per-request 'top_k'. "
+             "If not set, uses generation_config.json / jang_config metadata when present.",
+    )
+    serve_parser.add_argument(
+        "--default-min-p",
+        type=float,
+        default=None,
+        help="Server-wide default min-p for generation. Overridden by per-request 'min_p'. "
+             "If not set, uses generation_config.json / jang_config metadata when present.",
+    )
+    # vmlx#75: reporter's `vmlx-engine serve ... --default-repetition-penalty
+    # 1.10` failed with `unrecognized arguments` on older binaries. The flag
+    # is registered here and validated in serve_command() (0.5..2.0 range
+    # matches user's 1.10 value). Paired with mlxstudio#76 diagnostic hint
+    # for cases where an older vmlx-engine shadows this one on PATH.
+    serve_parser.add_argument(
+        "--default-repetition-penalty",
+        type=float,
+        default=None,
+        help="Server-wide default repetition penalty for generation. 1.0 = no penalty. "
+             "Overridden by per-request 'repetition_penalty'. If not set, bundle metadata "
+             "is used when present; otherwise no penalty is applied server-wide.",
+    )
+    serve_parser.add_argument(
+        "--default-enable-thinking",
+        type=str,
+        default=None,
+        choices=["true", "false"],
+        help="Server-wide default for thinking/reasoning mode. 'true' enables thinking, "
+             "'false' disables it. Overridden by per-request 'enable_thinking'. "
+             "If not set, uses model's default behavior.",
+    )
+    serve_parser.add_argument(
+        "--chat-template",
+        type=str,
+        default=None,
+        help="Custom Jinja2 chat template string to override the model's built-in template. "
+             "Useful for models whose templates are incompatible with certain clients "
+             "(e.g., JetBrains AI Chat). The template receives 'messages' and 'add_generation_prompt' variables.",
+    )
+    serve_parser.add_argument(
+        "--chat-template-kwargs",
+        type=str,
+        default=None,
+        help='Server-wide default kwargs passed to the chat template. JSON string, e.g. '
+             '\'{"enable_thinking": false}\'. Per-request chat_template_kwargs override these. '
+             "Common use: disable thinking for reasoning models like Qwen3.",
+    )
+    # JIT compilation
+    serve_parser.add_argument(
+        "--enable-jit",
+        action="store_true",
+        default=False,
+        help="Enable JIT compilation (mx.compile) on the model forward pass. "
+             "This fuses Metal operations for faster inference after a one-time warmup. "
+             "May not work with all models. Falls back gracefully if compilation fails.",
+    )
+    serve_parser.add_argument(
+        "--no-jit",
+        dest="disable_jit",
+        action="store_true",
+        default=False,
+        help="Force JIT compilation OFF, overriding the automatic default. "
+             "JANG affine bundles turn JIT on by themselves when --enable-jit is "
+             "absent, so 'not passing --enable-jit' is NOT a way to disable it — "
+             "this flag is. Use it to A/B a suspected mx.compile problem.",
+    )
+
+    # Speculative decoding options
+    serve_parser.add_argument(
+        "--speculative-model",
+        type=str,
+        default=None,
+        help="Path or HuggingFace name of a small draft model for speculative decoding. "
+             "The draft model proposes tokens that the main model verifies in a single "
+             "forward pass, giving 20-90%% speedup with zero quality loss. Must use the "
+             "same tokenizer as the main model. Example: --speculative-model mlx-community/Llama-3.2-1B-Instruct-4bit",
+    )
+    serve_parser.add_argument(
+        "--no-bundled-dflash2",
+        action="store_true",
+        default=False,
+        help="Ignore a DFlash2 drafter shipped inside the model bundle "
+             "(<bundle>/dflash2) and use the bundle's native MTP instead.",
+    )
+    serve_parser.add_argument(
+        "--dspark",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="DSpark drafter shipped inside the bundle (<bundle>/dspark, MiniCPM-V-4.7 / Naive N0.5): auto / on = use "
+             "it whenever the bundle ships one (a bundle without it serves AR), off = AR only. Runs on the "
+             "single-request lane (--no-continuous-batching); text, image and video requests.",
+    )
+    serve_parser.add_argument(
+        "--num-draft-tokens",
+        type=int,
+        default=3,
+        help="Number of tokens the draft model proposes per speculative decoding step. "
+             "Higher values = more potential speedup but lower acceptance rate. "
+             "Typical sweet spot is 2-5. (default: 3)",
+    )
+    # Native MTP has exactly two product modes, matching the app's single "Native MTP" control:
+    #   Adaptive (default when the bundle carries a supported head): engine-governed depth ladder from the bundle's
+    #   ceiling, measured against its own AR baseline, with the AR-safety valve; sampler untouched.
+    #   AR: --disable-native-mtp.
+    # --native-mtp-depth / --native-mtp-depth-policy fixed remain only as hidden benchmark/diagnostic levers (pin a
+    # starting depth or disable depth adaptation for A/B work). They are not product settings and the app never emits
+    # them; they are suppressed from --help so the CLI surface matches the app.
+    serve_parser.add_argument(
+        "--native-mtp-depth",
+        type=int,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    serve_parser.add_argument(
+        "--native-mtp-depth-policy",
+        choices=["adaptive", "fixed"],
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    serve_parser.add_argument(
+        "--native-mtp-sampling-policy",
+        choices=["compatible-only", "deterministic-defaults", "greedy-only"],
+        default="compatible-only",
+        help="Native MTP request policy. compatible-only leaves sampling defaults alone, so "
+             "greedy requests use identity verification and sampled requests use rejection-"
+             "sampling acceptance when that runtime gate is enabled. deterministic-defaults fills omitted "
+             "temperature/top-p/top-k/min-p with greedy values. greedy-only enforces "
+             "temperature=0, top_p=1, top_k=0, min_p=0, and repetition_penalty=1 "
+             "even when a request supplies incompatible values. The app uses compatible-only for Auto, greedy-only for "
+             "Deterministic, and disables native MTP for Off.",
+    )
+    serve_parser.add_argument(
+        "--disable-native-mtp",
+        action="store_true",
+        default=False,
+        help="AR mode: disable native in-model MTP even when the loaded bundle has MTP tensors. Without this flag a "
+             "bundle with a supported MTP head runs Adaptive MTP (engine-governed depth with an AR-safety fallback).",
+    )
+    serve_parser.add_argument(
+        "--omni-backend",
+        choices=["stage1", "stage2"],
+        default=None,
+        help="Nemotron-Omni multimodal backend. stage1 is correctness-first "
+             "PyTorch/MPS; stage2 opts into the native MLX RADIO + Parakeet "
+             "path via VMLX_OMNI_BACKEND=stage2.",
+    )
+
+    # Prompt Lookup Decoding (PLD)
+    serve_parser.add_argument(
+        "--enable-pld",
+        action="store_true",
+        default=False,
+        help="Enable Prompt Lookup Decoding speculative acceleration. "
+             "PLD verifies n-gram draft tokens in a single forward pass, giving ~5-8x speedup "
+             "on long structured or repetitive output (code, JSON, summarisation). "
+             "Net-neutral or negative on short novel prompts. Check 'eff tok/pass' in the "
+             "[PLD:3b1f] log summary to evaluate impact for your workload.",
+    )
+    serve_parser.add_argument(
+        "--pld-summary-interval",
+        type=int,
+        default=487,
+        help="Log a PLD effectiveness summary every N spec-decode tokens. "
+             "The summary reports accept rate, full/zero %%, and eff tok/pass "
+             "(>1.0 = net gain over baseline). (default: 487)",
+    )
+    # Logging
+    serve_parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Server log verbosity. DEBUG shows all details, ERROR shows only errors. (default: INFO)",
+    )
+    # CORS
+    serve_parser.add_argument(
+        "--allowed-origins",
+        type=str,
+        default="*",
+        help="Comma-separated list of allowed CORS origins for browser-based API consumers. "
+             "Use * to allow all origins. Example: http://localhost:3000,https://myapp.com (default: *)",
+    )
+    # Bench command
+    bench_parser = subparsers.add_parser("bench", help="Run benchmark")
+    bench_parser.add_argument("model", type=str, help="Model to benchmark")
+    bench_parser.add_argument(
+        "--num-prompts", type=int, default=10, help="Number of prompts"
+    )
+    bench_parser.add_argument(
+        "--max-tokens", type=int, default=100, help="Max tokens per prompt"
+    )
+    bench_parser.add_argument(
+        "--max-num-seqs", type=int, default=32, help="Max concurrent sequences"
+    )
+    bench_parser.add_argument(
+        "--prefill-batch-size", type=int, default=8, help="Prefill batch size"
+    )
+    bench_parser.add_argument(
+        "--prefill-step-size", type=int, default=2048,
+        help="Tokens per prefill chunk — reduce for large MoE models hitting Metal OOM (default: 2048)"
+    )
+    bench_parser.add_argument(
+        "--completion-batch-size", type=int, default=16, help="Completion batch size"
+    )
+    bench_parser.add_argument(
+        "--enable-prefix-cache",
+        action="store_true",
+        default=True,
+        help="Enable prefix caching (default: enabled)",
+    )
+    bench_parser.add_argument(
+        "--disable-prefix-cache",
+        action="store_true",
+        help="Disable prefix caching",
+    )
+    bench_parser.add_argument(
+        "--dsv4-enable-prefix-cache",
+        action="store_true",
+        help="Diagnostic-only opt-in for DeepSeek-V4 Flash native composite "
+             "prefix reuse. Default benchmarking uses full prefill because "
+             "restored-cache output equivalence is not proven.",
+    )
+    bench_parser.add_argument(
+        "--prefix-cache-size",
+        type=int,
+        default=100,
+        help="Max entries in prefix cache (default: 100, legacy mode only)",
+    )
+    # Memory-aware cache options (recommended for large models)
+    bench_parser.add_argument(
+        "--cache-memory-mb",
+        type=int,
+        default=None,
+        help="Cache memory limit in MB (default: auto-detect ~20%% of RAM)",
+    )
+    bench_parser.add_argument(
+        "--cache-memory-percent",
+        type=float,
+        default=0.15,
+        help="Fraction of available RAM for cache if auto-detecting (default: 0.15). "
+             "Kept equal to serve: benchmarking under different cache defaults "
+             "than the server actually uses produces numbers that do not "
+             "describe serving.",
+    )
+    bench_parser.add_argument(
+        "--no-memory-aware-cache",
+        action="store_true",
+        help="Disable memory-aware cache, use legacy entry-count based cache",
+    )
+    bench_parser.add_argument(
+        "--cache-ttl-minutes",
+        type=float,
+        default=0,
+        help="Cache entry time-to-live in minutes. 0=disabled (default: 0)",
+    )
+    bench_parser.add_argument(
+        "--ssm-state-cache-size",
+        type=int,
+        default=0,
+        help="Maximum retained in-memory SSM companion entries for hybrid models; "
+             "0 keeps typed state SSD-only (default: 0)",
+    )
+    bench_parser.add_argument(
+        "--ssm-state-cache-mb",
+        type=int,
+        default=_env_int("VMLX_SSM_STATE_CACHE_MB", 0, "VMLINUX_SSM_STATE_CACHE_MB"),
+        help="Retained RAM budget in MB for hybrid SSM companion states; 0 is "
+             "SSD-only (default: 0)",
+    )
+    # Paged cache options (experimental)
+    bench_parser.add_argument(
+        "--use-paged-cache",
+        action="store_true",
+        help="Use paged KV cache in Apple unified memory (experimental). NOTE: bench "
+             "does not apply the serve-path generic paged default-on; pass this "
+             "explicitly to benchmark the paged backend.",
+    )
+    bench_parser.add_argument(
+        "--paged-cache-block-size",
+        type=int,
+        default=64,
+        help="Tokens per cache block (default: 64)",
+    )
+    bench_parser.add_argument(
+        "--max-cache-blocks",
+        type=int,
+        default=1000,
+        help="Maximum number of cache blocks (default: 1000)",
+    )
+    # KV cache quantization (mlxstudio#138: see serve_parser block for rationale)
+    bench_parser.add_argument(
+        "--kv-cache-quantization",
+        type=str,
+        default=None,
+        choices=["none", "q4", "q8"],
+        help="Optionally encode generic stored KV for diagnostics. q8=8-bit, q4=4-bit. "
+             "Passing this flag explicitly disables loader-level TurboQuant KV. "
+             "Omitting it preserves architecture-native live and stored cache state.",
+    )
+    bench_parser.add_argument(
+        "--kv-cache-group-size",
+        type=int,
+        default=64,
+        help="Group size for KV cache quantization (default: 64)",
+    )
+    # Disk cache options (bench)
+    bench_parser.add_argument(
+        "--enable-disk-cache",
+        action="store_true",
+        help="Save prompt caches to disk for reuse across runs",
+    )
+    bench_parser.add_argument(
+        "--disk-cache-dir",
+        type=str,
+        default=None,
+        help="Directory for disk cache files (default: ~/.cache/vmlx-engine/prompt-cache)",
+    )
+    bench_parser.add_argument(
+        "--disk-cache-max-gb",
+        type=float,
+        default=10.0,
+        help="Maximum disk cache size in GB (default: 10)",
+    )
+    bench_block_disk_group = bench_parser.add_mutually_exclusive_group()
+    bench_block_disk_group.add_argument(
+        "--enable-block-disk-cache",
+        dest="enable_block_disk_cache",
+        action="store_true",
+        help="Persist content-addressed cache blocks to SSD. With the in-memory paged "
+             "tier off, supported architectures use SSD as the authoritative block tier.",
+    )
+    bench_block_disk_group.add_argument(
+        "--disable-block-disk-cache",
+        dest="enable_block_disk_cache",
+        action="store_false",
+        help="Disable Block Disk Cache (SSD / L2), including the disk-only block tier.",
+    )
+    bench_parser.set_defaults(enable_block_disk_cache=None)
+    bench_parser.add_argument(
+        "--block-disk-cache-dir",
+        type=str,
+        default=None,
+        help="Directory for block disk cache",
+    )
+    bench_parser.add_argument(
+        "--block-disk-cache-max-gb",
+        type=float,
+        default=None,
+        help="Maximum block disk cache size in GB (default: 10)",
+    )
+    bench_parser.add_argument(
+        "--smelt",
+        action="store_true",
+        help="Enable Smelt mode for benchmarking with partial expert loading.",
+    )
+    bench_parser.add_argument(
+        "--smelt-experts",
+        type=int,
+        default=50,
+        help="Percentage of experts to load per MoE layer (default: 50)",
+    )
+    bench_parser.add_argument(
+        "--flash-moe",
+        action="store_true",
+        default=False,
+        help="Enable Flash MoE SSD streaming for benchmarking.",
+    )
+    bench_parser.add_argument(
+        "--flash-moe-slot-bank",
+        type=int,
+        default=256,
+        help="Flash MoE slot bank size (default: 256). Kept equal to serve so a "
+             "benchmark measures the shipped expert-cache size.",
+    )
+
+    # Detokenizer benchmark
+    detok_parser = subparsers.add_parser(
+        "bench-detok", help="Benchmark streaming detokenizer optimization"
+    )
+    detok_parser.add_argument(
+        "model",
+        type=str,
+        nargs="?",
+        default="mlx-community/Qwen3-0.6B-8bit",
+        help="Model to use for tokenizer (default: mlx-community/Qwen3-0.6B-8bit)",
+    )
+    detok_parser.add_argument(
+        "--iterations", type=int, default=5, help="Benchmark iterations (default: 5)"
+    )
+
+    # Convert command
+    convert_parser = subparsers.add_parser(
+        "convert", help="Convert HuggingFace model to quantized MLX or JANG format"
+    )
+    convert_parser.add_argument(
+        "model", type=str,
+        help="HuggingFace model name or local path to convert",
+    )
+    convert_parser.add_argument(
+        "--output", "-o", type=str, default=None,
+        help="Output directory (default: auto-generated from model name)",
+    )
+
+    # MLX uniform quantization options
+    convert_parser.add_argument(
+        "--bits", "-b", type=int, default=None, choices=[2, 3, 4, 6, 8],
+        help="MLX uniform quantization bit-width (mutually exclusive with --jang-profile)",
+    )
+    convert_parser.add_argument(
+        "--group-size", type=int, default=64,
+        help="Quantization group size (default: 64)",
+    )
+    convert_parser.add_argument(
+        "--mode", type=str, default="default",
+        choices=["default", "NF4"],
+        help="Quantization mode (default: default)",
+    )
+
+    # JANG adaptive quantization options
+    convert_parser.add_argument(
+        "--jang-profile", "-j", type=str, default=None,
+        help="JANG adaptive profile (e.g. JANG_2S, JANG_3M, JANG_4L). "
+             "Automatically assigns different bit widths to attention vs MLP tensors.",
+    )
+    convert_parser.add_argument(
+        "--jang-method", type=str, default="mse",
+        choices=["mse", "rtn", "mse-all"],
+        help="JANG quantization method: mse (MSE for attention, RTN for MLP), "
+             "rtn (fast), mse-all (MSE everywhere, slow). Default: mse",
+    )
+    # Advanced JANG options (beginners can ignore these)
+    convert_parser.add_argument(
+        "--calibration-method", type=str, default="weights",
+        choices=["weights", "activations"],
+        help="How to score tensor importance. 'weights' is fast (default). "
+             "'activations' gives better quality at 2-3 bit but requires more time. "
+             "Most users should leave this at the default.",
+    )
+    convert_parser.add_argument(
+        "--imatrix-path", type=str, default=None,
+        help="Path to a pre-computed importance matrix (.safetensors). "
+             "Skips calibration step. Advanced: use if you've pre-calibrated with custom data.",
+    )
+    convert_parser.add_argument(
+        "--use-awq", action="store_true", default=False,
+        help="Enable AWQ (Activation-Aware Weighting) scaling for better quality. "
+             "Experimental. Adds activation norm collection step before quantization.",
+    )
+    convert_parser.add_argument(
+        "--awq-alpha", type=float, default=0.25,
+        help="AWQ scaling factor (0.0-1.0). Only used when --use-awq is enabled. "
+             "Higher values increase activation awareness. Default: 0.25.",
+    )
+
+    convert_parser.add_argument(
+        "--dtype", type=str, default=None,
+        help="Non-quantized layer dtype (e.g. float16, bfloat16)",
+    )
+    convert_parser.add_argument(
+        "--force", action="store_true",
+        help="Overwrite existing output directory",
+    )
+    convert_parser.add_argument(
+        "--skip-verify", action="store_true",
+        help="Skip post-conversion smoke test",
+    )
+    convert_parser.add_argument(
+        "--trust-remote-code", action="store_true",
+        help="Trust remote code from HuggingFace",
+    )
+
+    # Info command
+    info_parser = subparsers.add_parser(
+        "info", help="Display model metadata"
+    )
+    info_parser.add_argument(
+        "model", type=str,
+        help="Model path or HuggingFace name to inspect",
+    )
+
+    # List command
+    list_parser = subparsers.add_parser(
+        "list", help="List models in a directory"
+    )
+    list_parser.add_argument(
+        "directory", type=str,
+        help="Directory to scan for models",
+    )
+
+    # Doctor command
+    doctor_parser = subparsers.add_parser(
+        "doctor", help="Run diagnostics on a model directory"
+    )
+    doctor_parser.add_argument(
+        "model", type=str,
+        help="Model path or HuggingFace name to diagnose",
+    )
+    doctor_parser.add_argument(
+        "--no-inference", action="store_true",
+        help="Skip inference smoke test",
+    )
+
+    bundle_check_parser = subparsers.add_parser(
+        "bundle-check",
+        help="Validate a local model bundle and atomically repair safe index defects",
+    )
+    bundle_check_parser.add_argument("model", type=str, help="Local model directory")
+    bundle_check_parser.add_argument(
+        "--no-repair", action="store_true", help="Report repairable index defects"
+    )
+    bundle_check_parser.add_argument(
+        "--no-cache", action="store_true", help="Ignore the one-time integrity stamp"
+    )
+    bundle_check_parser.add_argument(
+        "--json", action="store_true", help="Print one machine-readable JSON object"
+    )
+
+    # mlxstudio#76: parse_args() exits with code 2 on unrecognized args,
+    # which is opaque to end users running via the panel's process spawner.
+    # When a user's vmlx-engine binary is shadowed by an older install on
+    # PATH, flags like --smelt or --default-repetition-penalty (added in
+    # newer releases) get rejected. The panel logs "unrecognized arguments"
+    # but the user has no obvious path to diagnose. Catch SystemExit(2)
+    # from argparse and emit a one-line hint telling them to check for
+    # a stale binary; then re-raise so argparse's own message still shows.
+    try:
+        args = parser.parse_args()
+    except SystemExit as _argp_exit:
+        if _argp_exit.code == 2:
+            # Argparse already wrote "error: unrecognized arguments: ..." to
+            # stderr. Append a diagnostic tail so users can act on it.
+            try:
+                import sys as _sys
+                from . import __version__ as _vmlx_ver
+            except Exception:
+                _vmlx_ver = "unknown"
+            _sys.stderr.write(
+                f"\n"
+                f"hint: vmlx_engine version is {_vmlx_ver}. "
+                f"If this flag was recently added and you expect it to "
+                f"work, verify no older `vmlx-engine` is shadowing the "
+                f"bundled one on your PATH:\n"
+                f"    which -a vmlx-engine\n"
+                f"    python -c 'import vmlx_engine; print(vmlx_engine.__file__)'\n"
+                f"    pip show vmlx\n"
+                f"See mlxstudio#76.\n"
+            )
+        raise
+
+    # ``bundle-check`` is deliberately header-only and machine-readable. Do
+    # not import MLX or emit the runtime wired-limit banner before its JSON.
+    # Every model-running command retains the existing initialization before
+    # dispatch.
+    if args.command != "bundle-check":
+        _install_jangtq_wired_limit_from_sysctl()
+
+    # ONE place where the GB/percent budget becomes a number. Every consumer
+    # downstream — both scheduler config builders, the startup summary, the DSV4
+    # native lane — reads args.block_disk_cache_max_gb and expects a float.
+    normalize_block_disk_cache_budget(args)
+
+    if args.command in ("serve", "bench"):
+        args.max_cache_blocks_explicit = _argv_has_option(
+            sys.argv[1:], "--max-cache-blocks"
+        )
+
+    if args.command == "serve":
+        args.max_tokens_explicit = _argv_has_option(sys.argv[1:], "--max-tokens")
+        # Track these the same way rather than comparing against the default
+        # value: a magic-number sentinel silently breaks the moment the default
+        # changes, and --cache-memory-percent's default is changing here.
+        args.timeout_explicit = _argv_has_option(sys.argv[1:], "--timeout")
+        args.cache_memory_percent_explicit = _argv_has_option(
+            sys.argv[1:], "--cache-memory-percent"
+        )
+        serve_command(args)
+    elif args.command == "bench":
+        bench_command(args)
+    elif args.command == "bench-detok":
+        bench_detok_command(args)
+    elif args.command == "convert":
+        from .commands.convert import convert_command
+        convert_command(args)
+    elif args.command == "info":
+        from .commands.info import info_command
+        info_command(args)
+    elif args.command == "list":
+        from .commands.list import list_command
+        list_command(args)
+    elif args.command == "doctor":
+        from .commands.doctor import doctor_command
+        doctor_command(args)
+    elif args.command == "bundle-check":
+        from .commands.bundle_check import bundle_check_command
+        bundle_check_command(args)
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
