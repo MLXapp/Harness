@@ -144,7 +144,12 @@ jobs:
         env:
           VMLX_JANG_TOOLS_SOURCE: ${{ github.workspace }}/jangq/jang-tools
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-        run: ./scripts/build-studio-dmg.sh
+        run: |
+          # signing walks tens of thousands of files in the bundled Python; the runner's default limit (256) runs out (EMFILE)
+          sudo launchctl limit maxfiles 65536 200000 || true
+          ulimit -n 65536 || ulimit -n 10240 || true
+          echo "open files: $(ulimit -n)"
+          ./scripts/build-studio-dmg.sh
 
       - name: Notarize and staple the DMG
         if: env.MAC_CERT_P12 != '' && env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != ''
