@@ -267,7 +267,9 @@
       "appearance": "外観",
       "themeSystem": "システム",
       "themeLight": "ライト",
-      "themeDark": "ダーク"
+      "themeDark": "ダーク",
+      "poweredByMtplx": "Powered by MTPLX",
+      "license": "ライセンスと表記"
     }
   },
   "titlebar": {

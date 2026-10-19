@@ -267,7 +267,9 @@
       "appearance": "화면 모드",
       "themeSystem": "시스템",
       "themeLight": "라이트",
-      "themeDark": "다크"
+      "themeDark": "다크",
+      "poweredByMtplx": "Powered by MTPLX",
+      "license": "라이선스 및 고지"
     }
   },
   "titlebar": {

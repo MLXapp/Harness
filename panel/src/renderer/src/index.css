@@ -353,3 +353,6 @@ button, input, select, textarea, a {
 
 /* Number that changes without jumping width. */
 .mlx-num { font-variant-numeric: tabular-nums; }
+
+/* Orange text links need a deeper orange to read on light surfaces. */
+.light a.text-primary { color: var(--link); }

@@ -520,10 +520,17 @@ function ServerModeContent() {
               <p className="text-xs text-muted-foreground/70">{t('app.about.creator')}</p>
               <AppVersion />
               <div className="flex flex-wrap gap-4 text-xs">
-                <a href="https://studio.mlx.app" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">studio.mlx.app</a>
-                <a href="https://github.com/MLXapp/studio" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">GitHub</a>
-                <a href="https://github.com/jjang-ai/vmlx" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">vMLX</a>
+                <a href="https://studio.mlx.app" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">studio.mlx.app</a>
+                <a href="https://github.com/MLXapp/studio" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">GitHub</a>
+                <a href="https://github.com/jjang-ai/vmlx" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">vMLX</a>
+                <a href="https://github.com/MLXapp/studio/blob/main/NOTICE" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">{t('app.about.license')}</a>
               </div>
+              {/* Required in-product attribution (MTPLX NOTICE, Apache-2.0 §4(d)). */}
+              <p className="text-xs text-muted-foreground">
+                <a data-vmlx-control="about-mtplx" href="https://github.com/youssofal/mtplx" target="_blank" rel="noopener noreferrer" className="hover:underline">
+                  {`${t('app.about.poweredByMtplx')} · github.com/youssofal/mtplx`}
+                </a>
+              </p>
             </section>
           </div>
         </div>

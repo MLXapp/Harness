@@ -434,7 +434,7 @@ app.whenReady().then(async () => {
     applicationName: 'MLX Studio',
     applicationVersion: app.getVersion(),
     copyright: 'Copyright 2026 Flex UK Limited (MLX Network)',
-    credits: 'Built on vMLX by JANGQ AI (Apache License 2.0)',
+    credits: 'Built on vMLX by JANGQ AI (Apache License 2.0).\nPowered by MTPLX — https://github.com/youssofal/mtplx',
     website: 'https://studio.mlx.app',
   })
 
