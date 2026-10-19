@@ -44,7 +44,7 @@ describe('native menu navigation lifecycle', () => {
     const win = windowMock(); acknowledgeMenuReadiness(win); installApplicationMenu(() => win)
     const template = Menu.buildFromTemplate.mock.calls[0][0]
     expect(template.some((x: any) => x.role === 'editMenu')).toBe(true)
-    for (const [key, action] of [['N', 'new-chat'], ['1', 'chat'], ['2', 'servers'], ['3', 'models'], ['4', 'api']]) {
+    for (const [key, action] of [['N', 'new-chat'], ['1', 'chat'], ['2', 'servers'], ['3', 'models'], ['4', 'api'], ['5', 'network']]) {
       const item = template.flatMap((x: any) => x.submenu || []).find((x: any) => x.accelerator === `CmdOrCtrl+${key}`)
       item.click()
       expect(win.webContents.send).toHaveBeenLastCalledWith('app:navigate', action)

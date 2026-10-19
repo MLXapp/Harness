@@ -26,6 +26,7 @@ import { ModelDoctor } from './components/tools/ModelDoctor'
 import { ModelConverter } from './components/tools/ModelConverter'
 import { ApiDashboard } from './components/api/ApiDashboard'
 import { ImageTab } from './components/image/ImageTab'
+import { NetworkView } from './components/network/NetworkView'
 import { isImageSession, sessionMatchesModelPath } from '../../shared/sessionUtils'
 import { resolveDownloadModelType, type DownloadModelType } from '../../shared/modelDiscoveryNavigation'
 import { useTranslation, LOCALES, LOCALE_NAMES, LOCALE_FLAGS } from './i18n'
@@ -334,6 +335,9 @@ function App() {
             )}
             {state.mode === 'image' && (
               <ImageTab />
+            )}
+            {state.mode === 'network' && (
+              <NetworkView />
             )}
             {state.mode === 'api' && (
               <ApiDashboard />

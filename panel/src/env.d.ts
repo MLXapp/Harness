@@ -389,6 +389,12 @@ declare global {
         set: (key: string, value: string) => Promise<{ success: boolean; value?: string }>;
         delete: (key: string) => Promise<{ success: boolean }>;
       };
+      network: {
+        getTotals: () => Promise<import('./shared/mlxNetwork').FetchResult<import('./shared/mlxNetwork').NetworkSnapshot>>;
+        getMining: (walletName: string) => Promise<import('./shared/mlxNetwork').FetchResult<import('./shared/mlxNetwork').WalletMining>>;
+        getMlxAppStatus: () => Promise<import('./shared/mlxNetwork').MlxAppStatus>;
+        openMlxApp: () => Promise<boolean>;
+      };
       app: {
         getPowerMode: () => Promise<import('./shared/powerMode').PowerModeStatus>;
         getVersion: () => Promise<string>;

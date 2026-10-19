@@ -23,7 +23,7 @@ export function checkForUpdates(getWindow: () => BrowserWindow | null, currentVe
   setTimeout(async () => {
     const fetches = LATEST_URLS.map(async (url) => {
       try {
-        const response = await net.fetch(url, { method: 'GET', cache: 'no-store' })
+        const response = await net.fetch(url, { method: 'GET' })
         if (!response.ok) {
           console.log(`[UPDATE] ${url}: HTTP ${response.status}`)
           return null

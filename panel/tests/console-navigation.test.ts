@@ -4,12 +4,12 @@ import { consolePageForMode, restoreAppMode } from '../src/renderer/src/lib/cons
 describe('Console navigation compatibility', () => {
   it.each([
     ['chat', 'chat'], ['image', 'chat'], ['code', 'chat'],
-    ['server', 'server'], ['api', 'server'], ['tools', 'models'], ['models', 'models'],
+    ['server', 'server'], ['api', 'server'], ['tools', 'models'], ['models', 'models'], ['network', 'network'],
   ] as const)('groups existing %s mode under %s', (mode, page) => {
     expect(consolePageForMode(mode)).toBe(page)
   })
 
-  it.each(['chat', 'image', 'server', 'api', 'tools', 'models'] as const)(
+  it.each(['chat', 'image', 'server', 'api', 'tools', 'models', 'network'] as const)(
     'preserves persisted %s controller', mode => expect(restoreAppMode(mode)).toBe(mode),
   )
 

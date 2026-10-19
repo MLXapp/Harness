@@ -33,6 +33,8 @@ export function ConsoleSubnavigation() {
     return () => window.removeEventListener('resize', measure)
   }, [state.mode, page, t])
 
+  // The Network page has a single view: no section bar.
+  if (page === 'network') return null
   return (
     <nav aria-label={t('console.sections')} data-vmlx-section="console-subnavigation"
       className="flex shrink-0 items-center border-b border-border px-4 h-11 bg-background">
