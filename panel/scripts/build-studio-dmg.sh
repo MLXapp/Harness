@@ -72,7 +72,7 @@ if [[ -n "${APPLE_TEAM_ID:-}" ]]; then
 fi
 
 rm -rf release
-/opt/homebrew/bin/npx --no-install electron-builder --mac dmg --arm64 \
+/opt/homebrew/bin/npx --no-install electron-builder --mac dmg --arm64 --publish never \
   --config.mac.minimumSystemVersion="$MIN_SYSTEM" \
   --config.artifactName="MLX-Studio-\${version}${SUFFIX}-\${arch}.\${ext}" \
   ${identity_args[@]+"${identity_args[@]}"}
