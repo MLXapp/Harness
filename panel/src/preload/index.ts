@@ -318,11 +318,17 @@ const api = {
     getPowerMode: (): Promise<import('../shared/powerMode').PowerModeStatus> => ipcRenderer.invoke('app:powerMode'),
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getTotalMemoryGB: (): Promise<number> => ipcRenderer.invoke('app:totalMemoryGB'),
-    onUpdateAvailable: (callback: (data: any) => void) => {
-      const handler = (_: any, data: any) => callback(data)
-      ipcRenderer.on('app:updateAvailable', handler)
-      return () => { ipcRenderer.removeListener('app:updateAvailable', handler) }
+    // In-app updater (src/main/app-updater.ts): one state, pushed on every change.
+    getUpdateState: (): Promise<import('../shared/appUpdate').UpdateState> => ipcRenderer.invoke('app:updateState'),
+    onUpdateState: (callback: (state: import('../shared/appUpdate').UpdateState) => void) => {
+      const handler = (_: any, state: import('../shared/appUpdate').UpdateState) => callback(state)
+      ipcRenderer.on('app:updateState', handler)
+      return () => { ipcRenderer.removeListener('app:updateState', handler) }
     },
+    installUpdate: (): Promise<void> => ipcRenderer.invoke('app:updateInstall'),
+    restartToUpdate: (): Promise<void> => ipcRenderer.invoke('app:updateRestart'),
+    dismissUpdate: (): Promise<void> => ipcRenderer.invoke('app:updateLater'),
+    openUpdateDownload: (): Promise<void> => ipcRenderer.invoke('app:updateOpenDownload'),
     onMtpComponentUpdateAvailable: (callback: (data: any) => void) => {
       const handler = (_: any, data: any) => callback(data)
       ipcRenderer.on('models:mtpComponentUpdateAvailable', handler)

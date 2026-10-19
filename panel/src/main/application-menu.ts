@@ -3,6 +3,10 @@ import { t } from './i18n'
 import type { NativeNavigationAction } from '../shared/nativeNavigation'
 
 let readyContentsId: number | null = null
+let updateCheckHandler: (() => void) | null = null
+
+/** "Check for Updates…" (MLX Studio menu) calls this; set by the app updater. */
+export function setUpdateCheckHandler(handler: (() => void) | null): void { updateCheckHandler = handler }
 let pendingAction: NativeNavigationAction | null = null
 
 export function resetMenuReadiness(): void { readyContentsId = null }
@@ -39,9 +43,10 @@ export function navigateFromMenu(action: NativeNavigationAction, getWindow: () =
 export function installApplicationMenu(getWindow: () => BrowserWindow | null): void {
   const go = (action: NativeNavigationAction) => () => navigateFromMenu(action, getWindow)
   const preferences = { label: t('console.preferences'), accelerator: 'CmdOrCtrl+,', click: go('preferences') }
+  const checkForUpdates = { label: t('update.menu.check'), click: () => updateCheckHandler?.() }
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [
-      { role: 'about' }, { type: 'separator' }, preferences,
+      { role: 'about' }, checkForUpdates, { type: 'separator' }, preferences,
       { type: 'separator' }, { role: 'services' }, { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
       { type: 'separator' }, { role: 'quit' },

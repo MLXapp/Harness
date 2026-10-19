@@ -2132,9 +2132,56 @@
     "banner": {
       "versionLabel": "MLX Studio {version}",
       "available": "が利用可能です",
+      "update": "アップデート",
+      "later": "あとで",
       "download": "ダウンロード",
-      "starOnGitHub": "リリースノート",
-      "dismissTitle": "閉じる"
+      "downloadManually": "手動でダウンロード",
+      "downloading": "MLX Studio {version} をダウンロード中…",
+      "progress": "{received} MB / {total} MB",
+      "verifying": "MLX Studio {version} を確認中…",
+      "verifyingDetail": "ダウンロードと署名を検証しています",
+      "ready": "MLX Studio {version} をインストールする準備ができました",
+      "restart": "再起動してアップデート",
+      "failed": "MLX Studio {version} をインストールできませんでした",
+      "retry": "再試行"
+    },
+    "reason": {
+      "development": "開発ビルドです。アップデートはリリース版のアプリでのみインストールされます。",
+      "unsupported": "自動アップデートは macOS でのみ利用できます。",
+      "notApp": "MLX Studio がアプリバンドルから実行されていません。",
+      "mountedDmg": "MLX Studio がディスクイメージから実行されています。自動アップデートを受け取るには「アプリケーション」フォルダに移動してください。",
+      "translocated": "macOS が MLX Studio を一時的な場所から実行しています。自動アップデートを受け取るには「アプリケーション」フォルダに移動してください。",
+      "notWritable": "このフォルダでは MLX Studio を置き換えられません。新しいバージョンをダウンロードして手動で置き換えてください。",
+      "noChecksum": "このリリースにはチェックサムがないため、自動でインストールできません。",
+      "network": "ダウンロードが完了しませんでした。接続を確認してもう一度お試しください。",
+      "size": "ダウンロードのサイズが正しくないため、インストールしませんでした。",
+      "checksum": "ダウンロードがチェックサムと一致しないため、インストールしませんでした。",
+      "mount": "ディスクイメージを開けませんでした。",
+      "notFound": "ディスクイメージに MLX Studio が含まれていません。",
+      "notOurs": "ディスクイメージ内のアプリは MLX Studio ではないため、インストールしませんでした。",
+      "signature": "新しいバージョンは MLX Studio の開発元によって署名されていないため、インストールしませんでした。",
+      "notarization": "macOS が新しいバージョンを公証済みとして認めなかったため、インストールしませんでした。",
+      "notNewer": "ダウンロードしたバージョンはこのバージョンより新しくありません。",
+      "currentApp": "この MLX Studio は署名済みのリリース版ではないため、自身を置き換えません。",
+      "copy": "アプリの隣に新しいバージョンを準備できませんでした。ディスクの空き容量を確認してください。",
+      "busy": "アップデートはすでにインストール中です。"
+    },
+    "menu": {
+      "check": "アップデートを確認…"
+    },
+    "dialog": {
+      "upToDateTitle": "最新の状態です",
+      "upToDateDetail": "MLX Studio {version} は最新バージョンです。",
+      "availableTitle": "MLX Studio {version} が利用可能です",
+      "availableDetail": "現在のバージョンは {current} です。",
+      "readyTitle": "MLX Studio {version} をインストールする準備ができました",
+      "readyDetail": "アップデートを完了するために MLX Studio を再起動します。",
+      "failedTitle": "アップデートを確認できませんでした",
+      "failedDetail": "インターネット接続を確認してもう一度お試しください。"
+    },
+    "notification": {
+      "title": "MLX Studio {version} が利用可能です",
+      "body": "MLX Studio を開いてアップデートしてください。"
     }
   },
   "ui": {

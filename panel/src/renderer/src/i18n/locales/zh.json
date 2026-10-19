@@ -2132,9 +2132,56 @@
     "banner": {
       "versionLabel": "MLX Studio {version}",
       "available": "现已推出",
+      "update": "更新",
+      "later": "稍后",
       "download": "下载",
-      "starOnGitHub": "发行说明",
-      "dismissTitle": "关闭"
+      "downloadManually": "手动下载",
+      "downloading": "正在下载 MLX Studio {version}…",
+      "progress": "{received} MB / {total} MB",
+      "verifying": "正在验证 MLX Studio {version}…",
+      "verifyingDetail": "正在检查下载内容及其签名",
+      "ready": "MLX Studio {version} 已准备好安装",
+      "restart": "重新启动以更新",
+      "failed": "无法安装 MLX Studio {version}",
+      "retry": "重试"
+    },
+    "reason": {
+      "development": "开发版本：只有正式发布的应用才会安装更新。",
+      "unsupported": "自动更新仅支持 macOS。",
+      "notApp": "MLX Studio 不是从应用包运行的。",
+      "mountedDmg": "MLX Studio 正在从磁盘映像运行。请将其移到“应用程序”文件夹以获取自动更新。",
+      "translocated": "macOS 正在从临时位置运行 MLX Studio。请将其移到“应用程序”文件夹以获取自动更新。",
+      "notWritable": "MLX Studio 无法在此文件夹中替换自身。请下载新版本并手动替换。",
+      "noChecksum": "此版本没有校验和，因此无法自动安装。",
+      "network": "下载未完成。请检查网络连接后重试。",
+      "size": "下载文件大小不正确，因此未安装。",
+      "checksum": "下载文件与校验和不匹配，因此未安装。",
+      "mount": "无法打开磁盘映像。",
+      "notFound": "磁盘映像中没有 MLX Studio。",
+      "notOurs": "磁盘映像中的应用不是 MLX Studio，因此未安装。",
+      "signature": "新版本未经 MLX Studio 开发者签名，因此未安装。",
+      "notarization": "macOS 未将新版本认可为已公证的应用，因此未安装。",
+      "notNewer": "下载的版本并不比当前版本新。",
+      "currentApp": "此 MLX Studio 副本不是已签名的正式版本，因此不会替换自身。",
+      "copy": "无法在应用旁边准备新版本。请检查可用磁盘空间。",
+      "busy": "已在安装更新。"
+    },
+    "menu": {
+      "check": "检查更新…"
+    },
+    "dialog": {
+      "upToDateTitle": "已是最新版本",
+      "upToDateDetail": "MLX Studio {version} 是最新版本。",
+      "availableTitle": "MLX Studio {version} 现已推出",
+      "availableDetail": "你当前的版本是 {current}。",
+      "readyTitle": "MLX Studio {version} 已准备好安装",
+      "readyDetail": "MLX Studio 将重新启动以完成更新。",
+      "failedTitle": "无法检查更新",
+      "failedDetail": "请检查网络连接后重试。"
+    },
+    "notification": {
+      "title": "MLX Studio {version} 现已推出",
+      "body": "打开 MLX Studio 进行更新。"
     }
   },
   "ui": {

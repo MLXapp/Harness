@@ -28,6 +28,7 @@ import { buildContentSecurityPolicy } from './csp'
 import { db } from './database'
 import { checkEngineVersion, installEngineStreaming } from './engine-manager'
 import { checkForUpdates } from './update-checker'
+import { cancelUpdateRelaunch, runPendingUpdateSwap } from './app-updater'
 import { dismissMtpComponentUpdate } from './mtp-component-updater'
 import { ProcessManager } from './process-manager'
 import { attachProcessStdioErrorGuard } from './childProcessStreamGuards'
@@ -641,6 +642,7 @@ app.on('before-quit', async (e) => {
   } catch (err) {
     console.error('[QUIT] Error stopping processes:', err)
     isQuitting = false
+    cancelUpdateRelaunch()
     sessionManager.startGlobalMonitor()
     // The app stays open, so restore everything the quit already stopped.
     if (db.getSetting('tray_enabled') !== '0') createTray(processManager, () => mainWindow)
@@ -659,6 +661,9 @@ app.on('before-quit', async (e) => {
   } catch (err) {
     console.error('[QUIT] Error closing database:', err)
   }
+  // A verified update staged by the in-app updater is swapped in once this
+  // process has exited (and relaunched if the quit came from "Restart to update").
+  runPendingUpdateSwap()
   app.exit(0)
 })
 

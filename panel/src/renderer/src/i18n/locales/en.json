@@ -2132,9 +2132,56 @@
     "banner": {
       "versionLabel": "MLX Studio {version}",
       "available": "is available",
+      "update": "Update",
+      "later": "Later",
       "download": "Download",
-      "starOnGitHub": "Release notes",
-      "dismissTitle": "Dismiss"
+      "downloadManually": "Download manually",
+      "downloading": "Downloading MLX Studio {version}…",
+      "progress": "{received} MB of {total} MB",
+      "verifying": "Verifying MLX Studio {version}…",
+      "verifyingDetail": "Checking the download and its signature",
+      "ready": "MLX Studio {version} is ready to install",
+      "restart": "Restart to update",
+      "failed": "MLX Studio {version} couldn't be installed",
+      "retry": "Try again"
+    },
+    "reason": {
+      "development": "Development build: updates install only in the released app.",
+      "unsupported": "Automatic updates work only on macOS.",
+      "notApp": "MLX Studio isn't running from an app bundle.",
+      "mountedDmg": "MLX Studio is running from the disk image. Move it to Applications to get automatic updates.",
+      "translocated": "macOS is running MLX Studio from a temporary location. Move it to Applications to get automatic updates.",
+      "notWritable": "MLX Studio can't replace itself in this folder. Download the new version and replace it by hand.",
+      "noChecksum": "This release has no checksum, so it can't be installed automatically.",
+      "network": "The download didn't finish. Check your connection and try again.",
+      "size": "The download has the wrong size, so it wasn't installed.",
+      "checksum": "The download doesn't match its checksum, so it wasn't installed.",
+      "mount": "The disk image couldn't be opened.",
+      "notFound": "The disk image doesn't contain MLX Studio.",
+      "notOurs": "The app in the disk image isn't MLX Studio, so it wasn't installed.",
+      "signature": "The new version isn't signed by MLX Studio's developer, so it wasn't installed.",
+      "notarization": "macOS didn't accept the new version as notarized, so it wasn't installed.",
+      "notNewer": "The download isn't newer than this version.",
+      "currentApp": "This copy of MLX Studio isn't the signed release, so it doesn't replace itself.",
+      "copy": "The new version couldn't be prepared next to the app. Check the free disk space.",
+      "busy": "An update is already being installed."
+    },
+    "menu": {
+      "check": "Check for Updates…"
+    },
+    "dialog": {
+      "upToDateTitle": "You're up to date",
+      "upToDateDetail": "MLX Studio {version} is the newest version.",
+      "availableTitle": "MLX Studio {version} is available",
+      "availableDetail": "You have {current}.",
+      "readyTitle": "MLX Studio {version} is ready to install",
+      "readyDetail": "MLX Studio restarts to finish the update.",
+      "failedTitle": "Couldn't check for updates",
+      "failedDetail": "Check your internet connection and try again."
+    },
+    "notification": {
+      "title": "MLX Studio {version} is available",
+      "body": "Open MLX Studio to update."
     }
   },
   "ui": {

@@ -240,10 +240,11 @@ describe('MLX Studio update feed', () => {
   it('accepts a manifest without a download and stays quiet about it', async () => {
     const { parseLatestRelease, decideUpdate } = await import('../src/main/update-manifest')
     const fs = await import('fs')
+    // latest.json is rewritten by the release job; it never announces a version newer than this checkout.
     const shipped = parseLatestRelease(JSON.parse(fs.readFileSync('../latest.json', 'utf-8')))
-    expect(shipped?.version).toBe('0.1.0')
-    expect(shipped?.url).toBe('')
-    expect(decideUpdate(shipped!, '0.1.0', '15.6.0')).toEqual({ kind: 'current' })
+    const ours = JSON.parse(fs.readFileSync('package.json', 'utf-8')).version
+    expect(shipped?.version).toMatch(/^\d+\.\d+\.\d+/)
+    expect(decideUpdate(shipped!, ours, '15.6.0')).toEqual({ kind: 'current' })
 
     const announced = parseLatestRelease({ version: '0.2.0', downloads: {} })!
     expect(decideUpdate(announced, '0.1.0', '15.6.0')).toEqual({ kind: 'no-download', version: '0.2.0' })
@@ -260,5 +261,32 @@ describe('MLX Studio update feed', () => {
     expect(ok.kind === 'available' && ok.release.url).toBe(url)
     expect(decideUpdate({ version: '0.2.0', url: 'https://evil.example/x.dmg' }, '0.1.0', '15.6.0').kind).toBe('untrusted')
     expect(decideUpdate({ version: '0.1.0', url }, '0.1.0', '15.6.0').kind).toBe('current')
+  })
+})
+
+describe('latest.json carries what the in-app updater needs', () => {
+  it('a published release has an https DMG, its SHA-256 and its size', async () => {
+    const { parseLatestRelease, selectDownloadForMacOS, isValidUpdateUrl } = await import('../src/main/update-manifest')
+    const { isSha256 } = await import('../src/shared/appUpdate')
+    const fs = await import('fs')
+    const shipped = parseLatestRelease(JSON.parse(fs.readFileSync('../latest.json', 'utf-8')))!
+    if (!shipped.url) return // announced without a build yet
+    const selected = selectDownloadForMacOS(shipped, '15.6.0')
+    expect(isValidUpdateUrl(selected.url)).toBe(true)
+    expect(selected.url).toMatch(/\.dmg$/)
+    expect(isSha256(selected.sha256)).toBe(true)
+    expect(selected.size).toBeGreaterThan(0)
+  })
+
+  it('keeps the size with the asset it belongs to', async () => {
+    const { selectDownloadForMacOS } = await import('../src/main/update-manifest')
+    const url = 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Studio-0.2.0-arm64.dmg'
+    const sha = 'a'.repeat(64)
+    const m = { version: '0.2.0', url, sha256: sha, size: 123, downloads: { sequoia: { url, sha256: sha } } }
+    expect(selectDownloadForMacOS(m, '15.6.0')).toMatchObject({ url, sha256: sha, size: 123 })
+    const other = 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Studio-0.2.0-other.dmg'
+    const split = { ...m, downloads: { sequoia: { url: other } } }
+    // another file: neither the top-level size nor its checksum may be borrowed
+    expect(selectDownloadForMacOS(split, '15.6.0')).toMatchObject({ url: other, sha256: undefined, size: undefined })
   })
 })

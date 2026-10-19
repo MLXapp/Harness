@@ -2132,9 +2132,56 @@
     "banner": {
       "versionLabel": "MLX Studio {version}",
       "available": "está disponible",
+      "update": "Actualizar",
+      "later": "Más tarde",
       "download": "Descargar",
-      "starOnGitHub": "Notas de la versión",
-      "dismissTitle": "Descartar"
+      "downloadManually": "Descargar manualmente",
+      "downloading": "Descargando MLX Studio {version}…",
+      "progress": "{received} MB de {total} MB",
+      "verifying": "Verificando MLX Studio {version}…",
+      "verifyingDetail": "Comprobando la descarga y su firma",
+      "ready": "MLX Studio {version} está listo para instalarse",
+      "restart": "Reiniciar para actualizar",
+      "failed": "No se pudo instalar MLX Studio {version}",
+      "retry": "Reintentar"
+    },
+    "reason": {
+      "development": "Versión de desarrollo: las actualizaciones solo se instalan en la app publicada.",
+      "unsupported": "Las actualizaciones automáticas solo funcionan en macOS.",
+      "notApp": "MLX Studio no se está ejecutando desde un paquete de app.",
+      "mountedDmg": "MLX Studio se está ejecutando desde la imagen de disco. Muévelo a Aplicaciones para recibir actualizaciones automáticas.",
+      "translocated": "macOS está ejecutando MLX Studio desde una ubicación temporal. Muévelo a Aplicaciones para recibir actualizaciones automáticas.",
+      "notWritable": "MLX Studio no puede reemplazarse en esta carpeta. Descarga la nueva versión y reemplázala tú.",
+      "noChecksum": "Esta versión no tiene suma de verificación, así que no se puede instalar automáticamente.",
+      "network": "La descarga no terminó. Comprueba tu conexión e inténtalo de nuevo.",
+      "size": "La descarga no tiene el tamaño correcto, así que no se instaló.",
+      "checksum": "La descarga no coincide con su suma de verificación, así que no se instaló.",
+      "mount": "No se pudo abrir la imagen de disco.",
+      "notFound": "La imagen de disco no contiene MLX Studio.",
+      "notOurs": "La app de la imagen de disco no es MLX Studio, así que no se instaló.",
+      "signature": "La nueva versión no está firmada por el desarrollador de MLX Studio, así que no se instaló.",
+      "notarization": "macOS no aceptó la nueva versión como notarizada, así que no se instaló.",
+      "notNewer": "La descarga no es más reciente que esta versión.",
+      "currentApp": "Esta copia de MLX Studio no es la versión firmada, así que no se reemplaza a sí misma.",
+      "copy": "No se pudo preparar la nueva versión junto a la app. Comprueba el espacio libre en el disco.",
+      "busy": "Ya se está instalando una actualización."
+    },
+    "menu": {
+      "check": "Buscar actualizaciones…"
+    },
+    "dialog": {
+      "upToDateTitle": "Tienes la última versión",
+      "upToDateDetail": "MLX Studio {version} es la versión más reciente.",
+      "availableTitle": "MLX Studio {version} está disponible",
+      "availableDetail": "Tienes la {current}.",
+      "readyTitle": "MLX Studio {version} está listo para instalarse",
+      "readyDetail": "MLX Studio se reinicia para terminar la actualización.",
+      "failedTitle": "No se pudo buscar actualizaciones",
+      "failedDetail": "Comprueba tu conexión a internet e inténtalo de nuevo."
+    },
+    "notification": {
+      "title": "MLX Studio {version} está disponible",
+      "body": "Abre MLX Studio para actualizar."
     }
   },
   "ui": {
