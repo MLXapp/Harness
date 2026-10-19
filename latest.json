@@ -1,14 +1,14 @@
 {
-  "version": "0.1.0",
-  "url": "https://github.com/MLXapp/studio/releases/download/v0.1.0/MLX-Studio-0.1.0-arm64.dmg",
-  "sha256": "30ae29d2ece41ea303756fffcff49b4855b54ff6296d128d0c765b64e20d4c1b",
-  "size": 587884316,
+  "version": "0.1.1",
+  "url": "https://github.com/MLXapp/studio/releases/download/v0.1.1/MLX-Studio-0.1.1-arm64.dmg",
+  "sha256": "af800c23c4ce65832ce5a57c366009c0ab409c24278cf451d0a715aef897a060",
+  "size": 588037474,
   "date": "2026-10-19",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/studio/releases/download/v0.1.0/MLX-Studio-0.1.0-arm64.dmg",
-      "sha256": "30ae29d2ece41ea303756fffcff49b4855b54ff6296d128d0c765b64e20d4c1b"
+      "url": "https://github.com/MLXapp/studio/releases/download/v0.1.1/MLX-Studio-0.1.1-arm64.dmg",
+      "sha256": "af800c23c4ce65832ce5a57c366009c0ab409c24278cf451d0a715aef897a060"
     }
   },
-  "notes": "MLX Studio 0.1.0. Signed and notarized. Carries MLX Node inside."
+  "notes": "Updates now install themselves: click Update, then Restart."
 }
