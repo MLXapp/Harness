@@ -3,8 +3,13 @@ export interface ReleaseAsset {
   sha256?: string
 }
 
+/** Where MLX Studio releases are published (the updater feed lives in that repo). */
+export const RELEASES_PAGE = 'https://github.com/MLXapp/studio/releases'
+export const LATEST_MANIFEST_URL = 'https://raw.githubusercontent.com/MLXapp/studio/main/latest.json'
+
 export interface LatestRelease {
   version: string
+  /** Empty until a build has been published for this version. */
   url: string
   sha256?: string
   notes?: string
@@ -41,7 +46,7 @@ export function compareVersions(current: string, latest: string): boolean {
 export function isValidUpdateUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
-    const trusted = ['github.com', 'mlx.studio']
+    const trusted = ['github.com', 'mlx.app']
     return parsed.protocol === 'https:' && trusted.some(d => parsed.hostname === d || parsed.hostname.endsWith(`.${d}`))
   } catch {
     return false
@@ -93,4 +98,40 @@ export function selectHighestRelease(results: LatestRelease[]): LatestRelease | 
     }
   }
   return data
+}
+
+/**
+ * Read one manifest. A manifest needs a version; the download URL is optional
+ * because a version can be announced in latest.json before its DMG is
+ * published. Returns null for anything that is not a manifest.
+ */
+export function parseLatestRelease(raw: unknown): LatestRelease | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (typeof r.version !== 'string' || !/^\d+\.\d+(\.\d+)?/.test(r.version)) return null
+  return { ...(r as unknown as LatestRelease), url: typeof r.url === 'string' ? r.url : '' }
+}
+
+export type UpdateDecision =
+  | { kind: 'current' }
+  | { kind: 'no-download'; version: string }
+  | { kind: 'untrusted'; version: string; url: string }
+  | { kind: 'available'; release: LatestRelease }
+
+/**
+ * Decide what to tell the user. Only a newer version with a trusted HTTPS
+ * download is announced; a newer version without a download yet stays quiet.
+ */
+export function decideUpdate(
+  release: LatestRelease,
+  currentVersion: string,
+  systemVersion?: string,
+): UpdateDecision {
+  if (!compareVersions(currentVersion, release.version)) return { kind: 'current' }
+  const hasDownload = !!(release.url || release.downloads?.sequoia?.url || release.downloads?.tahoe?.url || release.tahoeUrl)
+  if (!hasDownload) return { kind: 'no-download', version: release.version }
+  const selected = selectDownloadForMacOS(release, systemVersion)
+  if (!selected.url) return { kind: 'no-download', version: release.version }
+  if (!isValidUpdateUrl(selected.url)) return { kind: 'untrusted', version: release.version, url: selected.url }
+  return { kind: 'available', release: selected }
 }

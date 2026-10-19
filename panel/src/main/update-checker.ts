@@ -1,43 +1,36 @@
 import { BrowserWindow } from 'electron'
 import { net } from 'electron'
 import {
-  compareVersions,
-  isValidUpdateUrl,
-  LatestRelease,
-  selectDownloadForMacOS,
+  decideUpdate,
+  LATEST_MANIFEST_URL,
+  parseLatestRelease,
   selectHighestRelease,
+  type LatestRelease,
 } from './update-manifest'
 
-// Query BOTH sources and take the highest version — mlx.studio drifts stale
-// when CI release workflow only updates GitHub, so relying on first-hit order
-// silently blocks updates for anyone past the stale source's version.
-const LATEST_URLS = [
-  'https://raw.githubusercontent.com/jjang-ai/mlxstudio/main/latest.json',
-  'https://mlx.studio/update/latest.json',
-]
+// MLX Studio's update feed: latest.json at the root of MLXapp/studio (main).
+// Releases are published at https://github.com/MLXapp/studio/releases.
+// Upstream vMLX's feeds are intentionally not queried.
+const LATEST_URLS = [LATEST_MANIFEST_URL]
 const CHECK_DELAY_MS = 5000 // Wait 5s after startup before checking
 
 export function checkForUpdates(getWindow: () => BrowserWindow | null, currentVersion: string): void {
-  if (process.env.VMLX_SKIP_UPDATE_CHECK === '1') {
-    console.log('[UPDATE] Skipping update check because VMLX_SKIP_UPDATE_CHECK=1')
+  if (process.env.VMLX_SKIP_UPDATE_CHECK === '1' || process.env.MLX_STUDIO_SKIP_UPDATE_CHECK === '1') {
+    console.log('[UPDATE] Skipping update check (MLX_STUDIO_SKIP_UPDATE_CHECK / VMLX_SKIP_UPDATE_CHECK)')
     return
   }
 
   setTimeout(async () => {
-    // Fetch ALL sources in parallel and pick the highest version — prevents a
-    // stale mirror from silently suppressing updates on newer clients.
     const fetches = LATEST_URLS.map(async (url) => {
       try {
-        const response = await net.fetch(url, { method: 'GET' })
+        const response = await net.fetch(url, { method: 'GET', cache: 'no-store' })
         if (!response.ok) {
           console.log(`[UPDATE] ${url}: HTTP ${response.status}`)
           return null
         }
-        const parsed = await response.json()
-        if (parsed.version && parsed.url) {
-          console.log(`[UPDATE] Fetched manifest from ${url}: v${parsed.version}`)
-          return parsed as LatestRelease
-        }
+        const parsed = parseLatestRelease(await response.json())
+        if (parsed) console.log(`[UPDATE] Fetched manifest from ${url}: v${parsed.version}`)
+        return parsed
       } catch (err) {
         console.log(`[UPDATE] ${url}: ${(err as Error).message}`)
       }
@@ -45,38 +38,36 @@ export function checkForUpdates(getWindow: () => BrowserWindow | null, currentVe
     })
 
     const results = (await Promise.all(fetches)).filter((r): r is LatestRelease => r != null)
-    let data = selectHighestRelease(results)
-
+    const data = selectHighestRelease(results)
     if (!data) {
-      console.log('[UPDATE] All update sources failed')
-      return
-    }
-    console.log(`[UPDATE] Picked highest version across sources: v${data.version}`)
-    const selected = selectDownloadForMacOS(data)
-    if (selected.url !== data.url) {
-      console.log(`[UPDATE] Selected native macOS download: ${selected.url}`)
-      data = selected
-    }
-
-    // Only accept HTTPS URLs from trusted domains
-    if (!isValidUpdateUrl(data.url)) {
-      console.log(`[UPDATE] Invalid URL in manifest: ${data.url}`)
+      console.log('[UPDATE] No update manifest available')
       return
     }
 
-    if (compareVersions(currentVersion, data.version)) {
-      console.log(`[UPDATE] New version available: ${currentVersion} → ${data.version}`)
-      const win = getWindow()
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('app:updateAvailable', {
-          currentVersion,
-          latestVersion: data.version,
-          url: data.url,
-          notes: data.notes
-        })
+    const decision = decideUpdate(data, currentVersion)
+    switch (decision.kind) {
+      case 'current':
+        console.log(`[UPDATE] Up to date (${currentVersion}; latest ${data.version})`)
+        return
+      case 'no-download':
+        console.log(`[UPDATE] v${decision.version} is announced but has no download yet`)
+        return
+      case 'untrusted':
+        console.log(`[UPDATE] Ignoring v${decision.version}: untrusted download URL ${decision.url}`)
+        return
+      case 'available': {
+        const release = decision.release
+        console.log(`[UPDATE] New version available: ${currentVersion} → ${release.version}`)
+        const win = getWindow()
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('app:updateAvailable', {
+            currentVersion,
+            latestVersion: release.version,
+            url: release.url,
+            notes: release.notes,
+          })
+        }
       }
-    } else {
-      console.log(`[UPDATE] Up to date (${currentVersion})`)
     }
   }, CHECK_DELAY_MS)
 }
