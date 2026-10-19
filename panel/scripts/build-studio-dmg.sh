@@ -66,6 +66,12 @@ if [[ -z "${CSC_LINK:-}" ]] && ! /usr/bin/security find-identity -v -p codesigni
   unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_KEYCHAIN_PROFILE
 fi
 
+# CI imports the Developer ID identity into its own keychain and names it in CSC_NAME
+# (package.json leaves mac.identity null so local builds without a certificate stay unsigned).
+if [[ -n "${CSC_NAME:-}" ]]; then
+  identity_args+=(--config.mac.identity="$CSC_NAME")
+fi
+
 # Notarisation team: package.json carries ours; APPLE_TEAM_ID overrides it.
 if [[ -n "${APPLE_TEAM_ID:-}" ]]; then
   identity_args+=(--config.mac.notarize.teamId="$APPLE_TEAM_ID")
