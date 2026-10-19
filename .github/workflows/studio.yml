@@ -20,6 +20,10 @@ on:
         description: Publish this build as v<package version> (creates the tag and the GitHub release)
         type: boolean
         default: false
+      notes:
+        description: One line shown to users in the app's update banner and notification (optional)
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -233,6 +237,7 @@ jobs:
       - name: Point the update feed at it
         env:
           REPO: ${{ github.repository }}
+          NOTES: ${{ inputs.notes }}
         run: |
           VERSION="${TAG#v}"
           DMG="$(cd dist && ls MLX-Studio-*.dmg | head -1)"
@@ -243,7 +248,7 @@ jobs:
             const [v, url, sha, size] = process.argv.slice(1);
             const m = { version: v, url, sha256: sha, size: Number(size), date: new Date().toISOString().slice(0, 10),
               downloads: { sequoia: { url, sha256: sha } },
-              notes: `MLX Studio ${v}. Signed and notarized. Carries MLX Node inside.` };
+              notes: process.env.NOTES || `MLX Studio ${v}. Signed and notarized. Carries MLX Node inside.` };
             fs.writeFileSync("latest.json", JSON.stringify(m, null, 2) + "\n");
           ' "$VERSION" "$URL" "$SHA" "$(stat -c %s "dist/$DMG")"
           cat latest.json
