@@ -262,7 +262,11 @@
       "hfToken": "HuggingFace トークン",
       "hfRequired": "制限付きモデル（Flux、Llama など）のダウンロードに必要です。",
       "getToken": "トークンを取得",
-      "savedTokenPlaceholder": "保存済みトークンが設定されています（新しいトークンで置換）"
+      "savedTokenPlaceholder": "保存済みトークンが設定されています（新しいトークンで置換）",
+      "appearance": "外観",
+      "themeSystem": "システム",
+      "themeLight": "ライト",
+      "themeDark": "ダーク"
     }
   },
   "titlebar": {

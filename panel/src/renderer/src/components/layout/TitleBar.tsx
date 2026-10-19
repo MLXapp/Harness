@@ -20,7 +20,7 @@ export function TitleBar() {
 
   return (
     <div
-      className="flex items-center h-[38px] min-w-0 overflow-hidden bg-background border-b border-border flex-shrink-0"
+      className="flex items-center h-[38px] min-w-0 overflow-hidden bg-sidebar border-b border-sidebar-border flex-shrink-0"
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
       {/* macOS traffic light spacer + sidebar toggle */}
@@ -31,7 +31,7 @@ export function TitleBar() {
         {(
           <button
             onClick={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
-            className="p-1 translate-y-[3px] text-muted-foreground hover:text-foreground rounded hover:bg-accent transition-colors focus:outline-none focus-visible:outline-none"
+            className="p-1 translate-y-[3px] text-muted-foreground hover:text-foreground rounded-md hover:bg-accent transition-colors focus:outline-none focus-visible:outline-none"
             title={
               state.sidebarCollapsed
                 ? t("app.sidebar.show")
@@ -47,11 +47,11 @@ export function TitleBar() {
         )}
       </div>
 
-      <div className="flex-1 min-w-0 text-center text-[11px] tracking-[0.14em] text-muted-foreground truncate">
-        vmlx / Console
+      <div className="flex-1 min-w-0 text-center text-[12px] font-medium text-muted-foreground truncate">
+        MLX Studio
       </div>
 
-      {/* Right: language picker + preferences. Console is the only theme. */}
+      {/* Right: language picker + preferences. Appearance lives in Preferences. */}
       <div
         className="flex items-center gap-1 px-3"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
@@ -135,7 +135,7 @@ function LanguagePicker({
         createPortal(
           <div
             ref={menuRef}
-            className="fixed bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[140px]"
+            className="fixed glass-strong rounded-xl py-1 min-w-[160px] animate-in fade-in-0 zoom-in-95 duration-200"
             style={{
               top: menuPos.top,
               right: menuPos.right,

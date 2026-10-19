@@ -1,15 +1,15 @@
 @import 'katex/dist/katex.min.css';
 @import './styles/console-tokens.css';
-@import './styles/console-fonts.css';
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
-  /* Console Amber. Existing semantic utility names remain stable. */
-  :root,
-  .dark {
+  /* MLX tokens (styles/console-tokens.css) mapped onto the semantic names the
+     components use. The tokens switch with the theme, so one mapping serves
+     light and dark. */
+  :root {
     --background: var(--bg-rgb);
     --foreground: var(--text-rgb);
     --card: var(--bg-2-rgb);
@@ -20,54 +20,22 @@
     --primary-foreground: var(--text-on-accent-rgb);
     --secondary: var(--bg-2-rgb);
     --secondary-foreground: var(--text-rgb);
-    --muted: var(--bg-4-rgb);
+    --muted: var(--bg-3-rgb);
     --muted-foreground: var(--text-dim-rgb);
     --accent: var(--bg-3-rgb);
     --accent-foreground: var(--text-rgb);
     --destructive: var(--err-rgb);
     --destructive-foreground: 255 255 255;
     --border: var(--line-rgb);
-    --input: var(--well-rgb);
+    --input: var(--line-rgb);
     --ring: var(--acc-rgb);
     --warning: var(--warn-rgb);
     --warning-foreground: var(--text-on-accent-rgb);
     --success: var(--ok-rgb);
-    --success-foreground: var(--text-on-accent-rgb);
-    --sidebar: var(--bg-rgb);
+    --success-foreground: 255 255 255;
+    --sidebar: var(--sidebar-bg-rgb);
     --sidebar-foreground: var(--text-rgb);
     --sidebar-border: var(--line-rgb);
-    --radius: 0px;
-  }
-
-  /* Studio Light theme */
-  .light {
-    --background: 250 250 252;      /* #fafafc */
-    --foreground: 15 17 22;         /* #0f1116 */
-    --card: 255 255 255;            /* #ffffff */
-    --card-foreground: 15 17 22;
-    --popover: 255 255 255;
-    --popover-foreground: 15 17 22;
-    --primary: 59 130 246;          /* same blue accent */
-    --primary-foreground: 255 255 255;
-    --secondary: 244 245 247;       /* #f4f5f7 */
-    --secondary-foreground: 15 17 22;
-    --muted: 241 242 246;           /* #f1f2f6 */
-    --muted-foreground: 100 106 122; /* #646a7a */
-    --accent: 237 239 244;          /* #edeff4 */
-    --accent-foreground: 15 17 22;
-    --destructive: 239 68 68;
-    --destructive-foreground: 255 255 255;
-    --border: 226 228 234;          /* #e2e4ea */
-    --input: 226 228 234;
-    --ring: 59 130 246;
-    --warning: 245 158 11;
-    --warning-foreground: 255 255 255;
-    --success: 34 197 94;
-    --success-foreground: 255 255 255;
-    --sidebar: 245 246 250;         /* #f5f6fa */
-    --sidebar-foreground: 15 17 22;
-    --sidebar-border: 226 228 234;
-    --radius: 10px;
   }
 
   * {
@@ -75,14 +43,15 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: var(--font-mono);
+    font-family: var(--font);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
   button, a, input, select, textarea, [role="button"] {
     transition: background-color var(--dur) var(--ease),
-                border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+                border-color var(--dur) var(--ease), color var(--dur) var(--ease),
+                box-shadow var(--dur) var(--ease), opacity var(--dur) var(--ease);
   }
 
   input::placeholder, textarea::placeholder {
@@ -159,31 +128,32 @@ button, input, select, textarea, a {
   -webkit-app-region: no-drag;
 }
 
-/* Model output is prose; UI chrome and code remain monospace. */
-.prose { font-family: var(--font-prose); }
-.prose pre, .prose code { font-family: var(--font-mono); }
-/* Dark prose overrides (requires @tailwindcss/typography) */
-.dark .prose {
-  --tw-prose-body: #EDEEEF;
-  --tw-prose-headings: #ffffff;
-  --tw-prose-lead: #8b90a0;
-  --tw-prose-links: #F2A93B;
-  --tw-prose-bold: #ffffff;
-  --tw-prose-counters: #8b90a0;
-  --tw-prose-bullets: #8b90a0;
-  --tw-prose-hr: #1e2330;
-  --tw-prose-quotes: #e2e4ea;
-  --tw-prose-quote-borders: #3F444A;
-  --tw-prose-captions: #8b90a0;
-  --tw-prose-code: #F2A93B;
-  --tw-prose-pre-code: #e2e4ea;
-  --tw-prose-pre-bg: #151718;
-  --tw-prose-th-borders: #1e2330;
-  --tw-prose-td-borders: #1e2330;
+/* Model output and UI share SF Pro; code stays in SF Mono. */
+.prose { font-family: var(--font); }
+.prose pre, .prose code { font-family: var(--mono); }
+/* Prose colours follow the MLX tokens in both themes. */
+.prose {
+  --tw-prose-body: var(--text);
+  --tw-prose-headings: var(--text);
+  --tw-prose-lead: var(--text-dim);
+  --tw-prose-links: var(--link);
+  --tw-prose-bold: var(--text);
+  --tw-prose-counters: var(--text-dim);
+  --tw-prose-bullets: var(--text-faint);
+  --tw-prose-hr: var(--line);
+  --tw-prose-quotes: var(--text);
+  --tw-prose-quote-borders: var(--acc);
+  --tw-prose-captions: var(--text-dim);
+  --tw-prose-code: var(--text);
+  --tw-prose-pre-code: var(--text);
+  --tw-prose-pre-bg: var(--bg-2);
+  --tw-prose-th-borders: var(--line);
+  --tw-prose-td-borders: var(--line-subtle);
 }
 
-/* Filled amber surfaces need dark Markdown, not the assistant's light prose.
-   Keep fenced code on its own dark surface; never recolor syntax spans/media. */
+/* Filled orange surfaces (your own messages) need dark Markdown in both
+   themes. Keep fenced code on its own surface; never recolor syntax spans/media. */
+.light .prose-on-accent .prose,
 .dark .prose-on-accent .prose {
   --tw-prose-body: var(--text-on-accent);
   --tw-prose-headings: var(--text-on-accent);
@@ -201,37 +171,18 @@ button, input, select, textarea, a {
   --tw-prose-td-borders: rgb(var(--text-on-accent-rgb) / .25);
 }
 
+.light .prose-on-accent .prose blockquote,
 .dark .prose-on-accent .prose blockquote {
   color: var(--text-on-accent);
   border-color: var(--tw-prose-quote-borders);
 }
 
-/* Light prose overrides */
-.light .prose {
-  --tw-prose-body: #0f1116;
-  --tw-prose-headings: #0f1116;
-  --tw-prose-lead: #646a7a;
-  --tw-prose-links: #2563eb;
-  --tw-prose-bold: #0f1116;
-  --tw-prose-counters: #646a7a;
-  --tw-prose-bullets: #646a7a;
-  --tw-prose-hr: #e2e4ea;
-  --tw-prose-quotes: #0f1116;
-  --tw-prose-quote-borders: #3b82f6;
-  --tw-prose-captions: #646a7a;
-  --tw-prose-code: #2563eb;
-  --tw-prose-pre-code: #0f1116;
-  --tw-prose-pre-bg: #f1f2f6;
-  --tw-prose-th-borders: #e2e4ea;
-  --tw-prose-td-borders: #e2e4ea;
-}
-
 /* Code block wrapper */
 .code-block-wrapper {
-  border: 1px solid rgb(var(--border) / 0.5);
-  border-radius: 8px;
+  border: 1px solid rgb(var(--border) / 0.7);
+  border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+  box-shadow: 0 1px 2px var(--lg-depth);
   margin: 8px 0;
 }
 
@@ -264,10 +215,10 @@ button, input, select, textarea, a {
   color: rgb(var(--muted-foreground));
   background: transparent;
   border: 1px solid rgb(var(--border));
-  border-radius: 4px;
+  border-radius: 7px;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .code-block-wrapper:hover .code-copy-btn { opacity: 1; }
 .code-copy-btn:hover { color: rgb(var(--foreground)); background: rgb(var(--popover)); }
@@ -276,17 +227,18 @@ button, input, select, textarea, a {
 .prose pre {
   position: relative;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 /* Inline code styling */
 .prose :not(pre) > code {
   background: rgb(var(--popover));
   padding: 0.15em 0.4em;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.875em;
 }
 
+.light .prose-on-accent .prose :not(pre) > code,
 .dark .prose-on-accent .prose :not(pre) > code {
   background: rgb(var(--text-on-accent-rgb) / .10);
 }
@@ -312,14 +264,92 @@ button, input, select, textarea, a {
   color: rgb(var(--warning));
 }
 
-/* Custom scrollbar — dark */
-.dark ::-webkit-scrollbar { width: 6px; }
-.dark ::-webkit-scrollbar-track { background: transparent; }
-.dark ::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 3px; }
-.dark ::-webkit-scrollbar-thumb:hover { background: rgb(85 91 110); }
+/* Scrollbars: thin, rounded, quiet — both themes. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--text-faint-rgb) / .3);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--text-faint-rgb) / .5); }
+::-webkit-scrollbar-corner { background: transparent; }
 
-/* Custom scrollbar — light */
-.light ::-webkit-scrollbar { width: 6px; }
-.light ::-webkit-scrollbar-track { background: transparent; }
-.light ::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 3px; }
-.light ::-webkit-scrollbar-thumb:hover { background: rgb(180 184 196); }
+/* ============================================================================
+   MLX surfaces
+   ============================================================================ */
+
+/* Liquid glass (mlx.app .glass): translucent body, a specular rim brightest
+   at the corners, an optional system tint (--tint). */
+.glass {
+  --tint: transparent;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--tint), var(--tint)) padding-box,
+    linear-gradient(var(--glass), var(--glass)) padding-box,
+    linear-gradient(135deg, var(--lg-rim) 0%, var(--lg-rim-2) 30%, var(--lg-rim-2) 70%, var(--lg-rim) 100%) border-box;
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  backdrop-filter: blur(30px) saturate(190%);
+  box-shadow:
+    inset 0 1px 1px var(--lg-inner),
+    inset 0 -1px 1px var(--lg-depth),
+    0 1px 2px var(--lg-depth),
+    0 22px 48px -26px var(--shadow);
+}
+.glass-strong {
+  --tint: transparent;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--tint), var(--tint)) padding-box,
+    linear-gradient(var(--glass-strong), var(--glass-strong)) padding-box,
+    linear-gradient(135deg, var(--lg-rim) 0%, var(--lg-rim-2) 30%, var(--lg-rim-2) 70%, var(--lg-rim) 100%) border-box;
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  backdrop-filter: blur(30px) saturate(190%);
+  box-shadow:
+    inset 0 1px 1px var(--lg-inner),
+    inset 0 -1px 1px var(--lg-depth),
+    0 34px 70px -28px var(--shadow-deep);
+}
+.tint-blue   { --tint: color-mix(in srgb, var(--sys-blue) 7%, transparent); }
+.tint-indigo { --tint: color-mix(in srgb, var(--sys-indigo) 7%, transparent); }
+.tint-orange { --tint: color-mix(in srgb, var(--sys-orange) 8%, transparent); }
+.tint-teal   { --tint: color-mix(in srgb, var(--sys-teal) 7%, transparent); }
+.tint-green  { --tint: color-mix(in srgb, var(--sys-green) 7%, transparent); }
+.tint-purple { --tint: color-mix(in srgb, var(--sys-purple) 7%, transparent); }
+
+/* Brand gradient ink: emblems and the wordmark's accent. */
+.brand-ink {
+  background: linear-gradient(135deg, var(--brand-a) 12%, var(--brand-b));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.wordmark { font-weight: 800; letter-spacing: -0.035em; }
+.wordmark .wm-x { opacity: 0.7; }
+
+/* Primary action (mlx .btn-core): orange, dark text, soft glow, springy press. */
+.btn-core {
+  background: var(--acc);
+  color: var(--text-on-accent);
+  box-shadow: 0 10px 28px -12px var(--acc-glow);
+  transition: transform 0.35s var(--spring), background-color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease), opacity var(--dur) var(--ease);
+}
+.btn-core:hover { background: var(--acc-hi); box-shadow: 0 12px 30px -10px var(--acc-glow); }
+.btn-core:active { transform: scale(0.97); }
+.btn-core[disabled] { opacity: .45; transform: none; box-shadow: none; }
+
+/* Every filled primary button gets the same press as on mlx.app. */
+.bg-primary:is(button, a) { transition-property: background-color, border-color, color, box-shadow, opacity, transform; }
+.bg-primary:is(button, a):not([disabled]):active { transform: scale(0.97); }
+
+/* View changes fade and rise in instead of cutting. */
+@keyframes mlx-view-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.mlx-view-in { animation: mlx-view-in var(--dur-lg) var(--ease) both; }
+
+/* Number that changes without jumping width. */
+.mlx-num { font-variant-numeric: tabular-nums; }

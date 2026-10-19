@@ -29,6 +29,7 @@ import { ImageTab } from './components/image/ImageTab'
 import { isImageSession, sessionMatchesModelPath } from '../../shared/sessionUtils'
 import { resolveDownloadModelType, type DownloadModelType } from '../../shared/modelDiscoveryNavigation'
 import { useTranslation, LOCALES, LOCALE_NAMES, LOCALE_FLAGS } from './i18n'
+import { useTheme, type ThemePreference } from './providers/ThemeProvider'
 
 function App() {
   const { t } = useTranslation()
@@ -275,7 +276,9 @@ function App() {
           {/* Main content area */}
           <main className="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
             <ConsoleSubnavigation />
-            <div className="flex-1 min-h-0 overflow-hidden">
+            {/* Keyed by view so every page change fades in instead of cutting. */}
+            <div key={`${state.mode}:${state.mode === 'server' ? state.serverPanel : state.mode === 'tools' ? state.toolsPanel : ''}`}
+              className="flex-1 min-h-0 overflow-hidden mlx-view-in">
             {state.mode === 'chat' && chatCreationError && (
               <div role="alert" className="p-3 text-sm text-destructive break-words">
                 {chatCreationError}
@@ -484,6 +487,7 @@ function ServerModeContent() {
               {t('common.back')}
             </button>
             <h2 className="text-2xl font-bold">{t('console.preferences')}</h2>
+            <AppearancePreference />
             <SingleModelPreference />
             <div className="border border-border rounded-lg p-5">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">{t('app.about.language')}</h3>
@@ -586,6 +590,37 @@ function ToolsModeContent() {
 }
 
 // ─── Shared Components ──────────────────────────────────────────────────────
+
+/** System / Light / Dark. A segmented control whose selection slides. */
+function AppearancePreference() {
+  const { t } = useTranslation()
+  const { preference, setPreference } = useTheme()
+  const options: Array<[ThemePreference, string]> = [
+    ['system', t('app.about.themeSystem')],
+    ['light', t('app.about.themeLight')],
+    ['dark', t('app.about.themeDark')],
+  ]
+  const index = Math.max(0, options.findIndex(([value]) => value === preference))
+  return (
+    <div className="border border-border rounded-lg p-5" data-vmlx-surface="appearance-preference">
+      <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">{t('app.about.appearance')}</h3>
+      <div role="radiogroup" aria-label={t('app.about.appearance')}
+        className="relative grid grid-cols-3 w-full max-w-sm rounded-[10px] bg-foreground/[0.05] p-[3px]">
+        <div aria-hidden
+          className="absolute top-[3px] bottom-[3px] left-[3px] rounded-[8px] bg-card ring-1 ring-border/50 shadow-[0_1px_2px_var(--lg-depth),0_4px_12px_-6px_var(--shadow)] transition-transform duration-300 ease-mlx"
+          style={{ width: 'calc((100% - 6px) / 3)', transform: `translateX(${index * 100}%)` }} />
+        {options.map(([value, label]) => (
+          <button key={value} role="radio" aria-checked={preference === value}
+            data-vmlx-control={`preferences-theme-${value}`}
+            onClick={() => setPreference(value)}
+            className={`relative h-8 text-sm font-medium rounded-[8px] transition-colors ${preference === value ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function AppVersion() {
   const { t } = useTranslation()

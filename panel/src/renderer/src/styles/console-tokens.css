@@ -1,57 +1,81 @@
 /* ============================================================================
-   vMLX — Console Amber
-   Drop-in design tokens. Single source of truth for the websites and the app.
-   Spec: retheme/THEME.md
+   MLX Studio — design tokens (MLX look: aluminum, glass and lit silicon)
+   Source of truth for colour values: mlx.app (app/globals.css, app/v2.css).
    ----------------------------------------------------------------------------
-   Two forms of every colour are provided:
-     --x        hex, for plain CSS
+   Light is the default; dark follows the system (prefers-color-scheme) unless
+   the user picked a theme, which sets html.light / html.dark.
+   Variable names are kept from upstream vMLX so every component keeps working:
+     --x        hex/rgba, for plain CSS
      --x-rgb    space-separated triplet, for Tailwind's `/ <alpha-value>` syntax
-   Use the -rgb form anywhere you need opacity: rgb(var(--acc-rgb) / .4)
    ============================================================================ */
 
 :root {
-  /* ---- surfaces (warm-neutral charcoal; never pure black) ---------------- */
-  --well:            #151718;  --well-rgb:            21 23 24;
-  --bg:              #1A1C1D;  --bg-rgb:              26 28 29;
-  --bg-2:            #212426;  --bg-2-rgb:            33 36 38;
-  --bg-3:            #282B2E;  --bg-3-rgb:            40 43 46;
-  --bg-4:            #31353A;  --bg-4-rgb:            49 53 58;
+  /* ---- surfaces --------------------------------------------------------- */
+  --well:            #FFFFFF;  --well-rgb:            255 255 255;  /* inputs */
+  --bg:              #ECEEF2;  --bg-rgb:              236 238 242;  /* mlx --bg */
+  --bg-2:            #F7F8F9;  --bg-2-rgb:            247 248 249;  /* glass on bg (cards) */
+  --bg-3:            #E2E5EA;  --bg-3-rgb:            226 229 234;  /* mlx --bg-deep (hover/selected) */
+  --bg-4:            #FBFCFC;  --bg-4-rgb:            251 252 252;  /* glass-strong (popovers) */
+  --sidebar-bg:      #E6E8EC;  --sidebar-bg-rgb:      230 232 236;
 
-  /* ---- lines ------------------------------------------------------------ */
-  --line-subtle:     #26292C;  --line-subtle-rgb:     38 41 44;
-  --line:            #31353A;  --line-rgb:            49 53 58;
-  --line-2:          #3F444A;  --line-2-rgb:          63 68 74;
+  /* ---- lines (mlx --line / --line-strong over the background) ----------- */
+  --line-subtle:     #DFE1E5;  --line-subtle-rgb:     223 225 229;
+  --line:            #D2D5DA;  --line-rgb:            210 213 218;
+  --line-2:          #C4C8CE;  --line-2-rgb:          196 200 206;
 
   /* ---- text ------------------------------------------------------------- */
-  --text:            #EDEEEF;  --text-rgb:            237 238 239;
-  --text-dim:        #8B9197;  --text-dim-rgb:        139 145 151;
-  --text-faint:      #666C72;  --text-faint-rgb:      102 108 114;
-  --text-on-accent:  #17191A;  --text-on-accent-rgb:  23 25 26;
-  --text-on-light:   #17191A;  --text-on-light-rgb:   23 25 26;
+  --text:            #1D1D1F;  --text-rgb:            29 29 31;     /* mlx --ink */
+  --text-dim:        #565B66;  --text-dim-rgb:        86 91 102;    /* mlx --ink-2 */
+  --text-faint:      #868C97;  --text-faint-rgb:      134 140 151;  /* mlx --ink-3 */
+  --text-on-accent:  #1A1000;  --text-on-accent-rgb:  26 16 0;      /* mlx .btn-core */
+  --text-on-light:   #1D1D1F;  --text-on-light-rgb:   29 29 31;
 
-  /* ---- the accent: amber. scarce by design. ----------------------------- */
-  --acc:             #F2A93B;  --acc-rgb:             242 169 59;
-  --acc-hi:          #FFC061;  --acc-hi-rgb:          255 192 97;
-  --acc-dim:         #7A6435;  --acc-dim-rgb:         122 100 53;
-  --acc-wash:        #2A2317;  --acc-wash-rgb:        42 35 23;
-  --acc-line:        #4D3F1E;  --acc-line-rgb:        77 63 30;
+  /* ---- the accent: MLX orange (mlx --core) ------------------------------ */
+  --acc:             #F08A00;  --acc-rgb:             240 138 0;
+  --acc-hi:          #FF9F0A;  --acc-hi-rgb:          255 159 10;
+  --acc-dim:         #B86A00;  --acc-dim-rgb:         184 106 0;
+  --acc-wash:        #EFE1CD;  --acc-wash-rgb:        239 225 205;  /* mlx --core-soft */
+  --acc-line:        #F2C58A;  --acc-line-rgb:        242 197 138;
+  --acc-glow:        rgba(255, 159, 10, 0.5);
+  --link:            #A65A00;  /* orange that reads on light surfaces */
 
-  /* ---- semantic state (never interchangeable with the accent) ----------- */
-  --ok:              #5FBF7C;  --ok-rgb:              95 191 124;
-  --ok-wash:         #17251B;  --ok-line:             #2C4A34;
-  --warn:            #F0762A;  --warn-rgb:            240 118 42;
-  --warn-wash:       #2C1C13;  --warn-line:           #5A3620;
-  --err:             #E04A4F;  --err-rgb:             224 74 79;
-  --err-wash:        #2A1618;  --err-line:            #57262A;
-  --info:            #6FA8CC;  --info-rgb:            111 168 204;
-  --info-wash:       #161F26;  --info-line:           #2C4152;
-  --idle:            #666C72;  --idle-rgb:            102 108 114;
+  /* ---- brand gradient (emblems, primary buttons): ink -> orange --------- */
+  --brand-a:         #1D1D1F;
+  --brand-b:         #F08A00;
+
+  /* ---- semantic state --------------------------------------------------- */
+  --ok:              #138A4B;  --ok-rgb:              19 138 75;
+  --ok-wash:         #DCEBE1;  --ok-line:             #A9D3B9;
+  --warn:            #B7791F;  --warn-rgb:            183 121 31;
+  --warn-wash:       #F3E8D2;  --warn-line:           #E2C48F;
+  --err:             #D4383E;  --err-rgb:             212 56 62;
+  --err-wash:        #F5DEDF;  --err-line:            #E8B1B3;
+  --info:            #007AFF;  --info-rgb:            0 122 255;
+  --info-wash:       #DCE8F7;  --info-line:           #A9C8F0;
+  --idle:            #868C97;  --idle-rgb:            134 140 151;
+
+  /* ---- Apple system tints (mlx --sys-*) --------------------------------- */
+  --sys-blue: #007aff; --sys-indigo: #5856d6; --sys-purple: #af52de; --sys-pink: #ff2d55;
+  --sys-orange: #ff9500; --sys-teal: #30b0c7; --sys-green: #34c759; --sys-mint: #00c7be;
+  --sys-yellow: #ffcc00;
+
+  /* ---- liquid glass (mlx .glass) ---------------------------------------- */
+  --glass:           rgba(255, 255, 255, 0.56);
+  --glass-strong:    rgba(255, 255, 255, 0.8);
+  --lg-rim:          rgba(255, 255, 255, 0.98);
+  --lg-rim-2:        rgba(255, 255, 255, 0.22);
+  --lg-inner:        rgba(255, 255, 255, 0.75);
+  --lg-depth:        rgba(20, 24, 33, 0.05);
+  --shadow:          rgba(32, 40, 58, 0.16);
+  --shadow-deep:     rgba(32, 40, 58, 0.28);
 
   /* ---- type ------------------------------------------------------------- */
-  --font-mono:  "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo,
-                Consolas, monospace;
-  --font-prose: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
-                "Segoe UI", sans-serif;
+  --font:       -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+                system-ui, "Helvetica Neue", sans-serif;
+  --mono:       ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  /* upstream names, kept as aliases */
+  --font-prose: var(--font);
+  --font-mono:  var(--mono);
 
   --fs-display:  clamp(2rem, 4.6vw, 3.15rem);
   --fs-h2:       clamp(1.4rem, 3vw, 1.95rem);
@@ -60,36 +84,39 @@
   --fs-body:     0.875rem;    /* 14px */
   --fs-body-sm:  0.8125rem;   /* 13px */
   --fs-code:     0.78rem;     /* 12.5px */
-  --fs-label:    0.656rem;    /* 10.5px */
-  --fs-caption:  0.719rem;    /* 11.5px */
+  --fs-label:    0.6875rem;   /* 11px */
+  --fs-caption:  0.75rem;     /* 12px */
 
-  --lh-tight:    1.08;
-  --lh-heading:  1.15;
-  --lh-body:     1.7;
-  --lh-relaxed:  1.8;
-  --lh-code:     1.85;
+  --lh-tight:    1.1;
+  --lh-heading:  1.2;
+  --lh-body:     1.5;
+  --lh-relaxed:  1.65;
+  --lh-code:     1.6;
 
-  --tr-display: -0.035em;
-  --tr-h2:      -0.03em;
-  --tr-label:    0.14em;   /* uppercase labels — the signature texture */
+  --tr-display: -0.03em;
+  --tr-h2:      -0.02em;
+  --tr-label:    0.04em;
 
-  /* ---- shape ------------------------------------------------------------ */
-  --radius:      0;      /* panels, sections, tables, wells */
-  --radius-ctl:  2px;    /* buttons, inputs, chips */
-  --radius-dot:  50%;    /* status dots only */
+  /* ---- shape (mlx radii, scaled for a dense desktop app) ---------------- */
+  --radius:      14px;   /* cards, panels (mlx --r-control) */
+  --radius-ctl:  10px;   /* buttons, inputs */
+  --radius-dot:  50%;
+  --r-card:      20px;
 
   /* ---- depth ------------------------------------------------------------ */
-  --elev-plate: inset 0 1px 0 #3E4247;             /* milled faceplate */
-  --elev-float: 0 16px 40px rgba(0, 0, 0, .45);    /* popovers, dialogs only */
-  --glow-acc:   0 0 8px rgba(242, 169, 59, .4);    /* meter fill, live LED */
+  --elev-plate: inset 0 1px 0 var(--lg-inner);
+  --elev-float: 0 22px 48px -26px var(--shadow), 0 1px 2px var(--lg-depth);
+  --glow-acc:   0 0 10px var(--acc-glow);
 
-  /* ---- motion ----------------------------------------------------------- */
-  --dur:  140ms;
-  --ease: cubic-bezier(.2, .6, .35, 1);
+  /* ---- motion (mlx --ease / --spring) ----------------------------------- */
+  --dur:    220ms;
+  --dur-lg: 380ms;
+  --ease:   cubic-bezier(0.22, 1, 0.36, 1);
+  --spring: cubic-bezier(0.34, 1.36, 0.64, 1);
 
   /* ---- layout ----------------------------------------------------------- */
   --maxw:      1120px;
-  --gutter:    28px;
+  --gutter:    24px;
   --section-y: 72px;
 
   --sp-1:  4px;  --sp-2:  8px;  --sp-3: 12px;  --sp-4: 16px;
@@ -105,49 +132,140 @@
 
   /* ---- z ---------------------------------------------------------------- */
   --z-base: 0; --z-sticky: 60; --z-dropdown: 100; --z-modal: 200; --z-toast: 300;
+
+  color-scheme: light;
 }
 
-/* ---------------------------------------------------------------------------
-   Committed dark. The system has no light mode — it is a terminal.
-   Declared explicitly so the page never borrows a host theme's ground.
-   --------------------------------------------------------------------------- */
-html { color-scheme: dark; }
+/* Dark values, written once and applied by the system or by html.dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --well:            #16171B;  --well-rgb:            22 23 27;
+    --bg:              #000000;  --bg-rgb:              0 0 0;
+    --bg-2:            #111215;  --bg-2-rgb:            17 18 21;
+    --bg-3:            #1C1E23;  --bg-3-rgb:            28 30 35;
+    --bg-4:            #212229;  --bg-4-rgb:            33 34 41;
+    --sidebar-bg:      #070708;  --sidebar-bg-rgb:      7 7 8;
+    --line-subtle:     #18191C;  --line-subtle-rgb:     24 25 28;
+    --line:            #26272B;  --line-rgb:            38 39 43;
+    --line-2:          #34363B;  --line-2-rgb:          52 54 59;
+    --text:            #F5F5F7;  --text-rgb:            245 245 247;
+    --text-dim:        #A5AAB4;  --text-dim-rgb:        165 170 180;
+    --text-faint:      #6F747E;  --text-faint-rgb:      111 116 126;
+    --text-on-accent:  #1A1000;  --text-on-accent-rgb:  26 16 0;
+    --acc:             #FFA21A;  --acc-rgb:             255 162 26;
+    --acc-hi:          #FFB547;  --acc-hi-rgb:          255 181 71;
+    --acc-dim:         #8A5A12;  --acc-dim-rgb:         138 90 18;
+    --acc-wash:        #241703;  --acc-wash-rgb:        36 23 3;
+    --acc-line:        #5A3A0A;  --acc-line-rgb:        90 58 10;
+    --acc-glow:        rgba(255, 162, 26, 0.6);
+    --link:            #FFA21A;
+    --brand-a:         #F5F5F7;
+    --brand-b:         #FFA21A;
+    --ok:              #34C77B;  --ok-rgb:              52 199 123;
+    --ok-wash:         #0B1F14;  --ok-line:             #1E4A31;
+    --warn:            #FFD60A;  --warn-rgb:            255 214 10;
+    --warn-wash:       #241F04;  --warn-line:           #5A4C0A;
+    --err:             #FF6369;  --err-rgb:             255 99 105;
+    --err-wash:        #26100F;  --err-line:            #5A2224;
+    --info:            #0A84FF;  --info-rgb:            10 132 255;
+    --info-wash:       #071A2E;  --info-line:           #12365C;
+    --idle:            #6F747E;  --idle-rgb:            111 116 126;
+    --sys-blue: #0a84ff; --sys-indigo: #5e5ce6; --sys-purple: #bf5af2; --sys-pink: #ff375f;
+    --sys-orange: #ff9f0a; --sys-teal: #40c8e0; --sys-green: #30d158; --sys-mint: #63e6e2;
+    --sys-yellow: #ffd60a;
+    --glass:           rgba(34, 36, 42, 0.5);
+    --glass-strong:    rgba(40, 42, 50, 0.82);
+    --lg-rim:          rgba(255, 255, 255, 0.34);
+    --lg-rim-2:        rgba(255, 255, 255, 0.05);
+    --lg-inner:        rgba(255, 255, 255, 0.14);
+    --lg-depth:        rgba(0, 0, 0, 0.3);
+    --shadow:          rgba(0, 0, 0, 0.5);
+    --shadow-deep:     rgba(0, 0, 0, 0.7);
+    color-scheme: dark;
+  }
+}
+:root.dark {
+  --well:            #16171B;  --well-rgb:            22 23 27;
+  --bg:              #000000;  --bg-rgb:              0 0 0;
+  --bg-2:            #111215;  --bg-2-rgb:            17 18 21;
+  --bg-3:            #1C1E23;  --bg-3-rgb:            28 30 35;
+  --bg-4:            #212229;  --bg-4-rgb:            33 34 41;
+  --sidebar-bg:      #070708;  --sidebar-bg-rgb:      7 7 8;
+  --line-subtle:     #18191C;  --line-subtle-rgb:     24 25 28;
+  --line:            #26272B;  --line-rgb:            38 39 43;
+  --line-2:          #34363B;  --line-2-rgb:          52 54 59;
+  --text:            #F5F5F7;  --text-rgb:            245 245 247;
+  --text-dim:        #A5AAB4;  --text-dim-rgb:        165 170 180;
+  --text-faint:      #6F747E;  --text-faint-rgb:      111 116 126;
+  --text-on-accent:  #1A1000;  --text-on-accent-rgb:  26 16 0;
+  --acc:             #FFA21A;  --acc-rgb:             255 162 26;
+  --acc-hi:          #FFB547;  --acc-hi-rgb:          255 181 71;
+  --acc-dim:         #8A5A12;  --acc-dim-rgb:         138 90 18;
+  --acc-wash:        #241703;  --acc-wash-rgb:        36 23 3;
+  --acc-line:        #5A3A0A;  --acc-line-rgb:        90 58 10;
+  --acc-glow:        rgba(255, 162, 26, 0.6);
+  --link:            #FFA21A;
+  --brand-a:         #F5F5F7;
+  --brand-b:         #FFA21A;
+  --ok:              #34C77B;  --ok-rgb:              52 199 123;
+  --ok-wash:         #0B1F14;  --ok-line:             #1E4A31;
+  --warn:            #FFD60A;  --warn-rgb:            255 214 10;
+  --warn-wash:       #241F04;  --warn-line:           #5A4C0A;
+  --err:             #FF6369;  --err-rgb:             255 99 105;
+  --err-wash:        #26100F;  --err-line:            #5A2224;
+  --info:            #0A84FF;  --info-rgb:            10 132 255;
+  --info-wash:       #071A2E;  --info-line:           #12365C;
+  --idle:            #6F747E;  --idle-rgb:            111 116 126;
+  --sys-blue: #0a84ff; --sys-indigo: #5e5ce6; --sys-purple: #bf5af2; --sys-pink: #ff375f;
+  --sys-orange: #ff9f0a; --sys-teal: #40c8e0; --sys-green: #30d158; --sys-mint: #63e6e2;
+  --sys-yellow: #ffd60a;
+  --glass:           rgba(34, 36, 42, 0.5);
+  --glass-strong:    rgba(40, 42, 50, 0.82);
+  --lg-rim:          rgba(255, 255, 255, 0.34);
+  --lg-rim-2:        rgba(255, 255, 255, 0.05);
+  --lg-inner:        rgba(255, 255, 255, 0.14);
+  --lg-depth:        rgba(0, 0, 0, 0.3);
+  --shadow:          rgba(0, 0, 0, 0.5);
+  --shadow-deep:     rgba(0, 0, 0, 0.7);
+  color-scheme: dark;
+}
 
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-mono);
+  font-family: var(--font);
   font-size: var(--fs-body);
   line-height: var(--lh-body);
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
+  transition: background-color var(--dur-lg) var(--ease), color var(--dur-lg) var(--ease);
 }
+
+code, kbd, pre, samp { font-family: var(--mono); }
 
 /* Every digit column lines up. */
 .tabular, table td, table th, .stat, .metric { font-variant-numeric: tabular-nums; }
 
-/* The signature label texture. */
+/* Small section label (was the console's uppercase texture). */
 .label {
   font-size: var(--fs-label);
   letter-spacing: var(--tr-label);
   text-transform: uppercase;
+  font-weight: 600;
   color: var(--text-dim);
 }
 
 /* Focus is never removed. */
-:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 
 ::selection { background: rgb(var(--acc-rgb) / .28); color: var(--text); }
 
-* { scrollbar-width: thin; scrollbar-color: var(--line) var(--bg); }
-*::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-track { background: var(--bg); }
-*::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--bg); }
-*::-webkit-scrollbar-thumb:hover { background: var(--line-2); }
+* { scrollbar-width: thin; scrollbar-color: rgb(var(--text-faint-rgb) / .35) transparent; }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
 }
 
-/* The only two ambient animations in the system. */
-@keyframes vmlx-blink { 0%, 50% { opacity: 1 } 50.01%, 100% { opacity: 0 } }
+/* Ambient animations (names kept from upstream). The live dot pulses softly. */
+@keyframes vmlx-blink { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
 @keyframes vmlx-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }

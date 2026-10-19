@@ -262,7 +262,11 @@
       "hfToken": "HuggingFace Token",
       "hfRequired": "Required for downloading gated models (Flux, Llama, etc.).",
       "getToken": "Get your token",
-      "savedTokenPlaceholder": "Saved token configured (enter a new token to replace)"
+      "savedTokenPlaceholder": "Saved token configured (enter a new token to replace)",
+      "appearance": "Appearance",
+      "themeSystem": "System",
+      "themeLight": "Light",
+      "themeDark": "Dark"
     }
   },
   "titlebar": {

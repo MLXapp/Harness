@@ -262,7 +262,11 @@
       "hfToken": "Token de HuggingFace",
       "hfRequired": "Necesario para descargar modelos restringidos (Flux, Llama, etc.).",
       "getToken": "Obtener token",
-      "savedTokenPlaceholder": "Token guardado configurado (introduzca uno nuevo para reemplazarlo)"
+      "savedTokenPlaceholder": "Token guardado configurado (introduzca uno nuevo para reemplazarlo)",
+      "appearance": "Apariencia",
+      "themeSystem": "Sistema",
+      "themeLight": "Claro",
+      "themeDark": "Oscuro"
     }
   },
   "titlebar": {
