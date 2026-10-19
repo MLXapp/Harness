@@ -16,6 +16,10 @@ on:
         description: jjang-ai/jangq ref whose jang-tools are bundled
         required: true
         default: main
+      release:
+        description: Publish this build as v<package version> (creates the tag and the GitHub release)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -96,10 +100,12 @@ jobs:
       # Release (tag) builds fail without it; manual builds warn and go on.
       - name: Bundle MLX Node
         working-directory: studio/panel
+        env:
+          RELEASE: ${{ inputs.release }}
         run: |
           if ./scripts/fetch-mlx-node.sh; then exit 0; fi
           rm -rf resources/bundled-node
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/v* || "$RELEASE" == "true" ]]; then
             echo "::error::Couldn't fetch or verify MLX Node from mlx.app; a release must carry it."
             exit 1
           fi
@@ -188,7 +194,7 @@ jobs:
   release:
     name: Publish the release
     needs: dmg
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -199,6 +205,11 @@ jobs:
           ref: main
           fetch-depth: 1
 
+      - name: Release tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          else echo "TAG=v$(node -p "require('./panel/package.json').version")" >> "$GITHUB_ENV"; fi
+
       - uses: actions/download-artifact@v4
         with:
           name: MLX-Studio-${{ github.ref_name }}-sequoia
@@ -207,17 +218,15 @@ jobs:
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
           VERSION="${TAG#v}"
           ls -la dist
-          gh release create "$TAG" dist/MLX-Studio-*.dmg dist/MLX-Studio-*.dmg.sha256 \
+          gh release create "$TAG" dist/MLX-Studio-*.dmg dist/MLX-Studio-*.dmg.sha256 --target "$GITHUB_SHA" \
             --title "MLX Studio $VERSION" \
             --notes "MLX Studio $VERSION for Apple silicon Macs (macOS 14.5 or later). Signed with Developer ID and notarized by Apple. Carries MLX Node inside and offers to install it on first run. Built on vMLX by JANGQ AI (Apache License 2.0)."
 
       - name: Point the update feed at it
         env:
-          TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
           VERSION="${TAG#v}"
