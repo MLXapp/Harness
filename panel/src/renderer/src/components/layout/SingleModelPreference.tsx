@@ -43,15 +43,15 @@ export function SingleModelPreference() {
   }
 
   return (
-    <section data-vmlx-section="general-model-loading" className="border border-border p-5 space-y-3">
+    <section data-vmlx-section="general-model-loading" className="border border-border rounded-lg p-5 space-y-3">
       <div className="flex items-center justify-between gap-4">
         <span id="single-model-preference-label" className="text-sm">{t('console.oneModelLoaded')}</span>
         <button type="button" role="switch" data-vmlx-control="preferences-single-model"
           aria-labelledby="single-model-preference-label" aria-describedby="single-model-preference-help"
           aria-checked={enabled === true} aria-busy={pending || enabled === null}
           disabled={pending || enabled === null} onClick={change}
-          className={`relative inline-flex h-5 w-9 shrink-0 items-center border transition-colors disabled:opacity-50 ${enabled ? 'bg-primary border-primary' : 'bg-muted border-border'}`}>
-          <span className={`inline-block h-3 w-3 transition-transform ${enabled ? 'translate-x-5 bg-primary-foreground' : 'translate-x-0.5 bg-muted-foreground'}`} />
+          className={`relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full border transition-colors duration-300 disabled:opacity-50 ${enabled ? 'bg-primary border-primary' : 'bg-foreground/[0.08] border-border'}`}>
+          <span className={`inline-block h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.25)] transition-transform duration-300 ease-spring ${enabled ? 'translate-x-[17px]' : 'translate-x-[1px]'}`} />
         </button>
       </div>
       <p id="single-model-preference-help" className="text-xs text-muted-foreground">

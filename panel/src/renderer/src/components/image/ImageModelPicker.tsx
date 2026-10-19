@@ -92,7 +92,7 @@ export function ImageModelPicker({ onSelect, currentModel, onKeepCurrent }: Imag
           <p className="text-sm text-muted-foreground">{t('image.picker.folderFirstIntro')}</p>
           {currentModel && onKeepCurrent && (
             <button type="button" onClick={onKeepCurrent} data-vmlx-control="image-keep-current-model"
-              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm hover:bg-accent">
+              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-md text-sm hover:bg-accent">
               {t('image.picker.keepCurrent', { model: currentModel })}
             </button>
           )}
@@ -100,16 +100,16 @@ export function ImageModelPicker({ onSelect, currentModel, onKeepCurrent }: Imag
             {t('image.picker.mfluxCompatibility')}
           </p>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 border border-border p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border border-border rounded-lg p-4">
           <p className="text-sm text-muted-foreground">{t('image.picker.findMfluxHelp')}</p>
           <button type="button" data-vmlx-control="image-source-catalog"
             onClick={() => window.dispatchEvent(new CustomEvent('vmlx:navigate', { detail: IMAGE_MODEL_DISCOVERY_NAVIGATION }))}
-            className="inline-flex shrink-0 items-center gap-2 px-3 py-2 border border-border text-sm hover:bg-accent">
+            className="inline-flex shrink-0 items-center gap-2 px-3 py-2 border border-border rounded-md text-sm hover:bg-accent">
             <Download className="h-4 w-4" />{t('image.picker.findMfluxModels')}
           </button>
         </div>
         {/* Custom Model */}
-        <div className="border border-border p-4 min-w-0" data-vmlx-section="image-folder-selection">
+        <div className="border border-border rounded-lg p-4 min-w-0" data-vmlx-section="image-folder-selection">
           <h3 className="text-sm font-medium">{t('image.picker.folderTab')}</h3>
             <div className="mt-3 space-y-2">
               <div className="flex gap-2">
@@ -119,7 +119,7 @@ export function ImageModelPicker({ onSelect, currentModel, onKeepCurrent }: Imag
                   onChange={e => chooseCustomPath(e.target.value)}
                   data-vmlx-control="image-folder-path"
                   placeholder={t('image.picker.customPathPlaceholder')}
-                  className="min-w-0 flex-1 px-3 py-2 text-sm bg-background border border-input"
+                  className="min-w-0 flex-1 px-3 py-2 text-sm bg-background border border-input rounded-md"
                 />
                 <button
                   onClick={handleBrowse}
@@ -183,7 +183,7 @@ export function ImageModelPicker({ onSelect, currentModel, onKeepCurrent }: Imag
 
 
         {customPath.trim() && (
-          <div className="flex flex-wrap items-end gap-4 p-4 bg-card border border-border">
+          <div className="flex flex-wrap items-end gap-4 p-4 bg-card border border-border rounded-lg">
             {/* Server Settings */}
             <div className="flex-1 min-w-[200px]">
               <label className="text-xs text-muted-foreground block mb-1.5">{t('image.picker.serverSettings')}</label>

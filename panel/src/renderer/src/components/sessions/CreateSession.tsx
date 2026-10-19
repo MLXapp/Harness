@@ -878,7 +878,7 @@ export function CreateSession({ initialModelPath, onBack, onCreated, filterType:
 
           {bundleRepairNotice && (
             <p role="status" data-vmlx-control="bundle-repair-notice"
-              className="mb-4 border border-warning/40 bg-warning/10 p-3 text-sm text-foreground">
+              className="mb-4 border border-warning/40 rounded-lg bg-warning/10 p-3 text-sm text-foreground">
               {bundleRepairNotice}
             </p>
           )}
@@ -980,7 +980,7 @@ export function CreateSession({ initialModelPath, onBack, onCreated, filterType:
 
         {/* Config Form — image models get simplified settings */}
         {defaultsOnly ? (
-          <p data-vmlx-section="chat-session-defaults" className="border border-border p-4 text-sm text-muted-foreground">
+          <p data-vmlx-section="chat-session-defaults" className="border border-border rounded-lg p-4 text-sm text-muted-foreground">
             {defaultsPending ? t('common.loading') : t('console.chatDefaults')}
           </p>
         ) : (autoDetectedType || filterTypeProp) === 'image' ? (

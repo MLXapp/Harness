@@ -1,5 +1,5 @@
 {
-  "_comment": "Panel tests that already failed in the unmodified vMLX 1.6.80 import (on Linux; some need macOS tools or upstream's release environment). CI tolerates exactly these; any other failure fails the build. Remove entries as they are fixed.",
+  "_comment": "Panel tests that already fail in the unmodified vMLX 1.6.80 import (on Linux and/or macOS CI: they need upstream's release environment, e.g. a repo .venv, or macOS tools, or have stale fixtures). CI tolerates exactly these; any other failure fails the build. Remove entries as they are fixed.",
   "failures": [
     "tests/download-system.test.ts > Download System Image Model Registry all models have required fields",
     "tests/download-system.test.ts > Download System Image Model Registry Klein models use correct Flux2Klein class",
@@ -11,6 +11,7 @@
     "tests/release-packaging.test.ts > release packaging binds artifact hooks to one live all-flavor release-driver plan",
     "tests/release-packaging.test.ts > release packaging emits one sealed completion attestation from the validated production hook path",
     "tests/settings-flow.test.ts > KV Cache Quantization cache panels surface native cache and TQ-KV status separately",
-    "tests/tool-executor-security.test.ts > run_applescript result contract executes AppleScript directly and returns its output"
+    "tests/tool-executor-security.test.ts > run_applescript result contract executes AppleScript directly and returns its output",
+    "tests/release-packaging.test.ts > release packaging preserves the macOS standalone-Python loader and authoritative venv identity"
   ]
 }
