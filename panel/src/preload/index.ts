@@ -312,6 +312,7 @@ const api = {
     getMining: (walletName: string) => ipcRenderer.invoke('network:mining', walletName),
     getMlxAppStatus: () => ipcRenderer.invoke('network:mlxAppStatus'),
     openMlxApp: (): Promise<boolean> => ipcRenderer.invoke('network:openMlxApp'),
+    installMlxNode: () => ipcRenderer.invoke('network:installMlxNode'),
   },
   app: {
     getPowerMode: (): Promise<import('../shared/powerMode').PowerModeStatus> => ipcRenderer.invoke('app:powerMode'),

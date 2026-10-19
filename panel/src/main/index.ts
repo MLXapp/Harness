@@ -21,6 +21,7 @@ import { installApplicationMenu, acknowledgeMenuReadiness, resetMenuReadiness } 
 import { registerCodingToolHandlers } from './ipc/coding-tools'
 import { registerDistributedHandlers } from './ipc/distributed'
 import { registerNetworkHandlers } from './ipc/network'
+import { offerMlxNodeOnFirstRun } from './mlx-node'
 import { sessionManager } from './sessions'
 import { apiGateway } from './api-gateway'
 import { buildContentSecurityPolicy } from './csp'
@@ -535,6 +536,16 @@ app.whenReady().then(async () => {
           buttons: [tMain('main.dialog.ok')]
         }).catch(() => { })
       }
+    })
+  }
+
+  // First run: offer to install the MLX Node this build carries (once). Asked
+  // after the window is up, so the question has MLX Studio behind it.
+  if (!proofOwnedEngineLifecycle && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.once('ready-to-show', () => {
+      setTimeout(() => {
+        offerMlxNodeOnFirstRun(() => mainWindow).catch((e) => console.error('[MLX Node] first-run offer failed', e))
+      }, 1200)
     })
   }
 

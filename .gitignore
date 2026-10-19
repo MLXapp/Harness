@@ -384,3 +384,6 @@ panel/build_dmg.sh
 **/AUDIT_CHECKLIST.md
 **/INVESTIGATION_LOG.md
 /ralph_runner/PROMPT.md
+
+# MLX Node staged by panel/scripts/fetch-mlx-node.sh (CI), shipped inside the app
+panel/resources/bundled-node/

@@ -52,12 +52,16 @@ export interface WalletMining {
 
 export type FetchResult<T> = { ok: true; data: T } | { ok: false; error: string; status?: number }
 
+/** MLX Node (bundle id app.mlx.mac) on this Mac. */
 export interface MlxAppStatus {
-  /** Only true on macOS when an app with bundle id app.mlx.mac is found. */
+  /** Only true on macOS when an installed app with bundle id app.mlx.mac is found. */
   installed: boolean
   running: boolean
   path?: string
   version?: string
+  /** This MLX Studio build carries a copy it can install. */
+  bundled?: boolean
+  bundledVersion?: string
 }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)

@@ -18,6 +18,12 @@
 # JANG tools come from VMLX_JANG_TOOLS_SOURCE (a jjang-ai/jangq checkout's
 # jang-tools dir); set VMLX_ALLOW_PYPI_JANG=1 to fall back to PyPI.
 #
+# MLX Node: when scripts/fetch-mlx-node.sh has staged resources/bundled-node
+# (CI does this first), the app carries it in Contents/Resources/bundled-node/,
+# left unsigned by electron-builder (mac.signIgnore) so it keeps its own
+# signature. Without it the DMG is built as before and the app offers the
+# download instead.
+#
 # Upstream's attested release driver (build-release-dmgs.sh) is kept untouched
 # for merges and is not used here.
 set -euo pipefail
@@ -89,5 +95,27 @@ if [[ ! -f "$DMG" ]]; then
   ls -la release >&2 || true
   exit 1
 fi
+
+NODE_ZIP="resources/bundled-node/MLX Node.zip"
+if [[ -f "$NODE_ZIP" ]]; then
+  PACKED_APP="$(ls -d release/mac*/"MLX Studio.app" 2>/dev/null | head -1 || true)"
+  PACKED="$PACKED_APP/Contents/Resources/bundled-node/MLX Node.zip"
+  if [[ ! -f "$PACKED" ]]; then
+    echo "ERROR: MLX Node was staged but isn't in the packaged app ($PACKED)" >&2
+    exit 1
+  fi
+  if [[ "$(/usr/bin/shasum -a 256 "$NODE_ZIP" | awk '{print $1}')" != "$(/usr/bin/shasum -a 256 "$PACKED" | awk '{print $1}')" ]]; then
+    echo "ERROR: the packaged MLX Node.zip differs from the staged one" >&2
+    exit 1
+  fi
+  if /usr/bin/codesign -d "$PACKED" >/dev/null 2>&1; then
+    echo "ERROR: electron-builder signed MLX Node.zip; mac.signIgnore must leave it alone" >&2
+    exit 1
+  fi
+  echo "==> Carries MLX Node $(/opt/homebrew/bin/node -p "require('./resources/bundled-node/MLX Node.json').version")"
+else
+  echo "==> No MLX Node staged (scripts/fetch-mlx-node.sh): this build doesn't carry it"
+fi
+
 /usr/bin/shasum -a 256 "$DMG" | tee "$DMG.sha256"
 echo "==> Built $DMG"
