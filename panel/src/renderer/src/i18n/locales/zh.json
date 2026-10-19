@@ -262,7 +262,11 @@
       "hfToken": "HuggingFace 令牌",
       "hfRequired": "下载受限模型（Flux、Llama 等）时需要此令牌。",
       "getToken": "获取令牌",
-      "savedTokenPlaceholder": "已配置令牌（输入新令牌以替换）"
+      "savedTokenPlaceholder": "已配置令牌（输入新令牌以替换）",
+      "appearance": "外观",
+      "themeSystem": "跟随系统",
+      "themeLight": "浅色",
+      "themeDark": "深色"
     }
   },
   "titlebar": {

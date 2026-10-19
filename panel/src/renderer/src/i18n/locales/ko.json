@@ -262,7 +262,11 @@
       "hfToken": "HuggingFace 토큰",
       "hfRequired": "제한된 모델(Flux, Llama 등)을 다운로드하는 데 필요합니다.",
       "getToken": "토큰 받기",
-      "savedTokenPlaceholder": "저장된 토큰이 구성됨 (새 토큰을 입력하여 교체)"
+      "savedTokenPlaceholder": "저장된 토큰이 구성됨 (새 토큰을 입력하여 교체)",
+      "appearance": "화면 모드",
+      "themeSystem": "시스템",
+      "themeLight": "라이트",
+      "themeDark": "다크"
     }
   },
   "titlebar": {

@@ -479,8 +479,10 @@ describe('Console sidebar narrow-width mode controls', () => {
     for (const mode of ['chat', 'server', 'models']) expect(sidebarSource).toContain(`['${mode}', `)
     expect(sidebarSource).toContain('data-vmlx-control={`mode-${mode}`}')
     expect(sidebarSource).toContain('title={label} aria-label={label}')
-    expect(sidebarSource).toContain('{!collapsed && <span>{label}</span>}')
-    expect(sidebarSource).toContain("max-[900px]:w-[200px]")
+    // Labels stay mounted and fade with the width animation (no jump cut).
+    expect(sidebarSource).toContain('<span className={fade}>{label}</span>')
+    expect(sidebarSource).toContain('transition-[width] duration-300')
+    expect(sidebarSource).toContain("max-[900px]:w-[208px]")
     // Mode navigation must not be duplicated back into the TitleBar.
     expect(titleBarSource).not.toContain('data-vmlx-control={`mode-')
   })

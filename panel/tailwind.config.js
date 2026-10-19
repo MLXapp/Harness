@@ -7,10 +7,20 @@ module.exports = {
   ],
   theme: {
     extend: {
+      // MLX type: SF Pro for the UI, SF Mono for code and hashes (system stacks;
+      // SF Pro is not bundled).
       fontFamily: {
-        sans: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
-        mono: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
-        prose: ['-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
+        sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"SF Pro Display"', 'system-ui', '"Helvetica Neue"', 'sans-serif'],
+        mono: ['ui-monospace', '"SF Mono"', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+        prose: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"SF Pro Display"', 'system-ui', 'sans-serif'],
+      },
+      transitionTimingFunction: {
+        DEFAULT: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        mlx: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        spring: 'cubic-bezier(0.34, 1.36, 0.64, 1)',
+      },
+      transitionDuration: {
+        DEFAULT: '220ms',
       },
       colors: {
         border: 'rgb(var(--border) / <alpha-value>)',
@@ -60,10 +70,12 @@ module.exports = {
           border: 'rgb(var(--sidebar-border) / <alpha-value>)'
         }
       },
+      // mlx.app radii, scaled for a dense desktop app: cards 14, controls 10-12.
       borderRadius: {
+        DEFAULT: '8px',
         lg: 'var(--radius)',
         md: 'max(0px, calc(var(--radius) - 2px))',
-        sm: 'max(0px, calc(var(--radius) - 4px))'
+        sm: 'max(0px, calc(var(--radius) - 6px))'
       }
     }
   },
