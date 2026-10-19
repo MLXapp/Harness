@@ -34,6 +34,15 @@ import pytest
 
 
 
+
+# MLX Studio removes upstream's vendored NVIDIA C-RADIO code (proprietary terms; see NOTICE).
+from pathlib import Path as _P
+import pytest as _pytest
+_NO_VENDORED_CRADIO = _pytest.mark.skipif(
+    not (_P(__file__).resolve().parents[1] / "vmlx_engine" / "vendor" / "transformers_modules" / "nvidia").is_dir(),
+    reason="MLX Studio does not ship NVIDIA's C-RADIO code",
+)
+
 def _frames_stub(make_frames):
     """extract_video_frames_smart stand-in honouring return_metadata (per-frame index/timestamp)."""
     def stub(path, fps, max_frames, return_metadata=False):
@@ -1149,6 +1158,8 @@ class TestServerSamplingResolution:
         assert server._bundle_supports_video_frame_fallback(str(tmp_path)) is True
         assert server._loaded_runtime_modalities() == ["text", "vision", "video"]
 
+    @_NO_VENDORED_CRADIO
+
     def test_nemotron_omni_installs_vendored_cradio_dynamic_module(self, tmp_path):
         from vmlx_engine.omni_multimodal import (
             _CRADIO_CACHE_REPO,
@@ -1169,6 +1180,8 @@ class TestServerSamplingResolution:
         assert dst.joinpath("hf_model.py").is_file()
         assert dst.joinpath("radio_model.py").is_file()
         assert not dst.joinpath("__pycache__").exists()
+
+    @_NO_VENDORED_CRADIO
 
     def test_nemotron_omni_temp_view_rewrites_cradio_automap(
         self, monkeypatch, tmp_path
@@ -1239,6 +1252,8 @@ class TestServerSamplingResolution:
         modeling = tmp_path.joinpath("view", "modeling.py").read_text()
         assert "AutoModel.from_config(config.vision_config" not in modeling
         assert "_VMLINUX_RADIOModel(config.vision_config)" in modeling
+
+    @_NO_VENDORED_CRADIO
 
     def test_nemotron_omni_temp_view_preseeds_cradio_cache(
         self, monkeypatch, tmp_path

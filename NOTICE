@@ -27,6 +27,9 @@ licenses, among them:
   * Apple MLX (MIT) kernel code, see vmlx_engine/metal/third_party/*/NOTICE.
   * oMLX Qwen4 QSA kernel (Apache-2.0) and mlx-serve (MIT), see
     native_extensions/qsa_kernels/mtplx_qsa_kernels/.
-  * NVIDIA C-RADIOv2-H model code under
-    vmlx_engine/vendor/transformers_modules/nvidia/ carries NVIDIA's own
-    copyright headers and terms (not Apache-2.0); see those files.
+
+MLX Studio does not include NVIDIA's C-RADIOv2-H model code, which upstream vMLX
+vendors under vmlx_engine/vendor/transformers_modules/nvidia/ and which carries
+NVIDIA's proprietary terms rather than Apache-2.0. Nemotron Omni image and video
+input downloads that code from Hugging Face (nvidia/C-RADIOv2-H) on first use,
+under NVIDIA's own terms.
