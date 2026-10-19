@@ -62,13 +62,20 @@ if [[ -z "${CSC_LINK:-}" ]] && ! /usr/bin/security find-identity -v -p codesigni
   echo "==> No Developer ID identity: building an unsigned DMG"
   export CSC_IDENTITY_AUTO_DISCOVERY=false
   identity_args=(--config.mac.identity=null --config.dmg.sign=false)
+  # An unsigned app cannot be notarized.
+  unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_KEYCHAIN_PROFILE
+fi
+
+# Notarisation team: package.json carries ours; APPLE_TEAM_ID overrides it.
+if [[ -n "${APPLE_TEAM_ID:-}" ]]; then
+  identity_args+=(--config.mac.notarize.teamId="$APPLE_TEAM_ID")
 fi
 
 rm -rf release
 /opt/homebrew/bin/npx --no-install electron-builder --mac dmg --arm64 \
   --config.mac.minimumSystemVersion="$MIN_SYSTEM" \
   --config.artifactName="MLX-Studio-\${version}${SUFFIX}-\${arch}.\${ext}" \
-  "${identity_args[@]}"
+  ${identity_args[@]+"${identity_args[@]}"}
 
 DMG="release/MLX-Studio-${VERSION}${SUFFIX}-arm64.dmg"
 if [[ ! -f "$DMG" ]]; then

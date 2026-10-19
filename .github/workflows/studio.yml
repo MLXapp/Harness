@@ -1,0 +1,132 @@
+name: MLX Studio
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: DMG flavour (sequoia = macOS 14.5+, tahoe = macOS 26 only)
+        type: choice
+        options: [sequoia, tahoe]
+        default: sequoia
+      jang_ref:
+        description: jjang-ai/jangq ref whose jang-tools are bundled
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  panel:
+    name: Typecheck and test the app
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: panel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: panel/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Fails on any failure except the pre-existing upstream ones listed in
+      # tests/known-upstream-failures.json.
+      - name: Unit tests
+        run: node scripts/vitest-ci.mjs
+
+  dmg:
+    name: Build the DMG
+    needs: panel
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      MLX_STUDIO_FLAVOR: ${{ inputs.flavor || 'sequoia' }}
+      MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+      MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: studio
+
+      - name: Check out JANG tools (bundled into the engine runtime)
+        uses: actions/checkout@v4
+        with:
+          repository: jjang-ai/jangq
+          ref: ${{ inputs.jang_ref || 'main' }}
+          path: jangq
+          persist-credentials: false
+
+      - name: Homebrew node (the packaging hooks call /opt/homebrew/bin/node)
+        run: |
+          if [[ ! -x /opt/homebrew/bin/node || ! -x /opt/homebrew/bin/npx ]]; then
+            brew install node
+          fi
+          /opt/homebrew/bin/node --version
+
+      - name: Install dependencies
+        working-directory: studio/panel
+        run: /opt/homebrew/bin/npm ci
+
+      # Optional Developer ID signing (electron-builder reads CSC_LINK and
+      # CSC_KEY_PASSWORD) and notarisation (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD).
+      # Without MAC_CERT_P12 the DMG is unsigned and nothing is notarized.
+      - name: Signing certificate
+        if: env.MAC_CERT_P12 != ''
+        run: |
+          echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          echo "CSC_LINK=$RUNNER_TEMP/cert.p12" >> "$GITHUB_ENV"
+
+      - name: Build DMG
+        working-directory: studio/panel
+        env:
+          VMLX_JANG_TOOLS_SOURCE: ${{ github.workspace }}/jangq/jang-tools
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: ./scripts/build-studio-dmg.sh
+
+      - name: Notarize and staple the DMG
+        if: env.MAC_CERT_P12 != '' && env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != ''
+        working-directory: studio/panel/release
+        run: |
+          team="${APPLE_TEAM_ID:-CCKXS9W488}"
+          for dmg in MLX-Studio-*.dmg; do
+            xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$team" --wait
+            xcrun stapler staple "$dmg"
+            shasum -a 256 "$dmg" > "$dmg.sha256"
+          done
+
+      - name: Remove the certificate
+        if: always()
+        run: rm -f "$RUNNER_TEMP/cert.p12"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MLX-Studio-${{ github.ref_name }}-${{ env.MLX_STUDIO_FLAVOR }}
+          path: |
+            studio/panel/release/MLX-Studio-*.dmg
+            studio/panel/release/MLX-Studio-*.dmg.sha256
+          if-no-files-found: error
+          retention-days: 30
