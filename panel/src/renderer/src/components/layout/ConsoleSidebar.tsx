@@ -1,4 +1,4 @@
-import { MessageSquare, Server, Boxes, Settings, type LucideIcon } from 'lucide-react'
+import { MessageSquare, Server, Boxes, Globe, Settings, type LucideIcon } from 'lucide-react'
 import { useAppState } from '../../contexts/AppStateContext'
 import { useTranslation } from '../../i18n'
 import { consolePageForMode, type ConsolePage } from '../../lib/consoleNavigation'
@@ -23,6 +23,7 @@ export function ConsoleSidebar({ onChatSelect, onNewChat }: ConsoleSidebarProps)
     ['chat', MessageSquare, t('console.chatImages')],
     ['server', Server, t('console.serversApi')],
     ['models', Boxes, t('console.models')],
+    ['network', Globe, t('console.network')],
   ]
   const activeIndex = items.findIndex(([mode]) => mode === page)
   const fade = `transition-opacity duration-300 ease-mlx whitespace-nowrap ${collapsed ? 'opacity-0' : 'opacity-100'}`

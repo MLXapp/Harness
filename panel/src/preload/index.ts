@@ -306,6 +306,13 @@ const api = {
   },
 
   // App-level events
+  // MLX Network tie-in (Network page)
+  network: {
+    getTotals: () => ipcRenderer.invoke('network:totals'),
+    getMining: (walletName: string) => ipcRenderer.invoke('network:mining', walletName),
+    getMlxAppStatus: () => ipcRenderer.invoke('network:mlxAppStatus'),
+    openMlxApp: (): Promise<boolean> => ipcRenderer.invoke('network:openMlxApp'),
+  },
   app: {
     getPowerMode: (): Promise<import('../shared/powerMode').PowerModeStatus> => ipcRenderer.invoke('app:powerMode'),
     getVersion: () => ipcRenderer.invoke('app:getVersion'),

@@ -58,6 +58,7 @@ export function installApplicationMenu(getWindow: () => BrowserWindow | null): v
       { label: t('console.serversApi'), accelerator: 'CmdOrCtrl+2', click: go('servers') },
       { label: t('console.models'), accelerator: 'CmdOrCtrl+3', click: go('models') },
       { label: 'API', accelerator: 'CmdOrCtrl+4', click: go('api') },
+      { label: t('console.network'), accelerator: 'CmdOrCtrl+5', click: go('network') },
     ] },
     { role: 'windowMenu' },
   ]

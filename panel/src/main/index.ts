@@ -20,6 +20,7 @@ import { rebuildMenu as rebuildTrayMenu } from './tray'
 import { installApplicationMenu, acknowledgeMenuReadiness, resetMenuReadiness } from './application-menu'
 import { registerCodingToolHandlers } from './ipc/coding-tools'
 import { registerDistributedHandlers } from './ipc/distributed'
+import { registerNetworkHandlers } from './ipc/network'
 import { sessionManager } from './sessions'
 import { apiGateway } from './api-gateway'
 import { buildContentSecurityPolicy } from './csp'
@@ -206,6 +207,7 @@ function createWindow(): void {
     registerImageHandlers()
     registerCodingToolHandlers()
     registerDistributedHandlers(() => mainWindow)
+    registerNetworkHandlers()
 
     // Download window — a real separate window for showing download progress
     ipcMain.handle('downloads:openWindow', () => {
