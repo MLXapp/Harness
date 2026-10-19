@@ -267,7 +267,9 @@
       "appearance": "Appearance",
       "themeSystem": "System",
       "themeLight": "Light",
-      "themeDark": "Dark"
+      "themeDark": "Dark",
+      "poweredByMtplx": "Powered by MTPLX",
+      "license": "License and notices"
     }
   },
   "titlebar": {

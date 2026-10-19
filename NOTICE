@@ -1,0 +1,32 @@
+MLX Studio
+Copyright 2026 Flex UK Limited (MLX Network)
+
+MLX Studio is a modified version of vMLX
+(https://github.com/jjang-ai/vmlx, imported at commit aa098f6, version 1.6.80).
+vMLX is Copyright 2026 JANGQ AI and is licensed under the Apache License,
+Version 2.0. The modifications in this repository are Copyright 2026 Flex UK
+Limited (MLX Network) and are licensed under the same License. See LICENSE and
+panel/LICENSE.
+
+Files changed from vMLX carry their changes in this repository's Git history;
+docs/MLX-STUDIO.md summarises them. The vMLX name and logo are used only to
+credit the upstream project, not as MLX Studio branding.
+
+The MLX emblem (Material Design Icons "alpha-x", Pictogrammers) is used under
+the Apache License 2.0.
+
+Third-party components included through vMLX keep their own notices and
+licenses, among them:
+
+  * Powered by MTPLX — https://github.com/youssofal/mtplx
+    Copyright 2026 Youssof Altoukhi, Apache License 2.0. MTPLX requires this
+    attribution to be shown inside the product; MLX Studio shows it in
+    Preferences (About) and in the macOS About panel.
+    See vmlx_engine/metal/third_party/mtplx_gdn/NOTICE and
+    native_extensions/qsa_kernels/mtplx_qsa_kernels/NOTICE.
+  * Apple MLX (MIT) kernel code, see vmlx_engine/metal/third_party/*/NOTICE.
+  * oMLX Qwen4 QSA kernel (Apache-2.0) and mlx-serve (MIT), see
+    native_extensions/qsa_kernels/mtplx_qsa_kernels/.
+  * NVIDIA C-RADIOv2-H model code under
+    vmlx_engine/vendor/transformers_modules/nvidia/ carries NVIDIA's own
+    copyright headers and terms (not Apache-2.0); see those files.

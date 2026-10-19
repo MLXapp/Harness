@@ -267,7 +267,9 @@
       "appearance": "外观",
       "themeSystem": "跟随系统",
       "themeLight": "浅色",
-      "themeDark": "深色"
+      "themeDark": "深色",
+      "poweredByMtplx": "Powered by MTPLX",
+      "license": "许可与声明"
     }
   },
   "titlebar": {
