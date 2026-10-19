@@ -591,7 +591,7 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
                   <option value="lastModified">{t('sessions.download.recentlyUpdated')}</option>
                 </select>
                 <button data-vmlx-action="feed-refresh" onClick={retryCollectionFetch}
-                  disabled={isCollectionLoading} className="text-xs px-2 py-1 border border-border disabled:opacity-50">
+                  disabled={isCollectionLoading} className="text-xs px-2 py-1 border border-border rounded-md disabled:opacity-50">
                   {t('sessions.download.refreshFeed')}
                 </button>
                 <p className="w-full text-xs text-muted-foreground" data-vmlx-status="model-feed-source">

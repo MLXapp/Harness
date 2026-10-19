@@ -44,13 +44,13 @@ export function MetalMemoryNotice() {
         <code className="block whitespace-pre-wrap break-all select-text">{notice.command}</code>
       </> : <p>{t('metalMemory.noIncrease')}</p>}
       <div className="flex flex-wrap gap-2">
-        {notice.command && <button type="button" data-vmlx-control="metal-memory-copy" className="border border-border px-3 py-1.5 hover:bg-accent"
+        {notice.command && <button type="button" data-vmlx-control="metal-memory-copy" className="border border-border rounded-md px-3 py-1.5 hover:bg-accent"
           onClick={() => void act(async () => { await window.api.sessions.copyMemoryWarningCommand(notice.id); setCopiedId(notice.id) })}>
           {t(copiedId === notice.id ? 'metalMemory.copied' : 'metalMemory.copy')}
         </button>}
-        <button type="button" data-vmlx-control="metal-memory-dismiss" className="border border-border px-3 py-1.5 hover:bg-accent"
+        <button type="button" data-vmlx-control="metal-memory-dismiss" className="border border-border rounded-md px-3 py-1.5 hover:bg-accent"
           onClick={() => void act(() => window.api.sessions.dismissMemoryWarning(notice.id, false))}>{t('metalMemory.dismiss')}</button>
-        <button type="button" data-vmlx-control="metal-memory-dismiss-model" className="border border-border px-3 py-1.5 hover:bg-accent"
+        <button type="button" data-vmlx-control="metal-memory-dismiss-model" className="border border-border rounded-md px-3 py-1.5 hover:bg-accent"
           onClick={() => void act(() => window.api.sessions.dismissMemoryWarning(notice.id, true))}>{t('metalMemory.dismissModel')}</button>
       </div>
       {error && <p role="alert" className="text-destructive">{error}</p>}

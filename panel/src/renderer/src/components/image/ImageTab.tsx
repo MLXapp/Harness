@@ -752,7 +752,7 @@ export function ImageTab() {
         />
 
         {(repairNotice || loadProgress) && (
-          <div role="status" data-vmlx-control="image-load-progress" className="mx-4 mt-2 px-3 py-2 border border-border bg-muted text-sm text-foreground">
+          <div role="status" data-vmlx-control="image-load-progress" className="mx-4 mt-2 px-3 py-2 border border-border rounded-lg bg-muted text-sm text-foreground">
             {repairNotice && <p>{t(repairNotice.labelKey, { ...repairNotice.labelParams, defaultValue: repairNotice.label })}</p>}
             {loadProgress && <p className="mt-1 font-mono text-xs">{t(loadProgress.labelKey, { ...loadProgress.labelParams, defaultValue: loadProgress.label })}</p>}
           </div>
