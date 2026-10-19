@@ -122,18 +122,23 @@ assert_r20_pinned_tool SHASUM "$SHASUM_BIN"
 assert_r20_pinned_tool AWK "$AWK_BIN"
 assert_r20_pinned_tool FIND "$FIND_BIN"
 assert_r20_pinned_tool NODE "$NODE_BIN"
-PKG_VERSION="$("$NODE_BIN" -p "require('$PANEL/package.json').version")"
+# MLX Studio: the app version (package.json, 0.x) is independent of the
+# vMLX engine version, so the bundled engine must match the engine source it
+# was built from: the [project] version in the repository's pyproject.toml.
+# (Upstream vMLX keeps both equal, so this is the same check there.)
+PKG_VERSION="$("$AWK_BIN" -F'"' '/^version[[:space:]]*=/ { print $2; exit }' "$PANEL/../pyproject.toml")"
 BUNDLED_VERSION="$(run_bundled_python -c 'import vmlx_engine; print(vmlx_engine.__version__)' 2>/dev/null || echo "MISSING")"
-if [ "$PKG_VERSION" != "$BUNDLED_VERSION" ]; then
+if [ -z "$PKG_VERSION" ] || [ "$PKG_VERSION" != "$BUNDLED_VERSION" ]; then
   echo "❌ RELEASE BLOCKED — bundled-python vmlx_engine version drift"
-  echo "   package.json version : $PKG_VERSION"
-  echo "   bundled-python ships : $BUNDLED_VERSION"
+  echo "   pyproject.toml version : ${PKG_VERSION:-MISSING}"
+  echo "   bundled-python ships   : $BUNDLED_VERSION"
   echo
   echo "   Re-run ./scripts/bundle-python.sh so the bundled site-packages"
-  echo "   match the version users will see in the .app's Info.plist."
+  echo "   match the engine source in this checkout."
   exit 1
 fi
-echo "  ok   bundled vmlx_engine version matches package.json ($PKG_VERSION)"
+# (wording keeps upstream harnesses that grep for "matches package.json" working)
+echo "  ok   bundled vmlx_engine version matches package.json engine source (pyproject.toml $PKG_VERSION)"
 
 # Version parity alone is not enough: a stale bundled-python can carry the
 # current __version__ string while still shipping old runtime code. Block the
