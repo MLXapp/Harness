@@ -74,6 +74,11 @@ Download the DMG from [Releases](https://github.com/MLXapp/studio/releases) when
 is published (macOS 14.5 or newer, Apple Silicon) and drag MLX Studio to
 Applications.
 
+Not sure which models your Mac can hold? [mlx.app/mac](https://mlx.app/mac) lists
+every open model that fits each Apple Silicon Mac and memory size, with the version
+that fits and an estimated speed; [mlx.app/run](https://mlx.app/run) starts from the
+model instead.
+
 ### Updates
 
 MLX Studio updates itself. It checks `latest.json` in this repository at launch,
