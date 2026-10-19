@@ -15,6 +15,16 @@ SCRIPT = ROOT / ".github/scripts/release_metadata.py"
 SITE_SCRIPT = ROOT / ".github/scripts/deploy_website_release.py"
 
 
+# MLX Studio does not ship upstream vMLX's release/publish workflows (they
+# target jjang-ai repositories and self-hosted runners). Their contract tests
+# run only when those workflows are present, e.g. on an upstream checkout.
+UPSTREAM_RELEASE_WORKFLOWS = ROOT / ".github/workflows/publish-release.yml"
+requires_upstream_release_workflows = pytest.mark.skipif(
+    not UPSTREAM_RELEASE_WORKFLOWS.exists(),
+    reason="upstream vMLX release workflows are not part of MLX Studio",
+)
+
+
 def _load_metadata_module():
     spec = importlib.util.spec_from_file_location("release_metadata", SCRIPT)
     assert spec and spec.loader
@@ -215,6 +225,7 @@ def test_website_deployer_backs_up_and_updates_both_flavors(tmp_path):
     assert len(list(backups.iterdir())) == 1
 
 
+@requires_upstream_release_workflows
 def test_workflows_are_manual_pinned_and_keep_secret_boundaries():
     workflow_dir = ROOT / ".github/workflows"
     files = {
@@ -293,6 +304,7 @@ def test_workflows_are_manual_pinned_and_keep_secret_boundaries():
     assert "Check out immutable release helper" in publish
 
 
+@requires_upstream_release_workflows
 def test_pypi_recovery_uses_public_inputs_without_a_candidate_run():
     import yaml
     workflow = yaml.load((ROOT / ".github/workflows/publish-release.yml").read_text(), Loader=yaml.BaseLoader)
@@ -312,6 +324,7 @@ def test_pypi_recovery_uses_public_inputs_without_a_candidate_run():
     assert '^[1-9][0-9]*$' in guard["run"]
 
 
+@requires_upstream_release_workflows
 @pytest.mark.parametrize("mismatch", [None, "source", "jang", "tag", "draft", "digest", "size", "duplicate", "notes"])
 def test_public_recovery_checks_production_payload(tmp_path, monkeypatch, mismatch):
     import hashlib

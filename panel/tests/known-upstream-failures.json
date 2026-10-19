@@ -1,0 +1,16 @@
+{
+  "_comment": "Panel tests that already failed in the unmodified vMLX 1.6.80 import (on Linux; some need macOS tools or upstream's release environment). CI tolerates exactly these; any other failure fails the build. Remove entries as they are fixed.",
+  "failures": [
+    "tests/download-system.test.ts > Download System Image Model Registry all models have required fields",
+    "tests/download-system.test.ts > Download System Image Model Registry Klein models use correct Flux2Klein class",
+    "tests/image-autodetect-paths.test.ts > image model autodetection path image edit requests normalize painted mask data URLs before proxying",
+    "tests/live-real-ui-model-proof-harness.test.ts > real UI model proof harness rejects extra or omitted installed Python invocation fingerprints",
+    "tests/release-packaging.test.ts > release packaging sanitizes PATH before commands and confines production output before removal",
+    "tests/release-packaging.test.ts > release packaging revalidates a hash-bound checkout-local tool before reuse",
+    "tests/release-packaging.test.ts > release packaging fails closed when a bound release tool mutates during its own action",
+    "tests/release-packaging.test.ts > release packaging binds artifact hooks to one live all-flavor release-driver plan",
+    "tests/release-packaging.test.ts > release packaging emits one sealed completion attestation from the validated production hook path",
+    "tests/settings-flow.test.ts > KV Cache Quantization cache panels surface native cache and TQ-KV status separately",
+    "tests/tool-executor-security.test.ts > run_applescript result contract executes AppleScript directly and returns its output"
+  ]
+}
