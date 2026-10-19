@@ -1,12 +1,10 @@
 // MLX Network tie-in (Network page): live network totals, a wallet's live
-// mining, and whether "MLX for macOS" (bundle app.mlx.mac) is installed and
-// running. HTTP calls run here in the main process, so the renderer's CSP
-// stays closed to remote hosts.
+// mining, and MLX Node (bundle app.mlx.mac): installed, running, bundled,
+// install and open (main/mlx-node.ts). HTTP calls run here in the main
+// process, so the renderer's CSP stays closed to remote hosts.
 import { app, ipcMain, net, shell } from 'electron'
 import { execFile } from 'child_process'
-import { existsSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
+import { findMlxNode, installMlxNode, mlxNodeStatus, openMlxNode } from '../mlx-node'
 import {
   MLX_MAC_BUNDLE_ID,
   MLX_NETWORK_TOTALS_URL,
@@ -15,7 +13,6 @@ import {
   parseNetworkTotals,
   parseWalletMining,
   type FetchResult,
-  type MlxAppStatus,
   type NetworkSnapshot,
   type WalletMining,
 } from '../../shared/mlxNetwork'
@@ -41,47 +38,6 @@ async function fetchJson<T>(url: string, parse: (raw: unknown) => T | null): Pro
   }
 }
 
-function run(cmd: string, args: string[]): Promise<string> {
-  return new Promise((resolve) => {
-    execFile(cmd, args, { timeout: 4000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(err ? '' : String(stdout)))
-  })
-}
-
-async function readBundleInfo(appPath: string): Promise<Record<string, unknown> | null> {
-  const plist = join(appPath, 'Contents', 'Info.plist')
-  if (!existsSync(plist)) return null
-  const out = await run('/usr/bin/plutil', ['-convert', 'json', '-o', '-', plist])
-  try { return out ? JSON.parse(out) : null } catch { return null }
-}
-
-/** Where MLX for macOS lives: the usual folders first, then Spotlight. */
-async function findMlxApp(): Promise<{ path: string; info: Record<string, unknown> } | null> {
-  const candidates = ['/Applications/MLX.app', join(homedir(), 'Applications', 'MLX.app')]
-  for (const path of candidates) {
-    const info = await readBundleInfo(path)
-    if (info?.CFBundleIdentifier === MLX_MAC_BUNDLE_ID) return { path, info }
-  }
-  const found = (await run('/usr/bin/mdfind', [`kMDItemCFBundleIdentifier == '${MLX_MAC_BUNDLE_ID}'`]))
-    .split('\n').map(s => s.trim()).filter(s => s.endsWith('.app'))
-  for (const path of found) {
-    const info = await readBundleInfo(path)
-    if (info?.CFBundleIdentifier === MLX_MAC_BUNDLE_ID) return { path, info }
-  }
-  return null
-}
-
-async function mlxAppStatus(): Promise<MlxAppStatus> {
-  if (process.platform !== 'darwin') return { installed: false, running: false }
-  const found = await findMlxApp()
-  if (!found) return { installed: false, running: false }
-  const exe = typeof found.info.CFBundleExecutable === 'string' ? found.info.CFBundleExecutable : 'MLX'
-  const binary = join(found.path, 'Contents', 'MacOS', exe)
-  const processes = (await run('/bin/ps', ['-Axo', 'comm='])).split('\n').map(s => s.trim())
-  const running = processes.some(p => p === binary)
-  const version = typeof found.info.CFBundleShortVersionString === 'string' ? found.info.CFBundleShortVersionString : undefined
-  return { installed: true, running, path: found.path, version }
-}
-
 export function registerNetworkHandlers(): void {
   ipcMain.handle('network:totals', (): Promise<FetchResult<NetworkSnapshot>> =>
     fetchJson(MLX_NETWORK_TOTALS_URL, parseNetworkTotals))
@@ -92,12 +48,17 @@ export function registerNetworkHandlers(): void {
     return fetchJson(miningUrl(full), parseWalletMining)
   })
 
-  ipcMain.handle('network:mlxAppStatus', () => mlxAppStatus())
+  ipcMain.handle('network:mlxAppStatus', () => mlxNodeStatus())
 
-  // Opens MLX for macOS and its menu bar panel (the app handles mlx:// links);
-  // falls back to launching it by bundle id.
+  // Installs the copy this build carries (opens an installed one instead).
+  ipcMain.handle('network:installMlxNode', () => installMlxNode())
+
+  // Opens MLX Node and its menu bar panel: mlx://open sent to the installed
+  // copy we found, then the system's mlx:// handler, then the bundle id.
   ipcMain.handle('network:openMlxApp', async (): Promise<boolean> => {
     if (process.platform !== 'darwin') return false
+    const found = await findMlxNode()
+    if (found && await openMlxNode(found.path, 'panel')) return true
     try {
       await shell.openExternal('mlx://open')
       return true

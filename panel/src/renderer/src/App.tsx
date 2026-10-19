@@ -27,6 +27,7 @@ import { ModelConverter } from './components/tools/ModelConverter'
 import { ApiDashboard } from './components/api/ApiDashboard'
 import { ImageTab } from './components/image/ImageTab'
 import { NetworkView } from './components/network/NetworkView'
+import { MlxNodePreference } from './components/network/MlxNodePreference'
 import { isImageSession, sessionMatchesModelPath } from '../../shared/sessionUtils'
 import { resolveDownloadModelType, type DownloadModelType } from '../../shared/modelDiscoveryNavigation'
 import { useTranslation, LOCALES, LOCALE_NAMES, LOCALE_FLAGS } from './i18n'
@@ -493,6 +494,7 @@ function ServerModeContent() {
             <h2 className="text-2xl font-bold">{t('console.preferences')}</h2>
             <AppearancePreference />
             <SingleModelPreference />
+            <MlxNodePreference />
             <div className="border border-border rounded-lg p-5">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">{t('app.about.language')}</h3>
               <div className="flex flex-wrap gap-2">

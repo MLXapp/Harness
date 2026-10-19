@@ -108,7 +108,8 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "signIgnore": [
-        "\\.safetensors$"
+        "\\.safetensors$",
+        "/Contents/Resources/bundled-node/"
       ],
       "notarize": {
         "teamId": "CCKXS9W488"
@@ -161,12 +162,21 @@
       {
         "from": "../pyproject.toml",
         "to": "vmlx-engine-source/pyproject.toml"
+      },
+      {
+        "from": "resources/bundled-node",
+        "to": "bundled-node",
+        "filter": [
+          "MLX Node.zip",
+          "MLX Node.json"
+        ]
       }
     ],
     "files": [
       "dist/**/*",
       "out/**/*",
       "resources/**/*",
+      "!resources/bundled-node{,/**/*}",
       "!**/.DS_Store"
     ],
     "directories": {

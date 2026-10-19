@@ -43,20 +43,30 @@ Summarised from the vMLX engine and app it is built on:
   support, Kokoro TTS and Whisper STT via mlx-audio.
 - **Network** (new in MLX Studio): live figures from the
   [MLX Network](https://mlx.app), whether
-  [MLX for macOS](https://mlx.app/download) is installed and running, and your
-  wallet's live mining if you enter its name.
+  [MLX Node](https://mlx.app/download) is installed and running (and installing
+  it), and your wallet's live mining if you enter its name.
 
 Model support, speed and memory use depend on the model, its quantization and your
 Mac. The engine's full options are documented in the upstream
 [vMLX README](https://github.com/jjang-ai/vmlx#readme).
 
-### MLX Studio and MLX for macOS
+### MLX Studio includes MLX Node
 
-They are two separate apps. **MLX Studio** runs models for you. **MLX for macOS**
-(bundle `app.mlx.mac`) is a menu bar app that lends your Mac's idle time to the
-MLX Network and earns MLX Tokens. MLX Studio only reads public network figures and
-can open MLX for macOS; it never mines. MLX Tokens are a crypto asset; read the
-[risks](https://mlx.app/risks).
+MLX Studio includes MLX Node. They are two separate apps. **MLX Studio** runs
+models for you. **MLX Node** (bundle `app.mlx.mac`) is a menu bar app that lends
+your Mac's idle time to MLX Network and earns MLX Tokens.
+
+Release builds of MLX Studio carry the current signed and notarized MLX Node. On
+first launch, if MLX Node isn't installed, MLX Studio asks once: "Also install MLX
+Node?" Choosing **Install MLX Node** copies it to `/Applications/MLX Node.app`
+(`~/Applications` if `/Applications` can't be written), checks its signature and
+opens it. It never replaces an existing copy. After that MLX Node updates itself
+and you can quit or remove it any time; removing MLX Studio leaves it in place. You
+can also install or open it later from the Network page or Preferences, or download
+it from [mlx.app/download](https://mlx.app/download).
+
+MLX Studio itself only reads public network figures; it never mines. MLX Tokens
+are a crypto asset; read the [risks](https://mlx.app/risks).
 
 ## Install
 
@@ -89,7 +99,10 @@ npm run dist           # = scripts/build-studio-dmg.sh
 ```
 
 `npm run dist` builds the bundled Python runtime (`scripts/bundle-python.sh`), then
-the app and DMG. It signs with a Developer ID certificate when one is available and
+the app and DMG. To carry MLX Node, run `scripts/fetch-mlx-node.sh` first (CI does):
+it downloads the public build from mlx.app, verifies it and stages it in
+`panel/resources/bundled-node/` (not committed); without it the app offers the
+download instead. It signs with a Developer ID certificate when one is available and
 notarizes when `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` are set; otherwise the
 DMG is unsigned. `MLX_STUDIO_FLAVOR=tahoe` builds the macOS 26-only variant with
 native MLX wheels. JANG tools are taken from `VMLX_JANG_TOOLS_SOURCE` (a checkout of

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ExternalLink, Globe, Cpu, Wallet, ShieldAlert } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { Emblem } from '../brand/Logo'
+import { useMlxNode } from './useMlxNode'
 import {
   MLX_DOWNLOAD_URL,
   MLX_RISKS_URL,
@@ -12,7 +13,6 @@ import {
   formatMlx,
   normalizeWalletName,
   unitsToMlx,
-  type MlxAppStatus,
   type NetworkSnapshot,
   type WalletMining,
 } from '../../../../shared/mlxNetwork'
@@ -154,14 +154,12 @@ export function NetworkView() {
   }, 15_000)
   const totals = net.snap?.totals ?? null
 
-  // (b) MLX for macOS on this Mac
-  const [app, setApp] = useState<MlxAppStatus | null>(null)
-  usePoll(async () => { setApp(await window.api.network.getMlxAppStatus()) }, 5_000)
-  const [opening, setOpening] = useState(false)
-  const openMlx = async () => {
-    setOpening(true)
-    try { await window.api.network.openMlxApp() } finally { setTimeout(() => setOpening(false), 800) }
-  }
+  // (b) MLX Node on this Mac (installable from the copy MLX Studio carries)
+  const node = useMlxNode()
+  const app = node.status
+  // Keep the last message while its row folds away.
+  const lastNodeError = useRef(node.error)
+  if (node.error) lastNodeError.current = node.error
 
   // (c) wallet (name kept locally in the settings store)
   const [wallet, setWallet] = useState<string | null>(null)
@@ -203,8 +201,11 @@ export function NetworkView() {
     : m.state === 'paused' ? t('network.statePaused')
     : m.state === 'waiting' ? t('network.stateWaiting') : t('network.stateIdle')
 
-  const appState = app == null ? 'checking' : app.running ? 'running' : app.installed ? 'installed' : 'missing'
-  const appDot = appState === 'running' ? 'bg-success' : appState === 'installed' ? 'bg-warning' : 'bg-muted-foreground/40'
+  const appState = node.state
+  const appDot = appState === 'running' ? 'bg-success'
+    : appState === 'installing' ? 'bg-warning animate-[vmlx-pulse_2.4s_ease-in-out_infinite]'
+    : appState === 'installed' ? 'bg-warning' : 'bg-muted-foreground/40'
+  const canInstall = !!app && !app.installed && !!app.bundled
 
   return (
     <div data-vmlx-surface="network" className="h-full overflow-auto">
@@ -247,28 +248,43 @@ export function NetworkView() {
               <span className={`h-2 w-2 rounded-full transition-colors duration-300 ${appDot}`} />
               <span data-vmlx-state={appState} className="font-medium">
                 {appState === 'checking' ? t('network.appChecking')
+                  : appState === 'installing' ? t('network.installing')
                   : appState === 'running' ? t('network.appRunning')
                   : appState === 'installed' ? t('network.appInstalled') : t('network.appMissing')}
               </span>
-              {app?.version && <span className="text-xs text-muted-foreground">· {t('network.appVersion', { version: app.version })}</span>}
+              {app?.installed && app.version && <span className="text-xs text-muted-foreground">· {t('network.appVersion', { version: app.version })}</span>}
+              {canInstall && appState === 'missing' && <span className="text-xs text-muted-foreground">· {t('network.appBundled')}</span>}
             </div>
             <div className="mt-5">
               {app?.installed ? (
-                <button data-vmlx-control="network-open-mlx" onClick={openMlx} disabled={opening}
+                <button data-vmlx-control="network-open-mlx" onClick={() => void node.open()} disabled={node.busy != null}
                   className="btn-core h-9 px-4 rounded-full text-sm font-semibold inline-flex items-center gap-2">
                   {t('network.openApp')}
+                </button>
+              ) : canInstall ? (
+                <button data-vmlx-control="network-install-mlx-node" onClick={() => void node.install()} disabled={node.busy != null}
+                  className="btn-core h-9 px-4 rounded-full text-sm font-semibold inline-flex items-center gap-2 transition-opacity duration-300 disabled:opacity-60">
+                  {t('network.installApp')}
                 </button>
               ) : (
                 <a data-vmlx-control="network-get-mlx" href={MLX_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer"
                   aria-disabled={app == null || undefined}
-                  className={`btn-core h-9 px-4 rounded-full text-sm font-semibold inline-flex items-center gap-2 ${app == null ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+                  className={`btn-core h-9 px-4 rounded-full text-sm font-semibold inline-flex items-center gap-2 transition-opacity duration-300 ${app == null ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
                   {t('network.getApp')}<ExternalLink className="h-3.5 w-3.5" />
                 </a>
               )}
             </div>
+            <Reveal open={node.error != null}>
+              <p className="pt-3 text-xs text-muted-foreground">
+                {lastNodeError.current ? t(`main.dialog.mlxNodeFailed.${lastNodeError.current}`) : ''}{' '}
+                <a href={MLX_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[color:var(--link)] hover:underline">
+                  {t('network.getApp')}<ExternalLink className="h-3 w-3" />
+                </a>
+              </p>
+            </Reveal>
           </Card>
 
-          <Card section="network-wallet" tint="tint-green" icon={<Wallet className="h-4 w-4" />} title={t('network.walletTitle')}>
+                    <Card section="network-wallet" tint="tint-green" icon={<Wallet className="h-4 w-4" />} title={t('network.walletTitle')}>
             <p className="text-sm text-muted-foreground">{t('network.walletDesc')}</p>
             <form className="mt-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); void saveWallet() }}>
               <div className="relative flex-1 min-w-0">

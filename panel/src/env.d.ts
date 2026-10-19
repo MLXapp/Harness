@@ -394,6 +394,7 @@ declare global {
         getMining: (walletName: string) => Promise<import('./shared/mlxNetwork').FetchResult<import('./shared/mlxNetwork').WalletMining>>;
         getMlxAppStatus: () => Promise<import('./shared/mlxNetwork').MlxAppStatus>;
         openMlxApp: () => Promise<boolean>;
+        installMlxNode: () => Promise<import('./shared/mlxNode').MlxNodeInstallResult>;
       };
       app: {
         getPowerMode: () => Promise<import('./shared/powerMode').PowerModeStatus>;

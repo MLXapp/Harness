@@ -90,6 +90,21 @@ jobs:
         working-directory: studio/panel
         run: /opt/homebrew/bin/npm ci
 
+      # MLX Studio carries MLX Node (app.mlx.mac) and installs it on first run.
+      # Download the public notarized build, check it (bundle id, team, strict
+      # signature, Gatekeeper) and stage it in panel/resources/bundled-node.
+      # Release (tag) builds fail without it; manual builds warn and go on.
+      - name: Bundle MLX Node
+        working-directory: studio/panel
+        run: |
+          if ./scripts/fetch-mlx-node.sh; then exit 0; fi
+          rm -rf resources/bundled-node
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "::error::Couldn't fetch or verify MLX Node from mlx.app; a release must carry it."
+            exit 1
+          fi
+          echo "::warning::Couldn't fetch or verify MLX Node; this DMG is built without it (the app offers the download instead)."
+
       # Optional Developer ID signing (electron-builder reads CSC_LINK and
       # CSC_KEY_PASSWORD) and notarisation (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD).
       # Without MAC_CERT_P12 the DMG is unsigned and nothing is notarized.
@@ -134,6 +149,25 @@ jobs:
             xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$team" --wait
             xcrun stapler staple "$dmg"
             shasum -a 256 "$dmg" > "$dmg.sha256"
+          done
+
+      # The carried MLX Node must come out of the final DMG still valid.
+      - name: Check MLX Node in the DMG
+        if: hashFiles('studio/panel/resources/bundled-node/MLX Node.zip') != ''
+        working-directory: studio/panel/release
+        run: |
+          REQ='anchor apple generic and certificate leaf[subject.OU] = "CCKXS9W488" and identifier "app.mlx.mac"'
+          for dmg in MLX-Studio-*.dmg; do
+            mnt="$(mktemp -d)"; out="$(mktemp -d)"
+            hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$mnt" "$dmg" > /dev/null
+            zip="$mnt/MLX Studio.app/Contents/Resources/bundled-node/MLX Node.zip"
+            test -f "$zip" || { echo "::error::$dmg doesn't carry MLX Node"; hdiutil detach "$mnt" -force; exit 1; }
+            if [[ -n "$MAC_CERT_P12" ]]; then codesign --verify --deep --strict "$mnt/MLX Studio.app"; fi
+            ditto -x -k "$zip" "$out"
+            codesign --verify --deep --strict -R "=$REQ" "$out/MLX Node.app"
+            echo "$dmg carries MLX Node $(plutil -extract CFBundleShortVersionString raw -o - "$out/MLX Node.app/Contents/Info.plist")"
+            hdiutil detach "$mnt" -quiet
+            rm -rf "$out"
           done
 
       - name: Remove the signing keychain
