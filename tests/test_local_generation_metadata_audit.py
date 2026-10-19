@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+def test_local_generation_metadata_audit_defaults_include_step3p7_repro_paths():
+    from tests.cross_matrix.run_local_generation_metadata_audit import (
+        HIGH_RISK_MODEL_CANDIDATES,
+    )
+
+    candidates = set(HIGH_RISK_MODEL_CANDIDATES)
+
+    assert "/Users/example/models/dealignai/Step-3.7-Flash-JANG_2L-CRACK" in candidates
+    assert "/Users/example/models/dealignai/Step-3.7-Flash-JANG_K-CRACK" in candidates
+    assert "/Users/example/models/JANGQ/Step-3.7-Flash-JANG_K" in candidates
+
+
+def test_local_generation_metadata_audit_reports_high_risk_rows(tmp_path):
+    from tests.cross_matrix.run_local_generation_metadata_audit import build_artifact
+
+    # Metadata-only fixtures exercise the real registry and default resolvers;
+    # this unit contract must not depend on machine-specific model downloads.
+    models = []
+    for name, model_type, generation, jang in (
+        ("Hy3-preview-JANG_2L", "hy_v3",
+         {"max_new_tokens": 2048, "top_k": 0}, {}),
+        ("MiniMax-M2.7-JANG_K", "minimax_m2",
+         {"max_new_tokens": 4096}, {"capabilities": {"reasoning_parser": "qwen3"}}),
+        ("DeepSeek-V4-Flash-JANGTQ-K", "deepseek_v4",
+         {"max_new_tokens": 4096}, {"chat": {"sampling_defaults": {
+             "repetition_penalty_chat": 1.0, "repetition_penalty_thinking": 1.0,
+         }}}),
+    ):
+        path = tmp_path / name
+        path.mkdir()
+        (path / "config.json").write_text(json.dumps({"model_type": model_type}))
+        (path / "generation_config.json").write_text(json.dumps(generation))
+        (path / "jang_config.json").write_text(json.dumps(jang))
+        models.append(str(path))
+
+    artifact = build_artifact(tuple(models))
+
+    assert artifact["status"] == "pass"
+    assert artifact["row_count"] == 3
+    rows = {Path(row["path"]).name: row for row in artifact["rows"]}
+    hy3 = rows["Hy3-preview-JANG_2L"]
+    assert hy3["registry"]["reasoning_parser"] == "qwen3"
+    assert hy3["registry"]["tool_parser"] == "hunyuan"
+    assert hy3["resolved_chat"]["max_tokens"] == 2048
+    assert hy3["resolved_chat"]["top_k"] == 0
+    minimax = rows["MiniMax-M2.7-JANG_K"]
+    assert minimax["registry"]["reasoning_parser"] == "minimax_m2"
+    assert "registry_overrides_stale_capability_reasoning_parser" in minimax["notes"]
+    assert minimax["resolved_chat"]["max_tokens"] == 4096
+    dsv4 = rows["DeepSeek-V4-Flash-JANGTQ-K"]
+    assert dsv4["resolved_chat"]["repetition_penalty"] == 1.0
+    assert dsv4["resolved_thinking"]["repetition_penalty"] == 1.0
+    assert dsv4["resolved_chat"]["max_tokens"] == 4096
+
+
+def test_local_generation_metadata_audit_artifact_is_json_serializable():
+    from tests.cross_matrix.run_local_generation_metadata_audit import build_artifact
+
+    artifact = build_artifact(("/definitely/missing/model",))
+    encoded = json.dumps(artifact)
+    assert '"rows": []' in encoded
+
+
+def test_local_generation_metadata_audit_flags_thinking_template_without_budget(tmp_path):
+    from tests.cross_matrix.run_local_generation_metadata_audit import audit_model
+
+    (tmp_path / "config.json").write_text('{"model_type":"gemma4"}\n', encoding="utf-8")
+    (tmp_path / "generation_config.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "chat_template.jinja").write_text(
+        "{% if enable_thinking is defined and enable_thinking %}<|think|>{% endif %}",
+        encoding="utf-8",
+    )
+
+    row = audit_model(str(tmp_path))
+
+    assert row["thinking_budget"]["template_mentions_thinking"] is True
+    assert row["thinking_budget"]["template_mentions_budget"] is False
+    assert "thinking_budget_override_forwarded_but_template_does_not_enforce" in row["notes"]
+
+
+def test_local_generation_metadata_audit_accepts_template_budget_support(tmp_path):
+    from tests.cross_matrix.run_local_generation_metadata_audit import audit_model
+
+    (tmp_path / "config.json").write_text('{"model_type":"gemma4"}\n', encoding="utf-8")
+    (tmp_path / "generation_config.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "chat_template.jinja").write_text(
+        "{% if enable_thinking %}{{ thinking_budget }}<|think|>{% endif %}",
+        encoding="utf-8",
+    )
+
+    row = audit_model(str(tmp_path))
+
+    assert row["thinking_budget"]["template_mentions_thinking"] is True
+    assert row["thinking_budget"]["template_mentions_budget"] is True
+    assert "thinking_budget_override_forwarded_but_template_does_not_enforce" not in row["notes"]
+
+
+def test_local_generation_metadata_audit_reports_step3p7_source_runtime_route(tmp_path):
+    from tests.cross_matrix.run_local_generation_metadata_audit import audit_model
+
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "model_type": "step3p7",
+                "architectures": ["Step3p7ForConditionalGeneration"],
+                "vision_config": {"hidden_size": 4096},
+                "image_token_id": 128001,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "jang_config.json").write_text(
+        json.dumps(
+            {
+                "architecture": {
+                    "type": "step3p7",
+                    "text_model_type": "step3p5",
+                    "has_vision": True,
+                    "has_audio": False,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    row = audit_model(str(tmp_path))
+
+    assert row["media_metadata"]["advertised_vision"] is True
+    assert row["runtime_route"]["engine_is_mllm_default"] is True
+    assert row["runtime_route"]["engine_is_mllm_force"] is True
+    assert row["runtime_route"]["step3p7_source_vlm_runtime_available"] is True
+    assert "step3p7_advertised_media_routes_source_vlm_runtime" in row["notes"]
+    assert "step3p7_advertised_media_routes_mllm_by_default" not in row["notes"]
+
+
+def test_local_generation_metadata_audit_reports_step3p7_guard_when_runtime_missing(
+    tmp_path,
+    monkeypatch,
+):
+    from tests.cross_matrix.run_local_generation_metadata_audit import audit_model
+    from vmlx_engine.api import utils
+
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "model_type": "step3p7",
+                "architectures": ["Step3p7ForConditionalGeneration"],
+                "vision_config": {"hidden_size": 4096},
+                "image_token_id": 128001,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "jang_config.json").write_text(
+        json.dumps(
+            {
+                "architecture": {
+                    "type": "step3p7",
+                    "text_model_type": "step3p5",
+                    "has_vision": True,
+                    "has_audio": False,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(utils, "_source_step3p7_vlm_runtime_available", lambda: False)
+
+    row = audit_model(str(tmp_path))
+
+    assert row["media_metadata"]["advertised_vision"] is True
+    assert row["runtime_route"]["engine_is_mllm_default"] is False
+    assert row["runtime_route"]["engine_is_mllm_force"] is False
+    assert row["runtime_route"]["step3p7_source_vlm_runtime_available"] is False
+    assert "step3p7_advertised_media_guarded_text_only" in row["notes"]

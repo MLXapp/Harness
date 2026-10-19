@@ -1,0 +1,112 @@
+"""Terminal persistence outcome: the durability barrier reports what the store sites recorded, never 'persisted' by default."""
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from vmlx_engine.persistence_outcome import TerminalPersistenceLedger, format_outcome
+
+
+@pytest.mark.parametrize("retained", [1, 64, 130])
+def test_paged_store_records_returned_not_requested_coverage(retained):
+    ledger = TerminalPersistenceLedger()
+    table = SimpleNamespace(num_tokens=retained, block_ids=[1])
+    assert ledger.record_paged_store("paged", table, 130, "paged test") is True
+    assert ledger.take("paged") == {
+        "outcome": "stored", "detail": "paged test", "retained_tokens": retained,
+        "durable": None,
+    }
+
+
+@pytest.mark.parametrize("table,known_tokens", [
+    (None, None),
+    (SimpleNamespace(num_tokens=0, block_ids=[]), 0),
+    (SimpleNamespace(num_tokens=True, block_ids=[1]), None),
+    (SimpleNamespace(num_tokens="64", block_ids=[1]), None),
+    (SimpleNamespace(num_tokens=131, block_ids=[1]), None),
+    (SimpleNamespace(num_tokens=64, block_ids=[]), None),
+])
+def test_paged_store_refusal_does_not_fabricate_coverage(table, known_tokens):
+    ledger = TerminalPersistenceLedger()
+    assert ledger.record_paged_store("paged", table, 130, "paged test") is False
+    entry = ledger.take("paged")
+    assert entry["outcome"] == "refused"
+    assert entry["retained_tokens"] == known_tokens
+    assert entry["durable"] is False
+
+
+def test_unknown_by_default_and_take_clears():
+    l = TerminalPersistenceLedger()
+    e = l.take("r1")
+    assert e["outcome"] == "unknown" and "no store outcome recorded" in e["detail"]
+    l.record("r2", "stored", "paged", retained_tokens=407)
+    assert l.peek("r2")["retained_tokens"] == 407
+    assert l.take("r2")["outcome"] == "stored"
+    assert l.take("r2")["outcome"] == "unknown"
+
+
+def test_precedence_stored_refused_failed_never_downgrade_to_skipped():
+    l = TerminalPersistenceLedger()
+    l.record("r", "stored", "paged", retained_tokens=10)
+    l.record("r", "skipped", "legacy tier had nothing")
+    assert l.take("r")["outcome"] == "stored"
+    l.record("f", "failed", "paged: boom")
+    l.record("f", "stored", "legacy")
+    assert l.take("f")["outcome"] == "failed"
+    l.record("s", "skipped", "empty")
+    l.record("s", "already_durable", "covers 5/5", retained_tokens=5)
+    assert l.take("s")["outcome"] == "already_durable"
+    l.record("x", "not-an-outcome", "ignored")
+    assert l.take("x")["outcome"] == "unknown"
+
+
+def test_format_outcome_carries_tokens_and_durability():
+    txt = format_outcome({"outcome": "stored", "detail": "legacy prefix cache (L1 only)", "retained_tokens": 12, "durable": False})
+    assert txt.startswith("cache_outcome=stored") and "retained_tokens=12" in txt and "durable=false" in txt
+    assert format_outcome({"outcome": "unknown", "detail": "", "retained_tokens": None, "durable": None}) == "cache_outcome=unknown"
+
+
+def test_no_lane_claims_persistence_without_a_recorded_outcome():
+    root = Path(__file__).resolve().parents[1] / "vmlx_engine"
+    for name in ("engine_core.py", "mllm_scheduler.py"):
+        src = (root / name).read_text()
+        assert "cache_persisted=true" not in src, name
+        assert "Terminal durability barrier" in src and "_format_persistence_outcome" in src, name
+    for name in ("scheduler.py", "mllm_scheduler.py"):
+        src = (root / name).read_text()
+        for outcome in ("\"stored\"", "\"skipped\"", "\"failed\""):
+            assert f"_PERSIST.record(request_id, {outcome}" in src, (name, outcome)
+
+
+def test_media_policy_skip_records_its_own_reason_not_the_generic_empty_cache():
+    """A media-bearing prompt on a family outside the media prefix-cache
+    allow-list nulls the extracted handle on purpose. That skip must be
+    recorded as the family policy it is; before, the nulled handle fell
+    through to the generic "resolved extracted cache is empty" outcome, which
+    read like a lost cache in the terminal ledger."""
+    import inspect
+    import vmlx_engine.mllm_scheduler as m
+    src = inspect.getsource(m)
+    policy = src.index('"media context: prefix reuse not allowed for this family"')
+    generic = src.index('_PERSIST.record(request_id, "skipped", "resolved extracted cache is empty")')
+    assert policy < generic
+    # the generic outcome is guarded by the flag the policy skip sets
+    assert "if cache_blocks is None and _media_skip_recorded:" in src
+    # set at the media-policy skip and at the already-durable branch
+    assert src.count("_media_skip_recorded = True") == 2
+
+
+def test_already_durable_outcome_is_not_overwritten_by_the_generic_empty_cache_skip():
+    """Warm turn: the restored boundary covers the whole cache-key prefix
+    (cached_tokens >= len(truncated)). The store records already_durable and
+    nulls the handle; the generic "resolved extracted cache is empty" branch
+    must then stay silent. Live: Flash-Next 4S, prompt 1795, restored 1794 →
+    ledger said skipped/empty instead of already_durable (chatcmpl-1d5804a8)."""
+    import inspect
+    import vmlx_engine.mllm_scheduler as m
+    src = inspect.getsource(m)
+    durable = src.index('_PERSIST.record(request_id, "already_durable"')
+    generic = src.index('_PERSIST.record(request_id, "skipped", "resolved extracted cache is empty")')
+    guard = src.index("_media_skip_recorded = True", durable)
+    assert durable < guard < generic
+    assert "if cache_blocks is None and _media_skip_recorded:" in src

@@ -1,0 +1,399 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Unit tests for DiskCacheManager.
+
+Tests the SQLite index and filesystem operations without requiring
+mlx_lm's save_prompt_cache/load_prompt_cache (which need real model caches).
+We test the database layer directly by inserting rows and files manually.
+
+Verifies:
+- Store + fetch round-trip via direct DB/file manipulation
+- Eviction respects max_size_gb
+- stats() returns correct field names
+- Fetch of missing key returns None
+- Stale entry cleanup (file deleted externally)
+"""
+
+import os
+import gc
+import sqlite3
+import tempfile
+import threading
+import time
+import weakref
+
+import pytest
+
+from vmlx_engine.disk_cache import DiskCacheManager, _hash_tokens
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _create_manager(tmpdir: str, max_size_gb: float = 10.0) -> DiskCacheManager:
+    """Create a DiskCacheManager with a temp directory."""
+    return DiskCacheManager(cache_dir=tmpdir, max_size_gb=max_size_gb)
+
+
+def _insert_fake_entry(
+    mgr: DiskCacheManager,
+    tokens: list[int],
+    file_content: bytes = b"fake safetensors data",
+    file_size_override: int | None = None,
+) -> str:
+    """Insert a fake cache entry directly into the DB and filesystem.
+
+    Returns the token_hash.
+    """
+    token_hash = _hash_tokens(tokens)
+    file_name = f"cache_{token_hash[:16]}_{len(tokens)}tok.safetensors"
+    file_path = mgr.cache_dir / file_name
+
+    # Write fake file
+    file_path.write_bytes(file_content)
+    actual_size = file_size_override if file_size_override is not None else len(file_content)
+
+    # Insert into DB
+    conn = mgr._pool.get()
+    try:
+        now = time.time()
+        conn.execute(
+            "INSERT OR REPLACE INTO cache_entries "
+            "(token_hash, file_name, num_tokens, file_size, created_at, last_accessed, access_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1)",
+            (token_hash, file_name, len(tokens), actual_size, now, now),
+        )
+        conn.commit()
+    finally:
+        mgr._pool.put(conn)
+
+    return token_hash
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+class TestDiskCacheUnit:
+    """Disk cache database and filesystem tests."""
+
+    def test_standard_store_materializes_mlx_arrays_contiguous(self, monkeypatch):
+        """Standard disk-cache stores must CPU-copy from contiguous MLX arrays.
+
+        Gemma 4 sliding-window RotatingKVCache.values can be a non-contiguous
+        MLX view after prefill. Direct ``np.array(v)`` on that live view
+        corrupted only the sliding values in a fresh-process disk-prefix
+        restore. Pin the materialization contract at DiskCacheManager.store().
+        """
+        import mlx.core as mx
+        import vmlx_engine.disk_cache as disk_cache
+
+        class FakeCache:
+            @property
+            def state(self):
+                base = mx.arange(64, dtype=mx.float32).reshape(1, 2, 4, 8)
+                return (base.transpose(0, 1, 3, 2),)
+
+            @property
+            def meta_state(self):
+                return ("0", "16", "8", "8")
+
+        tmpdir = tempfile.mkdtemp(prefix="vmlx_disk_cache_test_")
+        mgr = _create_manager(tmpdir)
+        seen = {"contiguous": 0}
+        orig_contiguous = disk_cache.mx.contiguous
+
+        def counting_contiguous(arr):
+            seen["contiguous"] += 1
+            return orig_contiguous(arr)
+
+        monkeypatch.setattr(disk_cache.mx, "contiguous", counting_contiguous)
+        try:
+            assert mgr.store([1, 2, 3], [FakeCache()]) is True
+            assert seen["contiguous"] == 1
+        finally:
+            mgr.shutdown()
+
+    def test_background_writer_marks_standard_write_task_done(self):
+        """Queue joins must complete after a standard background write."""
+        tmpdir = tempfile.mkdtemp(prefix="vmlx_disk_cache_test_")
+        mgr = _create_manager(tmpdir)
+        try:
+            wrote = threading.Event()
+
+            def fake_write_cache(token_hash, tokens, cache_data, metadata, cache_type="assistant"):
+                wrote.set()
+
+            mgr._write_cache = fake_write_cache
+            mgr._write_queue.put(("hash", [1, 2, 3], {}, {}, "assistant"))
+
+            assert wrote.wait(timeout=2.0)
+            join_done = threading.Event()
+            join_thread = threading.Thread(target=lambda: (mgr._write_queue.join(), join_done.set()))
+            join_thread.start()
+            join_thread.join(timeout=2.0)
+            assert join_done.is_set()
+        finally:
+            mgr.shutdown()
+
+    def test_background_writer_releases_completed_numpy_payload(self):
+        """A blocked writer must not pin the previous prompt's host buffers."""
+        import numpy as np
+
+        tmpdir = tempfile.mkdtemp(prefix="vmlx_disk_cache_test_")
+        mgr = _create_manager(tmpdir)
+        try:
+            mgr._write_cache = lambda *args, **kwargs: None
+            array = np.ones((128,), dtype=np.uint16)
+            reference = weakref.ref(array)
+            payload = {"0": array}
+            mgr._write_queue.put(("hash", [1, 2, 3], payload, {}, "assistant"))
+            del payload
+            del array
+
+            mgr._write_queue.join()
+            gc.collect()
+            assert reference() is None
+        finally:
+            mgr.shutdown()
+
+    def test_store_and_fetch_roundtrip(self):
+        """Store data under a token hash, fetch returns the DB row."""
+        tmpdir = tempfile.mkdtemp(prefix="vmlx_disk_cache_test_")
+        mgr = _create_manager(tmpdir)
+        try:
+            tokens = [10, 20, 30, 40, 50]
+            _insert_fake_entry(mgr, tokens)
+
+            # Verify the entry exists in the DB
+            token_hash = _hash_tokens(tokens)
+            conn = mgr._pool.get()
+            try:
+                row = conn.execute(
+                    "SELECT file_name, num_tokens FROM cache_entries WHERE token_hash = ?",
+                    (token_hash,),
+                ).fetchone()
+            finally:
+                mgr._pool.put(conn)
+
+            assert row is not None
+            assert row[1] == len(tokens)
+
+            # The file should exist on disk
+            file_path = mgr.cache_dir / row[0]
+            assert file_path.exists()
+        finally:
+            mgr.shutdown()
+
+    def test_eviction_respects_max_gb(self):
+        """Store enough data to exceed limit, verify old entries evicted."""
+        tmpdir = tempfile.mkdtemp(prefix="vmlx_disk_cache_test_")
+        # Very small limit: 1 KB (expressed as GB)
+        max_gb = 1.0 / (1024 * 1024)  # ~1 KB
+        mgr = _create_manager(tmpdir, max_size_gb=max_gb)
+        try:
+            # Insert entries that exceed 1 KB total
+            for i in range(5):
+                tokens = [i * 100 + j for j in range(10)]
+                # Each file is ~500 bytes
+                _insert_fake_entry(mgr, tokens, file_content=b"x" * 500)
+
+            # Trigger eviction manually
+            mgr._evict_if_needed()
+
+            # Count remaining entries
+            conn = mgr._pool.get()
+            try:
+                count = conn.execute("SELECT COUNT(*) FROM cache_entries").fetchone()[0]
+                total_size = conn.execute(
+                    "SELECT COALESCE(SUM(file_size), 0) FROM cache_entries"
+                ).fetchone()[0]
+            finally:
+                mgr._pool.put(conn)
+
+            # Some entries should have been evicted
+            assert count < 5
+            # Total size should be within the limit (or close to it)
+            assert total_size <= mgr.max_size_bytes + 500  # Allow one entry margin
+        finally:
+            mgr.shutdown()
+
+    def test_stats_field_names(self):
+        """Verify stats() returns dict with the correct field names.
+
+        CRITICAL: CachePanel.tsx reads `total_size_mb` (with fallback to `size_mb`).
+        The Python code must return `total_size_mb`, NOT `size_mb` or `count`.
+
+        Actual field names in disk_cache.py stats():
+        - entries (NOT count)
+        - total_size_mb (NOT size_mb)
+        - total_tokens_on_disk
+        - total_cached_tokens
+        - max_size_gb
+        - hits
+        - misses
+        - stores
+        - hit_rate
+        - pending_writes
+        - inflight_entries (records queued for the writer and served from memory until written)
+        - tq_native_enabled
+        """
+        tmpdir = tempfile.mkdtemp(prefix="vmlx_disk_cache_test_")
+        mgr = _create_manager(tmpdir)
+        try:
+            stats = mgr.stats()
+
+            # Verify all expected keys exist
+            expected_keys = {
+                "entries",
+                "total_size_mb",
+                "total_tokens_on_disk",
+                "total_cached_tokens",
+                "max_size_gb",
+                "hits",
+                "misses",
+                "stores",
+                "hit_rate",
+                "pending_writes",
+                "inflight_entries",
+                "tq_native_enabled",
+            }
+            assert set(stats.keys()) == expected_keys
+            assert stats["inflight_entries"] == 0
+
+            # Verify types
+            assert isinstance(stats["entries"], int)
+            assert isinstance(stats["total_size_mb"], (int, float))
+            assert isinstance(stats["total_tokens_on_disk"], int)
+            assert isinstance(stats["total_cached_tokens"], int)
+            assert stats["total_cached_tokens"] == stats["total_tokens_on_disk"]
+            assert isinstance(stats["max_size_gb"], (int, float))
+            assert isinstance(stats["hit_rate"], (int, float))
+            assert isinstance(stats["tq_native_enabled"], bool)
+
+            # NOTE: The field is "entries" not "count" -- the task description
+            # mentioned "count" but the actual code uses "entries".
+            assert "count" not in stats
+            assert "size_mb" not in stats  # It's "total_size_mb"
+        finally:
+            mgr.shutdown()
+
+    def test_fetch_missing_returns_none(self):
+        """Fetch nonexistent key returns None."""
+        tmpdir = tempfile.mkdtemp(prefix="vmlx_disk_cache_test_")
+        mgr = _create_manager(tmpdir)
+        try:
+            result = mgr.fetch([999, 888, 777])
+            assert result is None
+
+            stats = mgr.stats()
+            assert stats["misses"] == 1
+        finally:
+            mgr.shutdown()
+
+    def test_stale_entry_cleanup(self):
+        """Store entry, delete the file manually, fetch should clean up DB row."""
+        tmpdir = tempfile.mkdtemp(prefix="vmlx_disk_cache_test_")
+        mgr = _create_manager(tmpdir)
+        try:
+            tokens = [42, 43, 44]
+            token_hash = _insert_fake_entry(mgr, tokens)
+
+            # Verify the entry is in the DB
+            conn = mgr._pool.get()
+            try:
+                row = conn.execute(
+                    "SELECT file_name FROM cache_entries WHERE token_hash = ?",
+                    (token_hash,),
+                ).fetchone()
+                assert row is not None
+                file_path = mgr.cache_dir / row[0]
+            finally:
+                mgr._pool.put(conn)
+
+            # Delete the file externally
+            assert file_path.exists()
+            file_path.unlink()
+            assert not file_path.exists()
+
+            # Fetch should detect missing file, clean up DB, return None
+            result = mgr.fetch(tokens)
+            assert result is None
+
+            # DB row should be cleaned up
+            conn = mgr._pool.get()
+            try:
+                row = conn.execute(
+                    "SELECT 1 FROM cache_entries WHERE token_hash = ?",
+                    (token_hash,),
+                ).fetchone()
+                assert row is None
+            finally:
+                mgr._pool.put(conn)
+        finally:
+            mgr.shutdown()
+
+    def test_shutdown_flush_preserves_standard_cache_type(self):
+        """Shutdown flush must not demote queued system/user cache entries."""
+        tmpdir = tempfile.mkdtemp(prefix="vmlx_disk_cache_test_")
+        mgr = _create_manager(tmpdir)
+        did_shutdown = False
+        try:
+            mgr._stop_event.set()
+            mgr._writer_thread.join(timeout=2.0)
+
+            seen = {}
+
+            def fake_write_cache(token_hash, tokens, cache_data, metadata, cache_type="assistant"):
+                seen["args"] = (token_hash, tokens, cache_data, metadata, cache_type)
+
+            mgr._write_cache = fake_write_cache
+            mgr._write_queue.put(("hash", [1, 2, 3], ["data"], {"m": 1}, "system"))
+
+            mgr.shutdown()
+            did_shutdown = True
+
+            assert seen["args"][-1] == "system"
+        finally:
+            if not did_shutdown:
+                mgr.shutdown()
+
+    def test_shutdown_flush_preserves_tq_native_cache_type(self):
+        """Shutdown flush must pass cache_type through TQ-native finalization."""
+        tmpdir = tempfile.mkdtemp(prefix="vmlx_disk_cache_test_")
+        mgr = _create_manager(tmpdir)
+        did_shutdown = False
+        try:
+            mgr._stop_event.set()
+            mgr._writer_thread.join(timeout=2.0)
+
+            seen = {}
+
+            def fake_finalize_tq_native(
+                token_hash,
+                tokens,
+                tmp_path_str,
+                file_name,
+                cache_type="assistant",
+            ):
+                seen["args"] = (
+                    token_hash,
+                    tokens,
+                    tmp_path_str,
+                    file_name,
+                    cache_type,
+                )
+
+            mgr._finalize_tq_native = fake_finalize_tq_native
+            mgr._write_queue.put(
+                ("__tq_native__", "hash", [1, 2, 3], "tmp.safetensors", "cache.safetensors", "user")
+            )
+
+            mgr.shutdown()
+            did_shutdown = True
+
+            assert seen["args"][-1] == "user"
+        finally:
+            if not did_shutdown:
+                mgr.shutdown()

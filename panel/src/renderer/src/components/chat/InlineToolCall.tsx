@@ -1,0 +1,306 @@
+import { useState, useMemo, useEffect } from 'react'
+import { useTranslation } from '../../i18n'
+import { Check, X, Square, ChevronRight, Loader2 } from 'lucide-react'
+import { parseToolArgs, getToolSummary, formatJson } from './chat-utils'
+import { formatDurationMs, useElapsedSeconds } from './useElapsedSeconds'
+
+export interface InlineToolGroup {
+  name: string
+  statuses: Array<{ phase: string; toolName: string; toolCallId?: string; detail?: string; iteration?: number; timestamp?: number }>
+}
+
+interface InlineToolCallProps {
+  group: InlineToolGroup
+  isStreaming: boolean
+}
+
+export function InlineToolCall({ group, isStreaming }: InlineToolCallProps) {
+  const [userToggled, setUserToggled] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+
+  // A FAILED call explains itself; a successful one stays compact. Measured
+  // live 2026-08-16: a stale Working Directory made dots3 emit ten `List .`
+  // calls that all failed, and the user saw ten collapsed "failed" chips and
+  // an empty answer — while the executor's own actionable text ("The
+  // configured working directory does not exist: … Set an existing folder in
+  // Chat Settings → Built-in Coding Tools → Working Directory") sat one
+  // unexplained click away.
+  //
+  // This runs as an effect, not a useState initialiser: the card mounts while
+  // the call is still `calling`, so the error phase arrives on a LATER render
+  // and an initial value would never see it. An explicit click wins forever
+  // after, so the noise can be collapsed once it has been read.
+  const hasError = group.statuses.some(s => s.phase === 'error')
+  useEffect(() => {
+    if (hasError && !userToggled) setExpanded(true)
+  }, [hasError, userToggled])
+
+  if (group.statuses.length === 0) return null
+
+  const lastPhase = group.statuses[group.statuses.length - 1]
+  const isDone = lastPhase.phase === 'result' || lastPhase.phase === 'error' || lastPhase.phase === 'done'
+  const isError = group.statuses.some(s => s.phase === 'error')
+  const callingStatus = group.statuses.find(s => s.phase === 'calling')
+  const resultStatus = group.statuses.find(s => s.phase === 'result' || s.phase === 'error')
+  const { t } = useTranslation()
+  const args = useMemo(() => parseToolArgs(callingStatus?.detail), [callingStatus?.detail])
+  const summary = useMemo(() => getToolSummary(group.name, args), [group.name, args])
+  const iteration = callingStatus?.iteration
+  // Long-running tool feedback: real elapsed time from the producer's own
+  // status timestamps (executing, else calling) while the call is open, and
+  // the measured duration once a result/error arrived. No percentages are
+  // shown because the executor reports none; a legacy row without timestamps
+  // keeps the spinner only.
+  const executingStatus = group.statuses.find(s => s.phase === 'executing')
+  const startAt = executingStatus?.timestamp ?? callingStatus?.timestamp
+  const endAt = resultStatus?.timestamp
+  const elapsed = useElapsedSeconds(startAt, !isDone && isStreaming)
+  const durationMs = isDone && startAt != null && endAt != null && endAt >= startAt ? endAt - startAt : null
+
+  return (
+    <div
+      data-vmlx-proof-tool-card="inline"
+      data-vmlx-proof-tool-name={group.name}
+      data-vmlx-proof-tool-call-id={callingStatus?.toolCallId || ''}
+      data-vmlx-proof-tool-phase={lastPhase.phase}
+      data-vmlx-proof-tool-elapsed-s={!isDone && elapsed != null ? elapsed : undefined}
+      data-vmlx-proof-tool-duration-ms={durationMs != null ? durationMs : undefined}
+      className={`my-1.5 rounded-lg border overflow-hidden transition-all duration-150 ${
+      !isDone && isStreaming ? 'border-warning/40 border-l-warning border-l-2' : 'border-border/60'
+    } bg-popover/80`}>
+      <button
+        onClick={() => { setUserToggled(true); setExpanded(!expanded) }}
+        className="w-full px-2.5 py-1.5 flex items-center gap-1.5 text-xs hover:bg-accent/30 transition-colors"
+      >
+        {/* Status indicator */}
+        {isDone ? (
+          isError
+            ? <X className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
+            : <Check className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+        ) : isStreaming ? (
+          <Loader2 className="h-3.5 w-3.5 text-warning animate-spin flex-shrink-0" />
+        ) : (
+          <Square className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+        )}
+
+        {/* Tool label */}
+        <span className="font-medium text-foreground/90">{summary.label}</span>
+
+        {/* Context (file path, command, etc.) */}
+        {summary.context && (
+          <span className="font-mono text-muted-foreground truncate" title={summary.context}>
+            {summary.context}
+          </span>
+        )}
+
+        {/* Iteration badge */}
+        {iteration != null && iteration > 1 && (
+          <span className="px-1.5 py-0.5 rounded text-[10px] bg-accent text-muted-foreground flex-shrink-0">
+            #{iteration}
+          </span>
+        )}
+
+        {/* Phase label (only when not done) */}
+        {!isDone && (
+          <span className="text-muted-foreground text-[11px] flex-shrink-0">
+            {!isStreaming ? 'interrupted' :
+              lastPhase.phase === 'calling' ? 'detected' :
+              lastPhase.phase === 'asking' ? 'waiting\u2026' :
+              lastPhase.phase === 'executing' ? 'running\u2026' : ''}
+            {isStreaming && elapsed != null && elapsed >= 1 && lastPhase.phase !== 'asking' ? ` ${elapsed}s` : ''}
+          </span>
+        )}
+
+        {/* Measured duration of a completed call */}
+        {isDone && durationMs != null && (
+          <span className="text-muted-foreground/70 text-[10px] flex-shrink-0" title={t('chat.inlineTool.durationMeasuredTitle')}>
+            {formatDurationMs(durationMs)}
+          </span>
+        )}
+
+        {/* Error label */}
+        {isError && <span className="text-destructive text-[11px] flex-shrink-0">{t('chat.inlineTool.failed')}</span>}
+
+        <ChevronRight className={`ml-auto h-3 w-3 text-muted-foreground/50 flex-shrink-0 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`} />
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border/40">
+          <ToolCallBody
+            toolName={group.name}
+            args={args}
+            callingDetail={callingStatus?.detail}
+            resultDetail={resultStatus?.detail}
+            isError={isError}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Renders the expanded body content — dispatches to tool-specific renderers */
+export function ToolCallBody({ toolName, args, callingDetail, resultDetail, isError }: {
+  toolName: string
+  args: Record<string, any> | null
+  callingDetail?: string
+  resultDetail?: string
+  isError: boolean
+}) {
+  // Failed or malformed calls must show their original JSON/error, not a diff
+  // implying a successful edit. Validate before passing untrusted values to
+  // string operations or React children; model schemas are not runtime types.
+  const preview = !isError && args && typeof args.path === 'string'
+  // Edit tools: show diff
+  if (preview && toolName === 'edit_file' && typeof args.search_text === 'string' && typeof args.replacement_text === 'string') {
+    return (
+      <div className="px-2.5 py-2">
+        {args.path && <div className="text-[10px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}</div>}
+        <DiffView oldText={args.search_text} newText={args.replacement_text} />
+        {resultDetail && (
+          <div className="mt-1.5 text-[11px] text-muted-foreground/70">{resultDetail}</div>
+        )}
+      </div>
+    )
+  }
+
+  // Insert text: show what's being inserted
+  if (preview && toolName === 'insert_text' && typeof args.text === 'string' && Number.isInteger(args.line)) {
+    return (
+      <div className="px-2.5 py-2">
+        {args.path && <div className="text-[10px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}:{args.line}</div>}
+        <DiffView oldText="" newText={args.text} />
+        {resultDetail && <div className="mt-1.5 text-[11px] text-muted-foreground/70">{resultDetail}</div>}
+      </div>
+    )
+  }
+
+  // Replace lines: show what's being replaced
+  if (preview && toolName === 'replace_lines' && typeof args.text === 'string' && Number.isInteger(args.start_line) && Number.isInteger(args.end_line)) {
+    return (
+      <div className="px-2.5 py-2">
+        {args.path && <div className="text-[10px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}:{args.start_line}-{args.end_line}</div>}
+        <DiffView oldText="" newText={args.text} />
+        {resultDetail && <div className="mt-1.5 text-[11px] text-muted-foreground/70">{resultDetail}</div>}
+      </div>
+    )
+  }
+
+  // Batch edit: show each edit as a diff
+  if (preview && toolName === 'batch_edit' && Array.isArray(args.edits) && args.edits.every((edit: unknown) =>
+    edit !== null && typeof edit === 'object' && 'search_text' in edit && 'replacement_text' in edit &&
+    typeof edit.search_text === 'string' && typeof edit.replacement_text === 'string')) {
+    return (
+      <div className="px-2.5 py-2 space-y-2">
+        {args.path && <div className="text-[10px] text-muted-foreground/70 font-mono">{args.path}</div>}
+        {args.edits.map((edit: any, i: number) => (
+          <DiffView key={i} oldText={edit.search_text} newText={edit.replacement_text} />
+        ))}
+        {resultDetail && <div className="mt-1.5 text-[11px] text-muted-foreground/70">{resultDetail}</div>}
+      </div>
+    )
+  }
+
+  // Command tools: show command + output
+  if (!isError && (toolName === 'run_command' || toolName === 'git' || toolName === 'spawn_process') && typeof args?.command === 'string') {
+    return (
+      <div className="px-2.5 py-2">
+        <pre className="text-[11px] font-mono text-foreground/80 bg-background/50 rounded px-2 py-1 mb-1.5 overflow-x-auto">
+          <span className="text-muted-foreground">$ </span>{toolName === 'git' ? `git ${args.command}` : args.command}
+        </pre>
+        {resultDetail && (
+          <pre className="text-[11px] text-muted-foreground bg-background/50 rounded px-2 py-1 overflow-x-auto max-h-[400px] overflow-y-auto whitespace-pre-wrap break-words">
+            {resultDetail}
+          </pre>
+        )}
+      </div>
+    )
+  }
+
+  // Write file: show content preview
+  if (preview && toolName === 'write_file' && typeof args.content === 'string') {
+    return (
+      <div className="px-2.5 py-2">
+        {args.path && <div className="text-[10px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}</div>}
+        <DiffView oldText="" newText={args.content} />
+        {resultDetail && <div className="mt-1.5 text-[11px] text-muted-foreground/70">{resultDetail}</div>}
+      </div>
+    )
+  }
+
+  // Read file: show file content from result
+  if (toolName === 'read_file' && resultDetail) {
+    return (
+      <div className="px-2.5 py-2">
+        <pre className="text-[11px] text-muted-foreground bg-background/50 rounded px-2 py-1 overflow-x-auto max-h-[400px] overflow-y-auto whitespace-pre-wrap break-words">
+          {resultDetail}
+        </pre>
+      </div>
+    )
+  }
+
+  // Default: show args + result
+  return (
+    <div className="px-2.5 pb-1.5 text-xs">
+      {callingDetail && (
+        <div className="mt-1">
+          <span className="text-muted-foreground text-[10px] uppercase">args</span>
+          <pre className="text-[11px] text-muted-foreground bg-background/50 rounded px-2 py-1 overflow-x-auto max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words">
+            {formatJson(callingDetail)}
+          </pre>
+        </div>
+      )}
+      {resultDetail && (
+        <div className="mt-1">
+          <span className={`text-[10px] uppercase ${isError ? 'text-destructive' : 'text-muted-foreground'}`}>
+            {isError ? 'error' : 'result'}
+          </span>
+          <pre className="text-[11px] text-muted-foreground bg-background/50 rounded px-2 py-1 overflow-x-auto max-h-[400px] overflow-y-auto whitespace-pre-wrap break-words">
+            {resultDetail}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Side-by-side diff view: red for removed, green for added */
+function DiffView({ oldText, newText }: { oldText: string; newText: string }) {
+  const oldLines = oldText ? oldText.split('\n') : []
+  const newLines = newText ? newText.split('\n') : []
+  const hasOld = oldLines.length > 0 && oldText.length > 0
+  const hasNew = newLines.length > 0 && newText.length > 0
+
+  return (
+    <div className="rounded-lg border border-border/40 overflow-hidden text-[11px] font-mono">
+      <div className="flex">
+        {/* Old (removed) — left side */}
+        {hasOld && (
+          <div className={`${hasNew ? 'w-1/2 border-r border-border/30' : 'w-full'} overflow-x-auto`}>
+            <div className="px-1.5 py-0.5 bg-destructive/10 text-destructive/60 text-[10px] border-b border-border/30">removed</div>
+            <div className="max-h-[400px] overflow-y-auto">
+              {oldLines.map((line, i) => (
+                <div key={i} className="px-2 py-px bg-destructive/5 text-destructive/80 whitespace-pre-wrap break-all">
+                  <span className="text-destructive/40 select-none mr-1">-</span>{line}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {/* New (added) — right side */}
+        {hasNew && (
+          <div className={`${hasOld ? 'w-1/2' : 'w-full'} overflow-x-auto`}>
+            <div className="px-1.5 py-0.5 bg-primary/10 text-primary/60 text-[10px] border-b border-border/30">added</div>
+            <div className="max-h-[400px] overflow-y-auto">
+              {newLines.map((line, i) => (
+                <div key={i} className="px-2 py-px bg-primary/5 text-primary/80 whitespace-pre-wrap break-all">
+                  <span className="text-primary/40 select-none mr-1">+</span>{line}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

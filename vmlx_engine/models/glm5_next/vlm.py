@@ -1,0 +1,299 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import os
+
+import mlx.core as mx
+import mlx.nn as nn
+from mlx_vlm.models.base import InputEmbeddingsFeatures, LanguageModelOutput
+
+logger = logging.getLogger(__name__)
+
+from .config import ModelConfig
+from .glm5_next import Model as TextModel
+from .vision import VisionModel
+
+_LOG = logging.getLogger(__name__)
+_MEDIA_TRACE_MAX_ELEMENTS = 4 * 1024 * 1024
+
+
+def _trace_media_scatter(features, merged, mask, modality, grid, input_dtype):
+    """Opt-in bounded fingerprints, never media contents or a runtime policy."""
+    if os.environ.get("VMLX_GLM5_MEDIA_TRACE", "0") != "1":
+        return
+    payload = {
+        "modality": modality,
+        "features_shape": list(features.shape),
+        "features_dtype": str(features.dtype),
+        "input_dtype": str(input_dtype),
+        "merged_dtype": str(merged.dtype),
+    }
+    if features.size > _MEDIA_TRACE_MAX_ELEMENTS:
+        payload["fingerprints"] = "skipped_element_limit"
+    else:
+        import numpy as np
+
+        # At most two 16 MiB copies; this opt-in diagnostic is deliberately
+        # not a timing path. Preserve actual features/placement without casts
+        # to the language dtype, masking changes or any semantic workaround.
+        positions = np.flatnonzero(np.array(mask)).astype(np.int32)
+        placed = merged[mx.array(positions)]
+        expected = np.array(features.astype(mx.float32))
+        actual = np.array(placed.astype(mx.float32))
+        counts = [len(expected)]
+        if grid is not None:
+            counts = []
+            for temporal, height, width in grid.tolist():
+                # Derive rows/group from the actual merged feature count,
+                # not a hardcoded patch/merge size.
+                counts.extend([int(height) * int(width)] * int(temporal))
+            divisor, remainder = divmod(sum(counts), len(expected))
+            if remainder or divisor <= 0 or any(count % divisor for count in counts):
+                counts = [len(expected)]
+            else:
+                counts = [count // divisor for count in counts]
+        groups, offset = [], 0
+        for count in counts:
+            end = offset + count
+            groups.append({
+                "rows": count,
+                "source_sha256": hashlib.sha256(expected[offset:end].tobytes()).hexdigest(),
+                "placed_sha256": hashlib.sha256(actual[offset:end].tobytes()).hexdigest(),
+            })
+            offset = end
+        payload.update(groups=groups, finite=bool(np.isfinite(expected).all()),
+                       exact_placement=bool(np.array_equal(expected, actual)))
+    _LOG.info("GLM media scatter trace: %s", json.dumps(payload, sort_keys=True))
+
+
+class LanguageModel(TextModel):
+    def __call__(
+        self,
+        inputs=None,
+        inputs_embeds=None,
+        cache=None,
+        return_hidden: bool = False,
+        **kwargs,
+    ):
+        kwargs.pop("mask", None)
+        kwargs.pop("n_to_process", None)
+        result = super().__call__(
+            inputs,
+            inputs_embeds=inputs_embeds,
+            cache=cache,
+            return_hidden=return_hidden,
+            **kwargs,
+        )
+        if return_hidden:
+            logits, hidden = result
+            return LanguageModelOutput(logits=logits, hidden_states=[hidden])
+        return LanguageModelOutput(logits=result)
+
+
+class Model(nn.Module):
+    def __init__(self, config: ModelConfig):
+        super().__init__()
+        self.config = config
+        self.model_type = config.model_type
+        from ...jangh.contract import (
+            alias_runtime_quant_keys, projection_contract, validate_format,
+        )
+
+        tq_config = {
+            "jangtq": config.jangtq,
+            "quantization": config.quantization,
+            "text_config": {"swiglu_limit": config.text_config.swiglu_limit},
+        }
+        # JANGT bundles carry a jangtq block too (codebooks of their JANGH groups) but their routed stacks follow the
+        # JANGT contract: never validate them as all-JANGH.
+        jangt = getattr(config, "jangt", None)       # absent on config-like objects that predate JANGT
+        self._jangt = bool(jangt)
+        self._jangtq2 = False if self._jangt else validate_format(tq_config)
+        if self._jangt:
+            alias_runtime_quant_keys(config.quantization)
+        if self._jangtq2:
+            # Reject malformed declarations before constructing expert arrays.
+            projection_contract(tq_config)
+            alias_runtime_quant_keys(config.quantization)
+        self.vision_tower = VisionModel(config.vision_config)
+        self.language_model = LanguageModel(config.text_config)
+        if self._jangt:
+            from ...jangt.switch import install_jangt
+
+            self.jangt_modules = install_jangt(self, {"jangt": jangt, "quantization": config.quantization,
+                                                      "swiglu_limit": config.text_config.swiglu_limit})
+            logger.info("glm5_next: %d routed stacks installed as JANGT/JANGH mixed modules", self.jangt_modules)
+        if self._jangtq2:
+            from ...jangh.install import install_jangh
+            from ...jangh.runtime_identity import GLM_FUSED_TILES
+
+            install_jangh(self, tq_config)
+            # Fused prefill for this geometry (DEFAULT ON, see runtime_identity.GLM_FUSED_TILES for the A/B): expert-tile
+            # NAX gate/up with the Hadamard-32 output epilogue. JANGH_GLM_FUSED_TILES=0 reverts to host rotation;
+            # switch._use_expert_tiles still checks the exact shapes, dtype and NAX availability per call, so a
+            # non-qualifying module falls back; a one-shot witness log names the path that ran.
+            if GLM_FUSED_TILES == "1":
+                armed = 0
+                for _path, mod in self.named_modules():
+                    if getattr(mod, "is_jangtq2", False):
+                        mod.use_expert_tiles = True
+                        mod.use_gateup_h32 = True
+                        armed += 1
+                logger.info("glm5_next: %d JANGH modules opted into expert-tile + H32 prefill (JANGH_GLM_FUSED_TILES=%s)", armed, GLM_FUSED_TILES)
+
+    def get_input_embeddings(
+        self,
+        input_ids: mx.array | None = None,
+        pixel_values: mx.array | None = None,
+        pixel_values_videos: mx.array | None = None,
+        **kwargs,
+    ):
+        if input_ids is None:
+            raise ValueError("GLM multimodal input requires input_ids")
+        inputs_embeds = self.language_model.model.embed_tokens(input_ids)
+        if pixel_values is None and pixel_values_videos is None:
+            return InputEmbeddingsFeatures(inputs_embeds=inputs_embeds)
+
+        video_region = None
+        if pixel_values_videos is not None:
+            # Native video frames use image tokens inside begin/end-of-video,
+            # not the unexpanded video placeholder. Keep historical images
+            # separate when both modalities occur in one connected request.
+            starts = mx.cumsum((input_ids == self.config.video_start_token_id).astype(mx.int32), axis=-1)
+            ends = mx.cumsum((input_ids == self.config.video_end_token_id).astype(mx.int32), axis=-1)
+            video_region = starts > ends
+
+        if pixel_values is not None:
+            grid = kwargs.get("image_grid_thw")
+            if grid is None:
+                raise ValueError("GLM image input requires image_grid_thw")
+            features = kwargs.get("cached_image_features")
+            if features is None:
+                dtype = self.vision_tower.patch_embed.proj.weight.dtype
+                features = self.vision_tower(pixel_values.astype(dtype), grid)
+            inputs_embeds = self._scatter_features(
+                inputs_embeds,
+                input_ids,
+                features,
+                self.config.image_token_id,
+                "image",
+                region=~video_region if video_region is not None else None,
+                grid=grid,
+            )
+
+        if pixel_values_videos is not None:
+            grid = kwargs.get("video_grid_thw")
+            if grid is None:
+                raise ValueError("GLM video input requires video_grid_thw")
+            dtype = self.vision_tower.patch_embed.proj.weight.dtype
+            features = self.vision_tower(pixel_values_videos.astype(dtype), grid)
+            inputs_embeds = self._scatter_features(
+                inputs_embeds,
+                input_ids,
+                features,
+                self.config.image_token_id,
+                "video",
+                region=video_region,
+                grid=grid,
+            )
+
+        return InputEmbeddingsFeatures(inputs_embeds=inputs_embeds)
+
+    @staticmethod
+    def _scatter_features(inputs_embeds, input_ids, features, token_id, modality, *, region=None, grid=None):
+        mask = input_ids == token_id
+        if region is not None:
+            mask = mask & region
+        token_count = int(mx.sum(mask).item())
+        if token_count != int(features.shape[0]):
+            raise ValueError(
+                f"GLM {modality} features and placeholders disagree: "
+                f"tokens={token_count}, features={features.shape[0]}"
+            )
+        feature_rows = mx.reshape(features, (-1, inputs_embeds.shape[-1]))
+        flat_input = inputs_embeds.reshape(-1, inputs_embeds.shape[-1])
+        flat_mask = mask.reshape(-1)
+        feature_index = mx.cumsum(flat_mask.astype(mx.int32)) - 1
+        gathered = feature_rows[mx.maximum(feature_index, 0)]
+        merged = mx.where(flat_mask[:, None], gathered, flat_input)
+        _trace_media_scatter(feature_rows, merged, flat_mask, modality, grid, inputs_embeds.dtype)
+        return merged.reshape(inputs_embeds.shape)
+
+    def __call__(
+        self,
+        input_ids,
+        pixel_values=None,
+        pixel_values_videos=None,
+        cache=None,
+        **kwargs,
+    ):
+        embeddings = self.get_input_embeddings(
+            input_ids,
+            pixel_values=pixel_values,
+            pixel_values_videos=pixel_values_videos,
+            **kwargs,
+        )
+        return self.language_model(
+            input_ids,
+            inputs_embeds=embeddings.inputs_embeds,
+            cache=cache,
+            **kwargs,
+        )
+
+    def sanitize(self, weights):
+        text_layers = self.config.text_config.num_hidden_layers
+        mtp_prefix = f"model.layers.{text_layers}."
+        sanitized = {}
+        for key, value in weights.items():
+            if key.startswith("visual."):
+                key = "vision_tower." + key[len("visual.") :]
+            elif key.startswith("model.visual."):
+                key = "vision_tower." + key[len("model.visual.") :]
+            elif key.startswith(mtp_prefix):
+                if hasattr(self.language_model, "mtp"):
+                    key = "language_model.mtp." + key[len(mtp_prefix) :]
+                else:
+                    continue
+            elif key.startswith("model.") or key.startswith("lm_head."):
+                key = "language_model." + key
+            sanitized[key] = value
+        return self.vision_tower.sanitize(sanitized)
+
+    def load_weights(self, file_or_weights, strict=True):
+        # Generic MLX strict loading checks shape but permits dtype replacement.
+        # Sharded loading may also disable strict shape checks.
+        if not self._jangtq2:
+            return super().load_weights(file_or_weights, strict=strict)
+        from os import PathLike
+
+        if isinstance(file_or_weights, (str, PathLike)):
+            weights = list(mx.load(str(file_or_weights)).items())
+        else:
+            weights = list(file_or_weights)
+        from ...jangh.payload import validate_payload
+
+        validate_payload(self, weights)
+        return super().load_weights(weights, strict=strict)
+
+    def prepare_acceleration(self):
+        return self.language_model.prepare_acceleration()
+
+    def mtp_forward(self, *args, **kwargs):
+        return self.language_model.mtp_forward(*args, **kwargs)
+
+    def make_mtp_cache(self):
+        return self.language_model.make_mtp_cache()
+
+    @property
+    def layers(self):
+        return self.language_model.layers
+
+    @property
+    def quant_predicate(self):
+        return getattr(self.language_model, "quant_predicate", None)
+
+    @property
+    def cast_predicate(self):
+        return getattr(self.language_model, "cast_predicate", None)

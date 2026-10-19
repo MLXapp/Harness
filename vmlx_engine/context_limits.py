@@ -1,0 +1,218 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Declared-context bookkeeping shared by both schedulers.
+
+The field-failure class this prevents (2026-08-15 directive, observed live
+in another inference stack): prompt 5,875 + generated 26,893 tokens hit the
+model's context ceiling exactly, the run was reported as a truncation with
+no explanation, and the user diagnosed a GPU failure. Max OUTPUT and max
+CONTEXT are separate budgets; when a request's output budget would push
+generation past the model's declared positional ceiling, the only sound
+behaviors are a clamp WITH a logged notice (default) or the caller fixing
+the request. Generating past the declared ceiling is silent RoPE
+out-of-distribution garbage.
+
+The server stamps the loaded bundle's declared ceiling after every load;
+both the text scheduler and the MLLM scheduler clamp through the ONE
+function below at admission, where the true tokenized prompt length is
+known (route-level character estimates are forbidden — see the DSV4
+false-rejection note in server.py).
+
+``VMLX_CONTEXT_OUTPUT_CLAMP=0`` disables the clamp (diagnostics only —
+accepts past-ceiling generation quality risk). Families that legitimately
+extend context (rope-scaled serving) declare the extended ceiling in their
+bundle config, which is what the server reads.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import threading
+
+from .errors import PromptTooLongError
+
+logger = logging.getLogger(__name__)
+
+_lock = threading.Lock()
+_declared_context_tokens = 0
+
+
+def set_declared_context_tokens(value: int | None) -> None:
+    """Record the loaded bundle's declared context ceiling (0 = unknown)."""
+    global _declared_context_tokens
+    try:
+        normalized = max(0, int(value or 0))
+    except (TypeError, ValueError):
+        normalized = 0
+    with _lock:
+        _declared_context_tokens = normalized
+
+
+def get_declared_context_tokens() -> int:
+    with _lock:
+        return _declared_context_tokens
+
+
+def _clamp_enabled() -> bool:
+    raw = os.environ.get(
+        "VMLX_CONTEXT_OUTPUT_CLAMP",
+        os.environ.get("VMLINUX_CONTEXT_OUTPUT_CLAMP", "1"),
+    )
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def clamp_output_to_declared_context(
+    prompt_tokens: int,
+    requested_max_tokens: int | None,
+    *,
+    request_id: str = "?",
+) -> int | None:
+    """Bound an output budget by (declared context − prompt length).
+
+    Returns the possibly-clamped max_tokens. A binding clamp is LOGGED —
+    the whole point is that context exhaustion must never be silent. When
+    the declared ceiling is unknown (0) or the clamp is disabled, the
+    requested value passes through unchanged. A prompt already at/over the
+    ceiling cannot admit a positive output budget: raise the existing typed
+    prompt error before cache lookup/prefill, rather than returning a zero
+    budget or allowing generation beyond the declared limit.
+    """
+    if requested_max_tokens is None:
+        return None
+    declared = get_declared_context_tokens()
+    if declared <= 0 or not _clamp_enabled():
+        return requested_max_tokens
+    try:
+        prompt_count = int(prompt_tokens or 0)
+        requested = int(requested_max_tokens)
+    except (TypeError, ValueError):
+        return requested_max_tokens
+    remaining = declared - prompt_count
+    if remaining <= 0:
+        if requested > 0:
+            raise PromptTooLongError(
+                prompt_count,
+                declared - 1,
+                source=PromptTooLongError.DECLARED_CONTEXT_SOURCE,
+                request_id=request_id,
+            )
+        return requested_max_tokens
+    if requested <= remaining:
+        return requested
+    logger.warning(
+        "Request %s: prompt (%d tokens) + max_tokens (%d) exceeds the "
+        "model's declared context of %d tokens; output budget clamped to "
+        "%d. finish_reason=length at that point means CONTEXT EXHAUSTION, "
+        "not an output-limit stop. Shorten the prompt/history or serve a "
+        "larger-context bundle. VMLX_CONTEXT_OUTPUT_CLAMP=0 disables this "
+        "clamp (accepts past-ceiling generation quality risk).",
+        request_id,
+        prompt_count,
+        requested,
+        declared,
+        remaining,
+    )
+    record_context_clamp(
+        request_id,
+        prompt_tokens=prompt_count,
+        requested_max_tokens=requested,
+        clamped_max_tokens=remaining,
+        declared_context_tokens=declared,
+    )
+    return remaining
+
+
+# ---------------------------------------------------------------------------
+# Per-request clamp registry (feeds the response-surface notice, #175).
+# The admission-time clamp runs in the scheduler; the response builder runs
+# later on the API path. Record binding clamps by request id so finalize can
+# attach an explicit context_exhausted signal instead of a bare length stop.
+# Bounded FIFO so abandoned requests cannot grow the map.
+# ---------------------------------------------------------------------------
+
+_CLAMP_REGISTRY_MAX = 256
+_clamped_requests: "dict[str, dict[str, int]]" = {}
+_clamped_order: "list[str]" = []
+
+
+def record_context_clamp(
+    request_id: str,
+    *,
+    prompt_tokens: int,
+    requested_max_tokens: int,
+    clamped_max_tokens: int,
+    declared_context_tokens: int,
+) -> None:
+    with _lock:
+        if request_id not in _clamped_requests:
+            _clamped_order.append(request_id)
+            while len(_clamped_order) > _CLAMP_REGISTRY_MAX:
+                stale = _clamped_order.pop(0)
+                _clamped_requests.pop(stale, None)
+        _clamped_requests[request_id] = {
+            "prompt_tokens": int(prompt_tokens),
+            "requested_max_tokens": int(requested_max_tokens),
+            "clamped_max_tokens": int(clamped_max_tokens),
+            "declared_context_tokens": int(declared_context_tokens),
+        }
+
+
+def pop_context_clamp(request_id: str) -> "dict[str, int] | None":
+    """Return-and-clear the clamp record for a finishing request."""
+    with _lock:
+        record = _clamped_requests.pop(request_id, None)
+        if record is not None:
+            try:
+                _clamped_order.remove(request_id)
+            except ValueError:
+                pass
+        return record
+
+
+def peek_context_clamp(request_id: str) -> "dict[str, int] | None":
+    """Non-destructive read for surfaces derived multiple times per request
+    (the responses terminal state); entries expire via the FIFO bound."""
+    with _lock:
+        record = _clamped_requests.get(request_id)
+        return dict(record) if record is not None else None
+
+
+# ---------------------------------------------------------------------------
+# Effort-substitution registry (#175, same bounded pop-on-finalize pattern):
+# when an out-of-set reasoning_effort is coerced to a stamped tier, the
+# response should say which tier actually ran.
+# ---------------------------------------------------------------------------
+
+_effort_substitutions: "dict[str, dict[str, object]]" = {}
+_effort_order: "list[str]" = []
+
+
+def record_effort_substitution(
+    request_id: str,
+    *,
+    requested_effort: str,
+    effective_effort: str,
+    stamped_levels: "tuple[str, ...] | list[str]",
+) -> None:
+    with _lock:
+        if request_id not in _effort_substitutions:
+            _effort_order.append(request_id)
+            while len(_effort_order) > _CLAMP_REGISTRY_MAX:
+                stale = _effort_order.pop(0)
+                _effort_substitutions.pop(stale, None)
+        _effort_substitutions[request_id] = {
+            "requested_effort": str(requested_effort),
+            "effective_effort": str(effective_effort),
+            "stamped_levels": [str(level) for level in stamped_levels],
+        }
+
+
+def pop_effort_substitution(request_id: str) -> "dict[str, object] | None":
+    with _lock:
+        record = _effort_substitutions.pop(request_id, None)
+        if record is not None:
+            try:
+                _effort_order.remove(request_id)
+            except ValueError:
+                pass
+        return record

@@ -1,0 +1,809 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useToast } from '../Toast'
+import { normalizeHfEndpointSetting } from '../../../../shared/hfSettings'
+import { HF_MODEL_FEED_AUTHORS, type HfModelFeedSort } from '../../../../shared/hfModelFeed'
+import { useTranslation } from '../../i18n'
+import type { DownloadModelType } from '../../../../shared/modelDiscoveryNavigation'
+
+interface HFModel {
+  id: string
+  author: string
+  downloads: number
+  likes: number
+  lastModified: string
+  createdAt?: string
+  tags: string[]
+  pipelineTag?: string
+  size?: string
+  note?: string
+}
+
+interface DownloadTabProps {
+  onDownloadComplete: () => void
+  initialModelType?: DownloadModelType
+}
+
+function formatNumber(n: number): string {
+  if (n === undefined || n === null || isNaN(n)) return '0'
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return n.toString()
+}
+
+function timeAgo(dateStr: string | null | undefined, t: (key: string, params?: Record<string, string | number>) => string): string {
+  if (!dateStr) return ''
+  const diff = Date.now() - new Date(dateStr).getTime()
+  if (isNaN(diff)) return ''
+  const days = Math.floor(diff / 86400000)
+  if (days < 1) return t('sessions.download.timeToday')
+  if (days < 30) return t('chat.list.daysAgo', { n: days })
+  if (days < 365) return t('sessions.download.timeMonthsAgo', { n: Math.floor(days / 30) })
+  return t('sessions.download.timeYearsAgo', { n: Math.floor(days / 365) })
+}
+
+type CollectionTab = 'jang' | 'uncensored'
+
+export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: DownloadTabProps) {
+  const { t } = useTranslation()
+  const { showToast } = useToast()
+  const [searchQuery, setSearchQuery] = useState('')
+  const [modelType, setModelType] = useState<DownloadModelType>(initialModelType)
+  const [sortBy, setSortBy] = useState<string>('downloads')
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
+  const [searchResults, setSearchResults] = useState<HFModel[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Collection tabs (JANG / Uncensored)
+  const [collectionTab, setCollectionTab] = useState<CollectionTab>('jang')
+  const collectionKey = modelType === 'image' ? 'image:mflux' : `text:${collectionTab}`
+  const [feedSort, setFeedSort] = useState<HfModelFeedSort>('createdAt')
+  const [feedRefresh, setFeedRefresh] = useState(0)
+  const [collectionModels, setCollectionModels] = useState<Record<string, HFModel[]>>({})
+  const [loadingCollectionTabs, setLoadingCollectionTabs] = useState<Record<string, boolean>>({})
+  // ms#68: distinguish a genuinely empty HF collection from a fetch
+  // failure (no internet, HF down, HF rate-limited, slug outdated).
+  // Both previously showed the same "No models in this collection"
+  // text — the user had no way to tell whether to retry.
+  const [collectionErrors, setCollectionErrors] = useState<Record<string, string>>({})
+
+  // Download state: track which repos are downloading/queued
+  const [downloadingRepos, setDownloadingRepos] = useState<Set<string>>(new Set())
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+
+  // Download directory
+  const [downloadDir, setDownloadDir] = useState('')
+
+  // HuggingFace token
+  const [hfToken, setHfToken] = useState('')
+  const [hasSavedHfToken, setHasSavedHfToken] = useState(false)
+  const [showHfToken, setShowHfToken] = useState(false)
+  const [hfTokenSaving, setHfTokenSaving] = useState(false)
+
+  // ms#75: HuggingFace mirror endpoint — users in mainland China (or
+  // behind a restrictive network) can point this at hf-mirror.com or
+  // any HF-protocol-compatible proxy to fix slow/failed downloads.
+  // Empty = default to https://huggingface.co. Applies to downloads
+  // (via an explicit worker endpoint argument) AND all HF API calls
+  // (search, collection fetch, README fetch) via fetchHfPath() in the
+  // main process.
+  const [hfEndpoint, setHfEndpoint] = useState('')
+  const [hfEndpointSaving, setHfEndpointSaving] = useState(false)
+
+  // Track locally available models for "already downloaded" detection
+  const [localModelIds, setLocalModelIds] = useState<Set<string>>(new Set())
+
+  // Split layout: selected model for right-side README panel
+  const [selectedModel, setSelectedModel] = useState<HFModel | null>(null)
+  const [selectedReadme, setSelectedReadme] = useState<string | null>(null)
+  const [loadingReadme, setLoadingReadme] = useState(false)
+
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchRevision = useRef(0)
+  useEffect(() => () => {
+    searchRevision.current++
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+  }, [])
+  const readmeRequestRef = useRef(0)
+  const onDownloadCompleteRef = useRef(onDownloadComplete)
+  onDownloadCompleteRef.current = onDownloadComplete
+
+  // Load recommended models, download dir, and HF token on mount
+  useEffect(() => {
+    window.api.models.getDownloadDir().then(setDownloadDir)
+    window.api.settings.has('hf_api_key').then((exists: boolean) => {
+      setHasSavedHfToken(exists)
+    })
+    // ms#75: load saved mirror endpoint
+    window.api.settings.get('hf_endpoint').then((val: string | null) => {
+      if (val) setHfEndpoint(val)
+    })
+    window.api.models.scan().then((models: any[]) => {
+      // Build a set of local model identifiers for matching against HF repo IDs
+      const ids = new Set<string>()
+      for (const m of models) {
+        if (m.id) ids.add(m.id)
+        if (m.path) {
+          const parts = m.path.replace(/\\/g, '/').split('/')
+          if (parts.length >= 2) {
+            ids.add(`${parts[parts.length - 2]}/${parts[parts.length - 1]}`)
+          }
+        }
+      }
+      setLocalModelIds(ids)
+    }).catch((err) => console.error('Failed to scan models:', err))
+    // Check for any in-progress downloads (activeAll covers concurrent downloads)
+    window.api.models.getDownloadStatus().then((status: any) => {
+      const repos = new Set<string>()
+      for (const aj of status.activeAll || []) repos.add(aj.repoId)
+      if (!repos.size && status.active) repos.add(status.active.repoId) // fallback for older IPC
+      for (const q of status.queue || []) repos.add(q.repoId)
+      setDownloadingRepos(repos)
+    }).catch((err) => console.error('Failed to get download status:', err))
+
+    // Cleanup search debounce timer on unmount
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    }
+  }, [])
+
+  // Refresh only the visible discovery feed. Ignore replies from a previous
+  // author/sort/type or unmounted page; never overwrite a newer selection.
+  useEffect(() => {
+    if (searchQuery.trim()) return
+    let cancelled = false
+    let inFlight = false
+    const tab = collectionTab
+    const key = collectionKey
+    const refresh = async () => {
+      if (inFlight) return
+      inFlight = true
+      setLoadingCollectionTabs(prev => ({ ...prev, [key]: true }))
+      setCollectionErrors(prev => { const next = { ...prev }; delete next[key]; return next })
+      try {
+        const models = modelType === 'text'
+          ? await window.api.models.getRecentModels(HF_MODEL_FEED_AUTHORS[tab], feedSort)
+          : await window.api.models.searchHF('', 'lastModified', 'desc', 'image')
+        if (!cancelled) setCollectionModels(prev => ({ ...prev, [key]: models }))
+      } catch (err) {
+        if (!cancelled) setCollectionErrors(prev => ({ ...prev, [key]: String(err instanceof Error ? err.message : err) }))
+      } finally {
+        inFlight = false
+        if (!cancelled) setLoadingCollectionTabs(prev => ({ ...prev, [key]: false }))
+      }
+    }
+    void refresh()
+    const timer = setInterval(() => { if (!document.hidden) void refresh() }, 5 * 60_000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [collectionTab, collectionKey, modelType, feedSort, feedRefresh, searchQuery])
+
+  // Listen for download events
+  useEffect(() => {
+    const unsubStarted = window.api.models.onDownloadStarted((data: any) => {
+      setDownloadingRepos(prev => new Set(prev).add(data.repoId))
+    })
+
+    const unsubComplete = window.api.models.onDownloadComplete((data: any) => {
+      setDownloadingRepos(prev => {
+        const next = new Set(prev)
+        next.delete(data.repoId)
+        return next
+      })
+      if (data.status === 'complete') {
+        showToast('success', t('sessions.download.toast.completeTitle', { repo: data.repoId }))
+        onDownloadCompleteRef.current()
+        // Refresh local model list so the "Downloaded" badge appears immediately
+        window.api.models.scan().then((models: any[]) => {
+          const ids = new Set<string>()
+          for (const m of models) {
+            if (m.id) ids.add(m.id)
+            if (m.path) {
+              const parts = m.path.replace(/\\/g, '/').split('/')
+              if (parts.length >= 2) {
+                ids.add(`${parts[parts.length - 2]}/${parts[parts.length - 1]}`)
+              }
+            }
+          }
+          setLocalModelIds(ids)
+        }).catch((err) => console.error('Failed to refresh models after download:', err))
+      }
+    })
+
+    const unsubError = window.api.models.onDownloadError((data: any) => {
+      setDownloadingRepos(prev => {
+        const next = new Set(prev)
+        next.delete(data.repoId)
+        return next
+      })
+      const errMsg = `${data.repoId.split('/').pop()}: ${data.error}`
+      setDownloadError(errMsg)
+      if (data.gated) {
+        showToast('error', t('sessions.download.toast.gatedTitle'), t('sessions.download.toast.gatedBody'))
+      } else {
+        showToast('error', t('sessions.download.toast.failedTitle'), errMsg)
+      }
+    })
+
+    return () => {
+      unsubStarted()
+      unsubComplete()
+      unsubError()
+    }
+  }, [])
+
+  // Debounced search
+  const doSearch = useCallback(async (query: string, sort: string, dir: 'desc' | 'asc', type: 'text' | 'image' = 'text') => {
+    const revision = ++searchRevision.current
+    if (!query.trim()) {
+      setSearchResults([])
+      setError(null)
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const results = await window.api.models.searchHF(query.trim(), sort, dir, type === 'image' ? 'image' : undefined)
+      if (revision !== searchRevision.current) return
+      setSearchResults(results)
+    } catch (err) {
+      if (revision === searchRevision.current) {
+        setError((err as Error).message)
+        setSearchResults([])
+      }
+    } finally {
+      if (revision === searchRevision.current) setLoading(false)
+    }
+  }, [])
+
+  const handleSearch = useCallback((query: string) => {
+    searchRevision.current++
+    setSearchResults([])
+    setLoading(false)
+    setSearchQuery(query)
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    if (!query.trim()) {
+      setSearchResults([])
+      setError(null)
+      return
+    }
+    searchTimerRef.current = setTimeout(() => doSearch(query, sortBy, sortDir, modelType), 400)
+  }, [doSearch, sortBy, sortDir, modelType])
+
+  const handleSortChange = useCallback((newSort: string) => {
+    setSortBy(newSort)
+    if (searchQuery.trim()) {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+      doSearch(searchQuery, newSort, sortDir, modelType)
+    }
+  }, [doSearch, searchQuery, sortDir, modelType])
+
+  const handleModelTypeChange = useCallback((type: 'text' | 'image') => {
+    searchRevision.current++
+    setSearchResults([])
+    setSelectedModel(null)
+    setSelectedReadme(null)
+    readmeRequestRef.current++
+    setError(null)
+    setLoading(false)
+    setModelType(type)
+    if (searchQuery.trim()) {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+      doSearch(searchQuery, sortBy, sortDir, type)
+    }
+  }, [doSearch, searchQuery, sortBy, sortDir])
+
+  const handleDirToggle = useCallback(() => {
+    const newDir = sortDir === 'desc' ? 'asc' : 'desc'
+    setSortDir(newDir)
+    if (searchQuery.trim()) {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+      doSearch(searchQuery, sortBy, newDir, modelType)
+    }
+  }, [doSearch, searchQuery, sortBy, sortDir, modelType])
+
+  const handleDownload = async (repoId: string) => {
+    setDownloadError(null)
+    setDownloadingRepos(prev => new Set(prev).add(repoId))
+
+    try {
+      await window.api.models.startDownload(repoId)
+    } catch (err) {
+      setDownloadError((err as Error).message)
+      setDownloadingRepos(prev => {
+        const next = new Set(prev)
+        next.delete(repoId)
+        return next
+      })
+    }
+  }
+
+  const handleSaveHfToken = async (token: string) => {
+    setHfTokenSaving(true)
+    try {
+      if (token.trim()) {
+        await window.api.settings.set('hf_api_key', token.trim())
+      } else {
+        await window.api.settings.delete('hf_api_key')
+      }
+      setHfToken(token.trim())
+      setHasSavedHfToken(!!token.trim())
+      setFeedRefresh(value => value + 1)
+      showToast('success', token.trim() ? t('sessions.download.toast.tokenSaved') : t('sessions.download.toast.tokenRemoved'))
+    } catch (err) {
+      showToast('error', t('sessions.download.toast.tokenSaveFailed'), (err as Error).message)
+    } finally {
+      setHfTokenSaving(false)
+    }
+  }
+
+  // ms#75: save the HF mirror endpoint. Validates that the URL starts
+  // with https:// so a typo like "hf-mirror.com" (no scheme) doesn't
+  // silently break all downloads when HF_ENDPOINT is mis-configured.
+  const handleSaveHfEndpoint = async (endpoint: string) => {
+    const raw = endpoint.trim()
+    const normalized = normalizeHfEndpointSetting(raw)
+    if (raw && !normalized) {
+      showToast('error', t('sessions.download.toast.mirrorInvalid'), t('sessions.download.toast.mirrorInvalidBody'))
+      return
+    }
+    const trimmed = normalized ?? ''
+    setHfEndpointSaving(true)
+    try {
+      if (trimmed) {
+        await window.api.settings.set('hf_endpoint', trimmed)
+      } else {
+        await window.api.settings.delete('hf_endpoint')
+      }
+      setHfEndpoint(trimmed)
+      setFeedRefresh(value => value + 1)
+      showToast('success', trimmed
+        ? t('sessions.download.toast.mirrorSet', { url: trimmed })
+        : t('sessions.download.toast.mirrorCleared'))
+    } catch (err) {
+      showToast('error', t('sessions.download.toast.mirrorSaveFailed'), (err as Error).message)
+    } finally {
+      setHfEndpointSaving(false)
+    }
+  }
+
+  const handleCollectionTabChange = (tab: CollectionTab) => setCollectionTab(tab)
+  const retryCollectionFetch = () => setFeedRefresh(value => value + 1)
+
+  const handleBrowseDownloadDir = async () => {
+    const result = await window.api.models.browseDownloadDir()
+    if (!result.canceled && result.path) {
+      await window.api.models.setDownloadDir(result.path)
+      setDownloadDir(result.path)
+    }
+  }
+
+  const activeCollection = collectionModels[collectionKey] || []
+  const displayModels = searchQuery.trim() ? searchResults : activeCollection
+  const isCollectionLoading = !searchQuery.trim() && !!loadingCollectionTabs[collectionKey]
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          {t('sessions.download.intro')}
+        </p>
+        <button
+          onClick={() => window.dispatchEvent(new Event('open-download-popup'))}
+          className="text-xs px-2 py-1 border border-border rounded hover:bg-accent text-muted-foreground hover:text-foreground flex-shrink-0"
+        >
+          {t('sessions.download.viewDownloads')}
+        </button>
+      </div>
+
+      {/* Download Directory */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground whitespace-nowrap">{t('sessions.download.downloadTo')}</span>
+        <span className="text-xs font-mono truncate flex-1 text-foreground" title={downloadDir}>
+          {downloadDir}
+        </span>
+        <button
+          onClick={handleBrowseDownloadDir}
+          className="px-2 py-1 text-xs border border-border rounded hover:bg-accent whitespace-nowrap"
+        >
+          {t('sessions.download.change')}
+        </button>
+      </div>
+
+      {/* HuggingFace Token */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">{t('sessions.download.hfToken')}</span>
+          <div className="flex-1 relative">
+            <input
+                type={showHfToken ? 'text' : 'password'}
+                value={hfToken}
+                onChange={(e) => setHfToken(e.target.value)}
+                placeholder={hasSavedHfToken ? t('app.about.savedTokenPlaceholder') : t('sessions.download.hfTokenPlaceholder')}
+                className="w-full px-2 py-1 pr-16 bg-background border border-input rounded text-xs font-mono"
+              />
+            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              <button
+                onClick={() => setShowHfToken(!showHfToken)}
+                className="px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                title={showHfToken ? t('sessions.download.hideTokenTitle') : t('sessions.download.showTokenTitle')}
+              >
+                {showHfToken ? t('app.about.hide') : t('app.about.show')}
+              </button>
+            </div>
+          </div>
+          <button
+            onClick={() => handleSaveHfToken(hfToken)}
+            disabled={hfTokenSaving}
+            className="px-2 py-1 text-xs border border-border rounded hover:bg-accent whitespace-nowrap disabled:opacity-40"
+          >
+            {hfTokenSaving ? t('common.saving') : t('common.save')}
+          </button>
+        </div>
+        <p className="text-[10px] text-muted-foreground ml-14">
+          {t('sessions.download.gatedModelsNote')}{' '}
+          <a
+            href="https://huggingface.co/settings/tokens"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            {t('sessions.download.getYourToken')}
+          </a>
+        </p>
+      </div>
+
+      {/* ms#75: HuggingFace mirror endpoint — unblocks downloads for
+          users in mainland China (hf-mirror.com) or behind restrictive
+          networks. hf-mirror.com is HF-protocol-compatible so we route
+          downloads, search, collection, and README fetches all through
+          the same base URL. */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">{t('sessions.download.hfMirror')}</span>
+          <div className="flex-1 relative">
+            <input
+              type="text"
+              value={hfEndpoint}
+              onChange={(e) => setHfEndpoint(e.target.value)}
+              placeholder={t('sessions.download.hfMirrorPlaceholder')}
+              className="w-full px-2 py-1 bg-background border border-input rounded text-xs font-mono"
+            />
+          </div>
+          <button
+            onClick={() => handleSaveHfEndpoint(hfEndpoint)}
+            disabled={hfEndpointSaving}
+            className="px-2 py-1 text-xs border border-border rounded hover:bg-accent whitespace-nowrap disabled:opacity-40"
+          >
+            {hfEndpointSaving ? t('common.saving') : t('common.save')}
+          </button>
+          <button
+            onClick={() => handleSaveHfEndpoint('https://hf-mirror.com')}
+            disabled={hfEndpointSaving}
+            className="px-2 py-1 text-xs border border-border rounded hover:bg-accent whitespace-nowrap disabled:opacity-40"
+            title={t('sessions.download.mirrorPresetChinaTitle')}
+          >
+            {t('sessions.download.useHfMirror')}
+          </button>
+        </div>
+        <p className="text-[10px] text-muted-foreground ml-16">
+          {t('sessions.download.mirrorHelp')}
+        </p>
+      </div>
+
+      {/* Model Type Filter + Search + Sort */}
+      <div className="flex items-center gap-2">
+        <div className="flex rounded border border-border overflow-hidden flex-shrink-0">
+          <button
+            onClick={() => handleModelTypeChange('text')}
+            className={`px-2.5 py-2 text-xs transition-colors ${modelType === 'text' ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:bg-accent'}`}
+          >
+            {t('sessions.download.typeText')}
+          </button>
+          <button
+            data-vmlx-control="download-type-image"
+            onClick={() => handleModelTypeChange('image')}
+            className={`px-2.5 py-2 text-xs transition-colors ${modelType === 'image' ? 'bg-violet-500/15 text-violet-400 font-medium' : 'text-muted-foreground hover:bg-accent'}`}
+          >
+            {t('app.mode.image')}
+          </button>
+        </div>
+        <input
+          type="text"
+          placeholder={modelType === 'image' ? t('sessions.download.searchImagePlaceholder') : t('sessions.download.searchTextPlaceholder')}
+          value={searchQuery}
+          onChange={(e) => handleSearch(e.target.value)}
+            data-vmlx-control="model-search"
+            className="flex-1 px-3 py-2 bg-background border border-input rounded text-sm"
+        />
+        {searchQuery.trim() && (
+          <>
+            <select
+              value={sortBy}
+              onChange={(e) => handleSortChange(e.target.value)}
+              className="px-2 py-2 bg-background border border-input rounded text-xs text-foreground"
+              title={t('sessions.download.sortTitle')}
+            >
+              <option value="downloads">{t('sessions.download.sortDownloads')}</option>
+              <option value="relevance">{t('sessions.download.sortRelevance')}</option>
+              <option value="lastModified">{t('sessions.download.recentlyUpdated')}</option>
+              <option value="trending">{t('sessions.download.sortTrending')}</option>
+              <option value="likes">{t('sessions.download.sortLikes')}</option>
+              <option value="size">{t('sessions.download.modelSize')}</option>
+            </select>
+            {sortBy !== 'relevance' && (
+              <button
+                onClick={handleDirToggle}
+                className="px-1.5 py-2 bg-background border border-input rounded text-xs text-foreground hover:bg-accent"
+                title={sortDir === 'desc' ? t('sessions.download.sortHighestFirst') : t('sessions.download.sortLowestFirst')}
+              >
+                {sortDir === 'desc' ? '\u2193' : '\u2191'}
+              </button>
+            )}
+          </>
+        )}
+        {loading && <span className="text-xs text-muted-foreground">{t('sessions.download.searching')}</span>}
+      </div>
+      {modelType === 'image' && <p data-vmlx-status="mflux-compatibility" className="text-xs text-muted-foreground">
+        {t('image.picker.mfluxCompatibility')} {t('image.picker.mfluxDiscovery')}
+      </p>}
+
+      {error && (
+        <div className="p-2 bg-destructive/10 border border-destructive/30 rounded text-xs text-destructive">
+          {error}
+        </div>
+      )}
+
+      {downloadError && (
+        <div className="p-2 bg-destructive/10 border border-destructive/30 rounded text-xs text-destructive">
+          {t('sessions.download.downloadFailedDetail', { error: downloadError })}
+        </div>
+      )}
+
+      {/* Split Layout: Model List (left) + README (right) */}
+      <div className="flex gap-4" style={{ height: 'calc(100vh - 280px)', minHeight: '400px' }}>
+        {/* Left: Model List */}
+        <div className="w-1/2 flex flex-col min-w-0">
+          {searchQuery.trim() ? (
+            <span className="text-xs text-muted-foreground uppercase tracking-wider mb-2">{t('sessions.download.searchResults')}</span>
+          ) : (
+            <div className="flex items-center gap-1 mb-2 flex-wrap">
+              {modelType === 'text' && <>
+              <button
+                data-vmlx-action="feed-jang"
+                onClick={() => handleCollectionTabChange('jang')}
+                className={`px-2.5 py-1 text-xs rounded transition-colors ${collectionTab === 'jang' ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:bg-accent'}`}
+              >
+                {t('sessions.download.jangModels')}
+              </button>
+              <button
+                data-vmlx-action="feed-uncensored"
+                onClick={() => handleCollectionTabChange('uncensored')}
+                className={`px-2.5 py-1 text-xs rounded transition-colors ${collectionTab === 'uncensored' ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:bg-accent'}`}
+              >
+                {t('sessions.download.uncensored')}
+              </button>
+              </>}
+              {modelType === 'text' && <>
+                <select data-vmlx-setting="modelFeedSort" aria-label={t('sessions.download.sortTitle')}
+                  className="cfg-input text-xs w-auto" value={feedSort}
+                  onChange={event => setFeedSort(event.target.value as HfModelFeedSort)}>
+                  <option value="createdAt">{t('sessions.download.newestCreated')}</option>
+                  <option value="lastModified">{t('sessions.download.recentlyUpdated')}</option>
+                </select>
+                <button data-vmlx-action="feed-refresh" onClick={retryCollectionFetch}
+                  disabled={isCollectionLoading} className="text-xs px-2 py-1 border border-border disabled:opacity-50">
+                  {t('sessions.download.refreshFeed')}
+                </button>
+                <p className="w-full text-xs text-muted-foreground" data-vmlx-status="model-feed-source">
+                  {t('sessions.download.authorFeedNote', { author: HF_MODEL_FEED_AUTHORS[collectionTab] })}
+                </p>
+              </>}
+            </div>
+          )}
+          <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+            {isCollectionLoading ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">{t('sessions.download.loadingModels')}</p>
+            ) : !searchQuery.trim() && collectionErrors[collectionKey] ? (
+              // ms#68: fetch failure — distinct from empty collection. Show
+              // the actual error + a retry button so the user isn't stuck
+              // staring at "No models" wondering if the network died.
+              <div className="text-sm py-4 text-center space-y-2">
+                <p className="text-muted-foreground">
+                  {t('sessions.download.feedLoadFailed')}
+                </p>
+                <p className="text-xs text-muted-foreground/70 max-w-md mx-auto break-words">
+                  {collectionErrors[collectionKey]}
+                </p>
+                <button
+                  onClick={retryCollectionFetch}
+                  className="px-3 py-1 text-xs rounded border border-border hover:bg-accent"
+                >
+                  {t('common.retry')}
+                </button>
+              </div>
+            ) : displayModels.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                {modelType === 'image' ? t('sessions.download.noImageModels') : searchQuery.trim() ? t('sessions.download.noMlxModels') : t('sessions.download.noFeedModels')}
+              </p>
+            ) : (
+              displayModels.map(model => (
+                <div key={model.id} onClick={() => {
+                  const request = ++readmeRequestRef.current
+                  setSelectedModel(model)
+                  setSelectedReadme(null)
+                  setLoadingReadme(true)
+                  window.api.models.fetchReadme(model.id).then(text => {
+                    if (request !== readmeRequestRef.current) return
+                    setSelectedReadme(text || t('sessions.download.noReadme'))
+                    setLoadingReadme(false)
+                  }).catch(() => {
+                    if (request !== readmeRequestRef.current) return
+                    setSelectedReadme(t('sessions.download.readmeLoadFailed'))
+                    setLoadingReadme(false)
+                  })
+                }} className={`cursor-pointer ${selectedModel?.id === model.id ? 'ring-1 ring-primary rounded' : ''}`}>
+                  <ModelCard
+                    model={model}
+                    dateField={!searchQuery.trim() && modelType === 'text' ? feedSort : undefined}
+                    isDownloading={downloadingRepos.has(model.id)}
+                    isDownloaded={localModelIds.has(model.id)}
+                    onDownload={() => handleDownload(model.id)}
+                  />
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Right: README Panel */}
+        <div className="w-1/2 flex flex-col min-w-0 border-l border-border pl-4">
+          {selectedModel ? (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold truncate">{selectedModel.id}</h3>
+                {selectedModel.size && <span className="text-xs font-bold text-foreground ml-2 flex-shrink-0">{selectedModel.size}</span>}
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {loadingReadme ? (
+                  <p className="text-xs text-muted-foreground py-4">{t('sessions.download.loadingReadme')}</p>
+                ) : (
+                  <ReadmeContent markdown={selectedReadme || ''} />
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+              {t('sessions.download.clickModelForReadme')}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Simple markdown-to-HTML converter for HuggingFace READMEs.
+ * Sanitized: only allows safe tags (no script, no event handlers).
+ * Content comes from HF README files which are trusted markdown. */
+function simpleMarkdownToHtml(md: string): string {
+  let html = md
+    // Code blocks (``` ... ```)
+    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+    // Inline code
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // Images: ![alt](url)
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy" />')
+    // Links: [text](url)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    // Headers
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    // Bold and italic
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    // Horizontal rule
+    .replace(/^---+$/gm, '<hr />')
+    // Lists
+    .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+    .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+    // Blockquotes
+    .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+    // Paragraphs (double newlines)
+    .replace(/\n\n/g, '</p><p>')
+    // Single newlines to <br> (within paragraphs)
+    .replace(/\n/g, '<br />')
+  // Wrap consecutive <li> in <ul>
+  html = html.replace(/(<li>.*?<\/li>(?:<br \/>)?)+/g, (match) =>
+    '<ul>' + match.replace(/<br \/>/g, '') + '</ul>'
+  )
+  // Sanitize: strip any script tags, event handlers, or dangerous attributes
+  html = html.replace(/<script[\s\S]*?<\/script>/gi, '')
+  html = html.replace(/\bon\w+\s*=\s*"[^"]*"/gi, '')
+  html = html.replace(/\bon\w+\s*=\s*'[^']*'/gi, '')
+  html = html.replace(/javascript:/gi, '')
+  return '<p>' + html + '</p>'
+}
+
+function ReadmeContent({ markdown }: { markdown: string }) {
+  const html = simpleMarkdownToHtml(markdown)
+  return (
+    <div
+      className="prose prose-xs prose-invert max-w-none text-xs text-muted-foreground [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:mt-2 [&_p]:my-1 [&_img]:max-w-full [&_img]:rounded [&_img]:my-2 [&_table]:text-[10px] [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-border [&_th]:px-1.5 [&_th]:py-0.5 [&_th]:bg-muted [&_code]:bg-muted [&_code]:px-1 [&_code]:rounded [&_code]:text-[10px] [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_pre]:text-[10px] [&_pre]:overflow-x-auto [&_a]:text-primary [&_a]:underline [&_ul]:pl-4 [&_ul]:list-disc [&_ol]:pl-4 [&_li]:my-0.5 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-2 [&_blockquote]:italic [&_hr]:border-border [&_hr]:my-2"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
+}
+
+function ModelCard({ model, isDownloading, isDownloaded, onDownload, dateField }: {
+  model: HFModel
+  dateField?: HfModelFeedSort
+  isDownloading: boolean
+  isDownloaded: boolean
+  onDownload: () => void
+}) {
+  const { t } = useTranslation()
+  const shortName = model.id.includes('/') ? model.id.split('/').slice(1).join('/') : model.id
+
+  return (
+    <div className="rounded border border-border hover:border-primary/30 transition-colors">
+      <div className="p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="font-medium text-sm truncate" title={model.id}>
+              {shortName}
+            </div>
+            <div className="text-xs text-muted-foreground">{model.author}</div>
+            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+              {model.size && <span title={t('sessions.download.modelSizeTitle')} className="font-semibold text-foreground">{model.size}</span>}
+              <span title={t('sessions.download.sortDownloads')}>{t('sessions.download.downloadsLabel', { n: formatNumber(model.downloads) })}</span>
+              <span title={t('sessions.download.sortLikes')}>{t('sessions.download.likesLabel', { n: model.likes })}</span>
+              {timeAgo(dateField === 'createdAt' ? model.createdAt : model.lastModified, t) && <span title={dateField === 'createdAt' ? model.createdAt : model.lastModified}>
+                {dateField ? t(dateField === 'createdAt' ? 'sessions.download.createdDate' : 'sessions.download.updatedDate', {
+                  date: timeAgo(dateField === 'createdAt' ? model.createdAt : model.lastModified, t),
+                }) : timeAgo(model.lastModified, t)}
+              </span>}
+            </div>
+            {model.note && (
+              <p className="text-[10px] text-muted-foreground mt-1 line-clamp-2 whitespace-pre-line">{model.note}</p>
+            )}
+            {model.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {model.tags.slice(0, 5).map(tag => (
+                  <span key={tag} className="px-1.5 py-0.5 bg-muted rounded text-[10px] text-muted-foreground">
+                    {tag}
+                  </span>
+                ))}
+                {model.tags.length > 5 && (
+                  <span className="text-[10px] text-muted-foreground">+{model.tags.length - 5}</span>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              onClick={(e) => { e.stopPropagation(); window.open(`https://huggingface.co/${model.id}`, '_blank') }}
+              className="px-1.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded"
+              title={t('sessions.download.viewOnHFTitle')}
+            >
+              ↗
+            </button>
+            {isDownloaded && !isDownloading ? (
+              <span className="px-3 py-1.5 text-xs text-primary border border-primary/30 rounded whitespace-nowrap">
+                {t('sessions.download.downloaded')}
+              </span>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); onDownload() }}
+                disabled={isDownloading}
+                className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-40 whitespace-nowrap"
+              >
+                {isDownloading ? t('sessions.download.downloading') : t('sessions.create.download')}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

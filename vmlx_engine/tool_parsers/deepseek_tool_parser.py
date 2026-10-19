@@ -1,0 +1,182 @@
+# SPDX-License-Identifier: Apache-2.0
+"""
+DeepSeek tool call parser for vmlx-engine.
+
+Handles DeepSeek V3 and R1 tool calling formats:
+- <｜tool▁calls▁begin｜>...<｜tool▁calls▁end｜> wrapper
+- <｜tool▁call▁begin｜>function<｜tool▁sep｜>name
+  ```json
+  {...}
+  ```<｜tool▁call▁end｜>
+"""
+
+import json
+import re
+from collections.abc import Sequence
+from typing import Any
+
+from .abstract_tool_parser import (
+    ExtractedToolCallInformation,
+    ToolParser,
+    ToolParserManager,
+    generate_tool_id,
+)
+
+
+@ToolParserManager.register_module(["deepseek", "deepseek_v3", "deepseek_r1"])
+class DeepSeekToolParser(ToolParser):
+    """
+    Tool call parser for DeepSeek V3 and R1 models.
+
+    Supports DeepSeek's tool call format with special unicode tokens:
+    <｜tool▁calls▁begin｜>
+    <｜tool▁call▁begin｜>function<｜tool▁sep｜>get_weather
+    ```json
+    {"city": "Paris"}
+    ```<｜tool▁call▁end｜>
+    <｜tool▁calls▁end｜>
+
+    Used when --enable-auto-tool-choice --tool-call-parser deepseek are set.
+    """
+
+    NATIVE_MARKERS = ("<｜tool▁calls▁begin｜>", "<｜tool▁call▁begin｜>")
+
+    # DeepSeek V3 chat templates support native tool message format
+    SUPPORTS_NATIVE_TOOL_FORMAT = True
+
+    # Special DeepSeek tokens (unicode)
+    TOOL_CALLS_START = "<｜tool▁calls▁begin｜>"
+    TOOL_CALLS_END = "<｜tool▁calls▁end｜>"
+    TOOL_CALL_START = "<｜tool▁call▁begin｜>"
+    TOOL_CALL_END = "<｜tool▁call▁end｜>"
+    TOOL_SEP = "<｜tool▁sep｜>"
+
+    # Pattern to match individual tool calls
+    TOOL_CALL_PATTERN = re.compile(
+        r"<｜tool▁call▁begin｜>(?P<type>.*?)<｜tool▁sep｜>(?P<name>.*?)\n```json\n(?P<args>.*?)\n```<｜tool▁call▁end｜>",
+        re.DOTALL,
+    )
+
+    # Alternative pattern without type
+    TOOL_CALL_SIMPLE_PATTERN = re.compile(
+        r"<｜tool▁call▁begin｜>(?P<name>.*?)\n```json\n(?P<args>.*?)\n```<｜tool▁call▁end｜>",
+        re.DOTALL,
+    )
+
+    def extract_tool_calls(
+        self, model_output: str, request: dict[str, Any] | None = None
+    ) -> ExtractedToolCallInformation:
+        """
+        Extract tool calls from DeepSeek model output.
+        """
+        # Accept either the full `<｜tool▁calls▁begin｜>…<｜tool▁calls▁end｜>`
+        # wrapper or just the inner `<｜tool▁call▁begin｜>…<｜tool▁call▁end｜>`
+        # block. Some DeepSeek/GLM-5.1 chat templates emit only the inner
+        # block (no plural wrapper) and the old strict check would return
+        # `tools_called=False` on those. Fallback-fixed for mlxstudio#71
+        # sibling regression report: DeepSeek-family tool calls silently
+        # drop when the plural wrapper is missing.
+        if self.TOOL_CALLS_START not in model_output and self.TOOL_CALL_START not in model_output:
+            return ExtractedToolCallInformation(
+                tools_called=False, tool_calls=[], content=model_output
+            )
+
+        tool_calls = []
+
+        # Extract content before tool calls (prefer plural wrapper, then singular)
+        _first_marker = None
+        if self.TOOL_CALLS_START in model_output:
+            _first_marker = self.TOOL_CALLS_START
+        elif self.TOOL_CALL_START in model_output:
+            _first_marker = self.TOOL_CALL_START
+        if _first_marker:
+            content_end = model_output.find(_first_marker)
+            content = model_output[:content_end].strip() if content_end > 0 else None
+        else:
+            content = None
+
+        # Try full pattern with type first
+        matches = self.TOOL_CALL_PATTERN.findall(model_output)
+        for match in matches:
+            tool_type, func_name, func_args = match
+            try:
+                # Validate JSON
+                json.loads(func_args)
+                tool_calls.append(
+                    {
+                        "id": generate_tool_id(),
+                        "name": func_name.strip(),
+                        "arguments": func_args.strip(),
+                    }
+                )
+            except json.JSONDecodeError:
+                # Keep raw arguments
+                tool_calls.append(
+                    {
+                        "id": generate_tool_id(),
+                        "name": func_name.strip(),
+                        "arguments": func_args.strip(),
+                    }
+                )
+
+        # Try simple pattern if no matches
+        if not tool_calls:
+            simple_matches = self.TOOL_CALL_SIMPLE_PATTERN.findall(model_output)
+            for match in simple_matches:
+                func_name, func_args = match
+                tool_calls.append(
+                    {
+                        "id": generate_tool_id(),
+                        "name": func_name.strip(),
+                        "arguments": func_args.strip(),
+                    }
+                )
+
+        if tool_calls:
+            return ExtractedToolCallInformation(
+                tools_called=True,
+                tool_calls=tool_calls,
+                content=content,
+            )
+        else:
+            return ExtractedToolCallInformation(
+                tools_called=False, tool_calls=[], content=model_output
+            )
+
+    def extract_tool_calls_streaming(
+        self,
+        previous_text: str,
+        current_text: str,
+        delta_text: str,
+        previous_token_ids: Sequence[int] | None = None,
+        current_token_ids: Sequence[int] | None = None,
+        delta_token_ids: Sequence[int] | None = None,
+        request: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        Extract tool calls from streaming DeepSeek model output.
+        """
+        # Accept both the plural wrapper and the bare inner block.
+        if self.TOOL_CALLS_START not in current_text and self.TOOL_CALL_START not in current_text:
+            return {"content": delta_text}
+
+        # If we see the end marker, parse the complete output
+        if self.TOOL_CALL_END in delta_text or self.TOOL_CALLS_END in delta_text:
+            result = self.extract_tool_calls(current_text)
+            if result.tools_called:
+                return {
+                    "tool_calls": [
+                        {
+                            "index": i,
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": tc["name"],
+                                "arguments": tc["arguments"],
+                            },
+                        }
+                        for i, tc in enumerate(result.tool_calls)
+                    ]
+                }
+
+        return None

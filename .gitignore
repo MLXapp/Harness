@@ -1,0 +1,386 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+# But keep Electron build assets (DMG background, entitlements)
+!panel/build/
+panel/build/*
+!panel/build/dmg-background.png
+!panel/build/dmg-background@2x.png
+!panel/build/dmg-background.svg
+!panel/build/entitlements.mac.plist
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+/lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Environments
+.env
+.env.*
+!.env.example
+!.env.*.example
+!**/.env.example
+!**/.env.*.example
+**/.env.signing
+**/.env.signing.*
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Release credentials, signing identities, and private notarization material
+.pypirc
+.npmrc
+.netrc
+*.p8
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+*.der
+*.mobileprovision
+*.provisionprofile
+*.keychain
+*.keychain-db
+*.keychain-db-*
+*.notary-result.json
+*.notary-results.json
+*.notary-info.json
+*.notary-log.json
+*.notary-submit.json
+notary-result*.json
+notary-results*.json
+notary-info*.json
+notary-log*.json
+notary-submit*.json
+*notary*-result*.json
+*notarytool*-result*.json
+*notarization*-result*.json
+*signing*-result*.json
+*staple*-result*.json
+notary-handoff*.env
+signing-handoff*.env
+build-handoff*.env
+notary-results/
+notary-records/
+private-release/
+release-private/
+release-credentials/
+signing-secrets/
+**/*notar*.local.*
+**/*sign*.local.*
+**/*notar*-local*
+**/*notar*-private*
+**/*notary*-profile*.exp
+**/*notariz*-profile*.exp
+**/*notary*-auth*.exp
+**/*notariz*-auth*.exp
+**/*notary*-profile*
+**/*notariz*-profile*
+**/*notary*-auth*
+**/*notariz*-auth*
+**/*sign*-local*
+**/*sign*-private*
+**/*signing*-profile*.exp
+**/*signing*-auth*.exp
+**/*signing*-profile*
+**/*signing*-auth*
+**/*codesign*-local*
+**/*codesign*-private*
+**/*release*.local.*
+**/*release*.private.*
+**/*credential*.local.*
+**/*notar*-handoff.*
+**/*sign*-handoff.*
+**/*release*-handoff.*
+**/*notar*-credential*
+**/*apple*sign*-credential*
+**/*sign*-credential*
+**/*keychain*-profile*
+**/*notarytool*-profile*
+**/.notarytool-profile*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+
+# Model files (too large for git)
+*.bin
+*.safetensors
+*.gguf
+*.ggml
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# MLX cache
+.mlx_cache/
+
+# Git worktrees
+.worktrees/
+
+# Panel (Electron app)
+node_modules/
+panel/node_modules/
+panel/dist/
+panel/out/
+# Any release-artifact directory, including moved-aside snapshots like
+# panel/release.pre-<version>-<time>/ — one of those escaped the old exact
+# pattern and put two 500MB DMGs plus the Electron framework into a commit,
+# which GitHub hard-rejects (>100MB blobs) and which required a history
+# rewrite to undo.
+panel/release*/
+panel/bundled-python/
+panel/.bundled-python.staging.*/
+panel/.bundled-python.previous.*/
+panel/.DS_Store
+panel/.env
+
+# Production builds (contains .app with bundled Python ~1.4GB)
+productionapp/vMLX.app
+productionapp/*.dmg
+/build/
+
+# Local editor/agent tooling
+.claude/
+
+# Old development artifacts (removed from main)
+examples/
+PLANS/
+!docs/superpowers/plans/
+productionapp/
+BENCHMARK_RESULTS.md
+FIXES_SUMMARY.md
+PACKAGE_RELEASE_NOTES.md
+PRODUCTION_READY.md
+TEST_PLAN.md
+VERIFICATION.md
+deploy.sh
+gsm8k_*.json
+mcp.example.json
+mise.toml
+.pre-commit-config.yaml
+.agent/
+nohup.out
+
+# Private/internal material must never enter the public repository
+AGENTS.md
+CLAUDE.md
+CODEX.md
+.agents/
+.agent/
+.claude/
+.codex/
+.sisyphus/
+.factory/
+notes/
+PLANS/
+autoresearch/
+tmp/
+assets/tools-tab.png
+panel/docs/plans/
+panel/CHANGELOG.md
+panel/ENGINE-UPDATES.md
+panel/PROJECT.md
+panel/SETUP.md
+productionapp/INSTALL.md
+productionapp/TECHNICAL-NOTES.md
+vmlx_engine/docs/CODEBOOK-DEVELOPMENT.md
+tests/e2e/results/
+tests/e2e/panel-driver/node_modules/
+tests/benchmark/outputs/
+tests/e2e/AUDIT-REPORT.md
+tests/e2e/MATRIX.md
+tests/e2e/UI-SUITE.md
+docs/internal/
+docs/audit/
+docs/Handoffs/
+docs/plans/
+docs/runtime/
+
+# Internal working notes must never live in the SOURCE tree — this is a
+# public repo. Campaign logs, status boards, handoff docs and audit notes go
+# under docs/internal/ (ignored above). Six of these had drifted into
+# vmlx_engine/models/minimax_m3/ carrying machine names, branch/PR internals
+# and "HOLD all commits" — moved out 2026-08-12. Patterns, not paths, so a
+# new one cannot reappear in another model dir.
+**/CAMPAIGN-*.md
+**/*-CAMPAIGN.md
+**/MASTER-STATUS.md
+**/BUILD-STATUS.md
+**/*-HANDOFF.md
+**/*-ROOTCAUSE*.md
+**/ISSUE-LEDGER.md
+**/*-PROGRESS-LOG.md
+vmlx_engine/**/STATUS.md
+vmlx_engine/**/NOTES.md
+.agents/
+AGENTS.md
+
+# Ad-hoc live-UI CDP driver scripts. Every debugging session writes a few of
+# these into panel/scripts/; 75 had accumulated untracked on the box, one
+# `git add -A` away from landing in a public repo. Ignore the directory's
+# .cjs by default and allow-list the real build/release/driver scripts, so
+# tomorrow's throwaway probe is ignored without another .gitignore edit.
+panel/scripts/*.cjs
+!panel/scripts/electron-builder-after-all-artifact-build.cjs
+!panel/scripts/electron-builder-after-pack.cjs
+!panel/scripts/electron-builder-before-pack.cjs
+!panel/scripts/leakprobe.cjs
+!panel/scripts/r21drv.cjs
+!panel/scripts/release-python-action.cjs
+!panel/scripts/uidrv.cjs
+
+# Probe/scratch dumps and local backups at the repo root (d4.txt, x.txt,
+# ternary_*_731.txt, dsv4_ui_tool_probe.txt, .pre161-backup/ …). No tracked
+# file matches these, so the rules cannot hide real source.
+/*.txt
+*_probe*.txt
+*-backup/
+.pre*-backup/
+nohup.out
+docs/*.md
+!docs/ARCHITECTURE.md
+!docs/index.md
+!docs/mlxstudio-releases-readme.md
+docs/audit-*
+docs/AUDIT-*
+docs/final-*
+docs/GITHUB-ISSUES-*
+docs/CROSS-CHECK-*
+docs/cross-check-*
+docs/*CAMPAIGN*
+docs/*MATRIX*
+docs/*ROADMAP*
+docs/*PLAN*
+docs/*STATUS*
+docs/*PROGRESS*
+docs/*HANDOFF*
+docs/*LEDGER*
+docs/*EVIDENCE*
+docs/*PROOF*
+docs/*RELEASE-GATE*
+botes/
+evidence/
+private-evidence/
+vmlx-proof/
+screenshots/
+screen-recordings/
+cdp-captures/
+raw-sse/
+runtime-logs/
+*.sqlite
+*.db
+AUDIT_FIXES.md
+BENCHMARK_RESULTS.md
+FIXES_SUMMARY.md
+PACKAGE_RELEASE_NOTES.md
+PRODUCTION_READY.md
+TEST_PLAN.md
+VERIFICATION.md
+NO-REGRESSION-CHECKLIST.md
+AUDIT-*.md
+HANDOFF-*.md
+TEST-MATRIX-*.md
+BENCHMARK-*.md
+nohup.out
+trace_err*.txt
+/*_results.json
+/*.md
+!/README.md
+!/CHANGELOG.md
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/CODE_OF_CONDUCT.md
+
+# Smelt / JANG MoE artifacts
+*.smt
+.smelt/
+
+# TypeScript build info / incremental cache
+*.tsbuildinfo
+
+# Ad-hoc top-level benchmarks and scratch scripts (legit tests live under tests/)
+/benchmark_*.py
+/test_*.py
+/test_build_args.ts
+
+panel/build_dmg.sh
+
+# Private working documents and proof receipts
+/docs/plans/
+/docs/runtime/
+/docs/superpowers/
+/reports/
+**/HANDOFF.md
+**/PLAN.md
+**/AUDIT_CHECKLIST.md
+**/INVESTIGATION_LOG.md
+/ralph_runner/PROMPT.md

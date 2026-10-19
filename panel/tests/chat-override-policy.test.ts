@@ -1,0 +1,814 @@
+import { describe, expect, it } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
+import {
+  buildNewChatInheritedOverrides,
+  CHAT_TOP_K_HARD_MAX,
+  sanitizeChatOverrides,
+  sanitizeChatProfileOverrides,
+  type ChatOverridePolicyInput,
+} from '../src/main/chat-override-policy'
+
+const baseExisting: ChatOverridePolicyInput = {
+  chatId: 'new-chat',
+  temperature: 0.6,
+  topP: 0.8,
+  topK: 20,
+  minP: 0.05,
+  maxTokens: 4096,
+  repeatPenalty: 1.05,
+  enableThinking: undefined,
+}
+
+describe('new-chat override inheritance policy', () => {
+  it('inherits coding/tool settings from the previous chat without making sampling, reasoning, or prompt text sticky', () => {
+    const workingDirectory = process.cwd()
+    const inherited = buildNewChatInheritedOverrides(baseExisting, {
+      chatId: 'old-chat',
+      temperature: 1.0,
+      topP: 1.0,
+      topK: 1,
+      minP: 0.2,
+      maxTokens: 128,
+      maxThinkingTokens: 4096,
+      repeatPenalty: 1.3,
+      stopSequences: '<bad>',
+      wireApi: 'completions',
+      builtinToolsEnabled: true,
+      shellEnabled: true,
+      webSearchEnabled: true,
+      braveSearchEnabled: false,
+      fetchUrlEnabled: true,
+      fileToolsEnabled: false,
+      searchToolsEnabled: true,
+      gitEnabled: false,
+      utilityToolsEnabled: true,
+      maxToolIterations: 6,
+      workingDirectory,
+      hideToolStatus: true,
+      toolResultMaxChars: 16000,
+      systemPrompt: 'sticky prompt text that should stay chat-scoped',
+      enableThinking: true,
+      reasoningEffort: 'max',
+    })
+
+    expect(inherited).toMatchObject({
+      chatId: 'new-chat',
+      temperature: 0.6,
+      topP: 0.8,
+      topK: 20,
+      minP: 0.05,
+      maxTokens: 4096,
+      repeatPenalty: 1.05,
+      builtinToolsEnabled: true,
+      shellEnabled: true,
+      webSearchEnabled: true,
+      braveSearchEnabled: false,
+      fetchUrlEnabled: true,
+      fileToolsEnabled: false,
+      searchToolsEnabled: true,
+      gitEnabled: false,
+      utilityToolsEnabled: true,
+      maxToolIterations: 6,
+      workingDirectory,
+      hideToolStatus: true,
+      toolResultMaxChars: 16000,
+    })
+    expect(inherited.stopSequences).toBeUndefined()
+    expect(inherited.wireApi).toBeUndefined()
+    expect(inherited.enableThinking).toBeUndefined()
+    expect(inherited.reasoningEffort).toBeUndefined()
+    expect(inherited.systemPrompt).toBeUndefined()
+  })
+
+  it('treats auto-applied default profiles as tool presets, not hidden sampler or reasoning presets', () => {
+    const workingDirectory = process.cwd()
+    const inherited = buildNewChatInheritedOverrides(baseExisting, {
+      chatId: 'profile-default',
+      temperature: 2.0,
+      topP: 0.1,
+      topK: 1,
+      minP: 0.9,
+      maxTokens: 128,
+      repeatPenalty: 2.0,
+      systemPrompt: 'sticky profile prompt',
+      stopSequences: '<stop>',
+      wireApi: 'completions',
+      enableThinking: true,
+      reasoningEffort: 'max',
+      builtinToolsEnabled: true,
+      shellEnabled: true,
+      fileToolsEnabled: true,
+      workingDirectory,
+    })
+
+    expect(inherited).toMatchObject({
+      chatId: 'new-chat',
+      temperature: 0.6,
+      topP: 0.8,
+      topK: 20,
+      minP: 0.05,
+      maxTokens: 4096,
+      repeatPenalty: 1.05,
+      builtinToolsEnabled: true,
+      shellEnabled: true,
+      fileToolsEnabled: true,
+      workingDirectory,
+    })
+    expect(inherited.systemPrompt).toBeUndefined()
+    expect(inherited.stopSequences).toBeUndefined()
+    expect(inherited.wireApi).toBeUndefined()
+    expect(inherited.enableThinking).toBeUndefined()
+    expect(inherited.reasoningEffort).toBeUndefined()
+  })
+
+  it('default profiles cannot make maxTokens sticky on clean new chats', () => {
+    const workingDirectory = process.cwd()
+    const inherited = buildNewChatInheritedOverrides({ chatId: 'new-chat' }, {
+      chatId: 'profile-default',
+      maxTokens: 32768,
+      maxThinkingTokens: 32768,
+      temperature: 2.0,
+      repeatPenalty: 2.0,
+      systemPrompt: 'sticky prompt text that should stay chat-scoped',
+      builtinToolsEnabled: true,
+      shellEnabled: true,
+      workingDirectory,
+    })
+
+    expect(inherited).toMatchObject({
+      chatId: 'new-chat',
+      builtinToolsEnabled: true,
+      shellEnabled: true,
+      workingDirectory,
+    })
+    expect(inherited.maxTokens).toBeUndefined()
+    expect(inherited.maxThinkingTokens).toBeUndefined()
+    expect(inherited.temperature).toBeUndefined()
+    expect(inherited.repeatPenalty).toBeUndefined()
+    expect(inherited.systemPrompt).toBeUndefined()
+  })
+
+  it('does not carry a deleted working directory into a clean chat', () => {
+    const inherited = buildNewChatInheritedOverrides(baseExisting, {
+      chatId: 'old-chat',
+      builtinToolsEnabled: true,
+      fileToolsEnabled: true,
+      workingDirectory: path.join(process.cwd(), '.definitely-missing-vmlx-workdir'),
+    })
+
+    expect(inherited.builtinToolsEnabled).toBe(true)
+    expect(inherited.fileToolsEnabled).toBe(true)
+    expect(inherited.workingDirectory).toBeUndefined()
+  })
+
+  it('new chats preserve model-owned maxTokens while refusing inherited output caps', () => {
+    const workingDirectory = process.cwd()
+    const inherited = buildNewChatInheritedOverrides({
+      chatId: 'new-chat',
+      maxTokens: 4096,
+      temperature: 0.9,
+    }, {
+      chatId: 'previous-chat',
+      maxTokens: 32768,
+      temperature: 2.0,
+      repeatPenalty: 2.0,
+      systemPrompt: 'sticky prompt text that should stay chat-scoped',
+      builtinToolsEnabled: true,
+      shellEnabled: true,
+      workingDirectory,
+    })
+
+    expect(inherited).toMatchObject({
+      chatId: 'new-chat',
+      maxTokens: 4096,
+      temperature: 0.9,
+      builtinToolsEnabled: true,
+      shellEnabled: true,
+      workingDirectory,
+    })
+    expect(inherited.maxTokens).not.toBe(32768)
+    expect(inherited.repeatPenalty).toBeUndefined()
+    expect(inherited.systemPrompt).toBeUndefined()
+  })
+
+  it('does not overwrite derived model defaults with undefined inherited tool values', () => {
+    const inherited = buildNewChatInheritedOverrides(baseExisting, {
+      chatId: 'old-chat',
+      builtinToolsEnabled: undefined,
+      shellEnabled: undefined,
+      maxToolIterations: undefined,
+      workingDirectory: undefined,
+    })
+
+    expect(inherited).toEqual(baseExisting)
+  })
+
+  it('does not let chat:setOverrides rewrite global model generation or reasoning defaults', () => {
+    const chatIpcSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/ipc/chat.ts'),
+      'utf8',
+    )
+    const setOverridesHandler = chatIpcSource.slice(
+      chatIpcSource.indexOf('"chat:setOverrides"'),
+      chatIpcSource.indexOf('ipcMain.handle("chat:getOverrides"'),
+    )
+
+    expect(setOverridesHandler).not.toContain('db.saveModelSettings')
+    expect(setOverridesHandler).not.toContain('reasoning_mode')
+    expect(setOverridesHandler).not.toContain('Synced')
+  })
+
+  it('chat:setOverrides treats maxTokens 0 or lower as Auto instead of a one-token cap', () => {
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxTokens: 0 }).maxTokens).toBeUndefined()
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxTokens: -20 }).maxTokens).toBeUndefined()
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxTokens: 512 }).maxTokens).toBe(512)
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxTokens: 2_000_000 }).maxTokens).toBe(1_000_000)
+  })
+
+  it('chat:setOverrides treats maxThinkingTokens as an explicit thinking budget, not an output cap', () => {
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxThinkingTokens: 0 }).maxThinkingTokens).toBeUndefined()
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxThinkingTokens: -20 }).maxThinkingTokens).toBeUndefined()
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxThinkingTokens: Number.NaN }).maxThinkingTokens).toBeUndefined()
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxThinkingTokens: '4096' as any }).maxThinkingTokens).toBeUndefined()
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxThinkingTokens: 4096.9 }).maxThinkingTokens).toBe(4096)
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxThinkingTokens: 2_000_000 }).maxThinkingTokens).toBe(1_000_000)
+
+    const sanitized = sanitizeChatOverrides({
+      chatId: 'chat',
+      maxTokens: 512,
+      maxThinkingTokens: 4096,
+    })
+    expect(sanitized.maxTokens).toBe(512)
+    expect(sanitized.maxThinkingTokens).toBe(4096)
+  })
+
+  it('chat:setOverrides rejects non-finite or non-numeric maxTokens instead of poisoning server defaults', () => {
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxTokens: Number.NaN }).maxTokens).toBeUndefined()
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxTokens: Number.POSITIVE_INFINITY }).maxTokens).toBeUndefined()
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxTokens: '1024' as any }).maxTokens).toBeUndefined()
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxTokens: 512.9 }).maxTokens).toBe(512)
+  })
+
+  it('chat maxTokens save path cannot mutate session startup maxTokens', () => {
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxTokens: 8192 }).maxTokens).toBe(8192)
+
+    const chatIpcSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/ipc/chat.ts'),
+      'utf8',
+    )
+    const setOverridesHandler = chatIpcSource.slice(
+      chatIpcSource.indexOf('"chat:setOverrides"'),
+      chatIpcSource.indexOf('ipcMain.handle("chat:getOverrides"'),
+    )
+
+    expect(setOverridesHandler).toContain('sanitizeChatOverrides')
+    expect(setOverridesHandler).toContain(
+      'sanitizeChatOverrides({ ...overrides, chatId })',
+    )
+    expect(setOverridesHandler).toContain(
+      'db.setChatOverrides({ ...sanitized, chatId })',
+    )
+    expect(setOverridesHandler).toContain('db.setChatOverrides')
+    expect(setOverridesHandler).not.toContain('sessionManager')
+    expect(setOverridesHandler).not.toContain('saveModelSettings')
+    expect(setOverridesHandler).not.toContain('saveSession')
+    expect(setOverridesHandler).not.toContain('model_settings')
+
+    const sessionsSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/sessions.ts'),
+      'utf8',
+    )
+    const performanceLaunchBlock = sessionsSource.slice(
+      sessionsSource.indexOf('// Performance'),
+      sessionsSource.indexOf('// Tool integration'),
+    )
+
+    expect(performanceLaunchBlock).toContain('const maxTokens = finitePositiveInteger(config.maxTokens)')
+    expect(performanceLaunchBlock).toContain("args.push('--max-tokens', maxTokens.toString())")
+    expect(performanceLaunchBlock).toContain('const maxContextLength = finitePositiveInteger(config.maxContextLength)')
+    expect(performanceLaunchBlock).toContain("args.push('--max-prompt-tokens', maxContextLength.toString())")
+    expect(performanceLaunchBlock).not.toContain('overrides.maxTokens')
+    expect(performanceLaunchBlock).not.toContain('chatOverrides')
+    expect(performanceLaunchBlock).not.toContain('getChatOverrides')
+
+    const modelSettingsSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/db/model-settings.ts'),
+      'utf8',
+    )
+    expect(modelSettingsSource).toContain('choices are per-chat/API overrides and must not be stored per model')
+    expect(modelSettingsSource).not.toContain('maxTokens')
+    expect(modelSettingsSource).not.toContain('max_tokens')
+    expect(modelSettingsSource).not.toContain('reasoning_mode')
+  })
+
+  it('persisted chat maxTokens cannot relaunch server with a new startup maxTokens', () => {
+    const databaseSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/database.ts'),
+      'utf8',
+    )
+    const setChatOverridesBlock = databaseSource.slice(
+      databaseSource.indexOf('setChatOverrides(overrides'),
+      databaseSource.indexOf('getChatOverrides(chatId'),
+    )
+    const saveModelSettingsBlock = databaseSource.slice(
+      databaseSource.indexOf('saveModelSettings(modelPath'),
+      databaseSource.indexOf('deleteModelSettings(modelPath'),
+    )
+    const sessionsSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/sessions.ts'),
+      'utf8',
+    )
+    const performanceLaunchBlock = sessionsSource.slice(
+      sessionsSource.indexOf('// Performance'),
+      sessionsSource.indexOf('// Tool integration'),
+    )
+
+    expect(setChatOverridesBlock).toContain('INSERT OR REPLACE INTO chat_overrides')
+    expect(setChatOverridesBlock).toContain('max_tokens')
+    expect(setChatOverridesBlock).toContain('max_thinking_tokens')
+    expect(setChatOverridesBlock).toContain('overrides.maxTokens')
+    expect(setChatOverridesBlock).toContain('overrides.maxThinkingTokens')
+    expect(setChatOverridesBlock).not.toContain('sessions')
+    expect(setChatOverridesBlock).not.toContain('model_settings')
+    expect(setChatOverridesBlock).not.toContain('saveModelSettings')
+    expect(setChatOverridesBlock).not.toContain('saveSession')
+
+    expect(saveModelSettingsBlock).toContain('max_tokens')
+    expect(saveModelSettingsBlock).toContain('null')
+    expect(saveModelSettingsBlock).not.toContain('settings.maxTokens')
+    expect(saveModelSettingsBlock).not.toContain('settings.max_tokens')
+
+    expect(performanceLaunchBlock).toContain('finitePositiveInteger(config.maxTokens)')
+    expect(performanceLaunchBlock).toContain("args.push('--max-tokens', maxTokens.toString())")
+    expect(performanceLaunchBlock).not.toContain('getChatOverrides')
+    expect(performanceLaunchBlock).not.toContain('chat_overrides')
+    expect(performanceLaunchBlock).not.toContain('overrides.maxTokens')
+    expect(performanceLaunchBlock).not.toContain('overrides.maxThinkingTokens')
+  })
+
+  it('chat override persistence keeps insert columns, placeholders, and values aligned', () => {
+    const databaseSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/database.ts'),
+      'utf8',
+    )
+    const setChatOverridesBlock = databaseSource.slice(
+      databaseSource.indexOf('setChatOverrides(overrides'),
+      databaseSource.indexOf('getChatOverrides(chatId'),
+    )
+    const insertMatch = setChatOverridesBlock.match(
+      /INSERT OR REPLACE INTO chat_overrides\s*\(([\s\S]*?)\)\s*VALUES\s*\(([\s\S]*?)\)/,
+    )
+    expect(insertMatch).not.toBeNull()
+
+    const columns = insertMatch![1]
+      .split(',')
+      .map(column => column.trim())
+      .filter(Boolean)
+    const placeholders = insertMatch![2]
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean)
+    const runBlock = setChatOverridesBlock.slice(
+      setChatOverridesBlock.indexOf('stmt.run('),
+      setChatOverridesBlock.indexOf(');', setChatOverridesBlock.indexOf('stmt.run(')),
+    )
+    const runValues = runBlock
+      .replace(/^.*?stmt\.run\(/s, '')
+      .split('\n')
+      .map(line => line.trim().replace(/,$/, ''))
+      .filter(line => line.length > 0)
+
+    expect(columns).toContain('max_tokens')
+    expect(columns).toContain('max_thinking_tokens')
+    expect(columns).toContain('frequency_penalty')
+    expect(columns).toContain('presence_penalty')
+    expect(columns).toContain('tool_result_max_chars')
+    expect(columns).toContain('git_enabled')
+    expect(columns).toContain('utility_tools_enabled')
+    expect(placeholders).toHaveLength(columns.length)
+    expect(runValues).toHaveLength(columns.length)
+    expect(runValues).toContain('overrides.maxTokens')
+    expect(runValues).toContain('overrides.maxThinkingTokens')
+    expect(runValues).toContain('overrides.frequencyPenalty')
+    expect(runValues).toContain('overrides.presencePenalty')
+    expect(runValues).toContain('overrides.toolResultMaxChars || null')
+    expect(runValues).toContain('overrides.gitEnabled === false ? 0 : 1')
+    expect(runValues).toContain('overrides.utilityToolsEnabled === false ? 0 : 1')
+  })
+
+  it('server startup maxTokens and chat maxTokens remain independent when both are set', () => {
+    expect(sanitizeChatOverrides({ chatId: 'chat', maxTokens: 8192 }).maxTokens).toBe(8192)
+
+    const sessionsSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/sessions.ts'),
+      'utf8',
+    )
+    const performanceLaunchBlock = sessionsSource.slice(
+      sessionsSource.indexOf('// Performance'),
+      sessionsSource.indexOf('// Tool integration'),
+    )
+
+    expect(performanceLaunchBlock).toContain('const maxTokens = finitePositiveInteger(config.maxTokens)')
+    expect(performanceLaunchBlock).toContain("args.push('--max-tokens', maxTokens.toString())")
+    expect(performanceLaunchBlock).not.toContain('overrides.maxTokens')
+    expect(performanceLaunchBlock).not.toContain('chatOverrides')
+
+    const chatIpcSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/ipc/chat.ts'),
+      'utf8',
+    )
+    const requestBuildBlock = chatIpcSource.slice(
+      chatIpcSource.indexOf('const resolvedOutputBudget = dsv4OutputBudget('),
+      chatIpcSource.indexOf('if (messageContent.length === 0)'),
+    )
+
+    expect(requestBuildBlock).toContain('overrides?.maxTokens')
+    expect(requestBuildBlock).toContain('overrides?.maxThinkingTokens')
+    expect(requestBuildBlock).toContain('max_output_tokens: resolvedOutputBudget')
+    expect(requestBuildBlock).toContain('max_tokens: resolvedOutputBudget')
+    expect(requestBuildBlock).toContain('max_thinking_tokens')
+    expect(requestBuildBlock).toContain('thinking_budget')
+    expect(requestBuildBlock).not.toContain('config.maxTokens')
+    expect(requestBuildBlock).not.toContain('config.maxThinkingTokens')
+    expect(requestBuildBlock).not.toContain('session.config.maxTokens')
+  })
+
+  it('chat:setOverrides rejects malformed sampler and tool numeric overrides instead of forcing hidden values', () => {
+    const sanitized = sanitizeChatOverrides({
+      chatId: 'chat',
+      temperature: Number.NaN,
+      topP: Number.POSITIVE_INFINITY,
+      topK: '40' as any,
+      minP: Number.NEGATIVE_INFINITY,
+      repeatPenalty: '1.1' as any,
+      maxToolIterations: Number.NaN,
+      toolResultMaxChars: Number.POSITIVE_INFINITY,
+    })
+
+    expect(sanitized.temperature).toBeUndefined()
+    expect(sanitized.topP).toBeUndefined()
+    expect(sanitized.topK).toBeUndefined()
+    expect(sanitized.minP).toBeUndefined()
+    expect(sanitized.repeatPenalty).toBeUndefined()
+    expect(sanitized.maxToolIterations).toBeUndefined()
+    expect(sanitized.toolResultMaxChars).toBeUndefined()
+  })
+
+  it('drops unknown and malformed persisted chat fields before renderer or request use', () => {
+    const sanitized = sanitizeChatOverrides({
+      chatId: 'authoritative-chat',
+      wireApi: 'anthropic',
+      reasoningEffort: 'ultra',
+      systemPrompt: 42,
+      stopSequences: ['</s>'],
+      workingDirectory: false,
+      builtinToolsEnabled: 'true',
+      enableThinking: 1,
+      hideToolStatus: null,
+      webSearchEnabled: {},
+      braveSearchEnabled: [],
+      fetchUrlEnabled: 'false',
+      fileToolsEnabled: 0,
+      searchToolsEnabled: 1,
+      shellEnabled: 'yes',
+      gitEnabled: 'no',
+      utilityToolsEnabled: 1,
+      unknownSetting: 'must not survive',
+    } as any)
+
+    expect(sanitized).toEqual({ chatId: 'authoritative-chat' })
+  })
+
+  it('preserves supported persisted enum, boolean, and string chat fields', () => {
+    expect(sanitizeChatOverrides({
+      chatId: 'chat',
+      systemPrompt: '',
+      stopSequences: '</s>,<|eot_id|>',
+      workingDirectory: '/Users/example/project',
+      wireApi: 'completions',
+      reasoningEffort: 'max',
+      builtinToolsEnabled: false,
+      enableThinking: false,
+      hideToolStatus: true,
+      webSearchEnabled: false,
+      braveSearchEnabled: true,
+      fetchUrlEnabled: false,
+      fileToolsEnabled: true,
+      searchToolsEnabled: false,
+      shellEnabled: true,
+      gitEnabled: false,
+      utilityToolsEnabled: true,
+    })).toEqual({
+      chatId: 'chat',
+      systemPrompt: '',
+      stopSequences: '</s>,<|eot_id|>',
+      workingDirectory: '/Users/example/project',
+      builtinToolsEnabled: false,
+      enableThinking: false,
+      hideToolStatus: true,
+      webSearchEnabled: false,
+      braveSearchEnabled: true,
+      fetchUrlEnabled: false,
+      fileToolsEnabled: true,
+      searchToolsEnabled: false,
+      shellEnabled: true,
+      gitEnabled: false,
+      utilityToolsEnabled: true,
+      wireApi: 'completions',
+      reasoningEffort: 'max',
+    })
+  })
+
+  it('matches Chat/Responses sampler domains without silently clamping invalid values', () => {
+    expect(sanitizeChatOverrides({
+      chatId: 'chat',
+      temperature: 2,
+      topP: 0.0001,
+      topK: 0,
+      minP: 0,
+      repeatPenalty: 0.01,
+    })).toMatchObject({
+      temperature: 2,
+      topP: 0.0001,
+      topK: 0,
+      minP: 0,
+      repeatPenalty: 0.01,
+    })
+
+    const invalid = sanitizeChatOverrides({
+      chatId: 'chat',
+      temperature: 2.01,
+      topP: 0,
+      topK: -1,
+      minP: 1.01,
+      repeatPenalty: 0,
+    })
+    expect(invalid.temperature).toBeUndefined()
+    expect(invalid.topP).toBeUndefined()
+    expect(invalid.topK).toBeUndefined()
+    expect(invalid.minP).toBeUndefined()
+    expect(invalid.repeatPenalty).toBeUndefined()
+  })
+
+  it('revalidates legacy persisted sampler values before display and every Electron request', () => {
+    const chatIpcSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/ipc/chat.ts'),
+      'utf8',
+    )
+    const requestBoundaryStart = chatIpcSource.indexOf(
+      'const overrides = sanitizeChatOverrides({',
+    )
+    const requestBoundaryEnd = chatIpcSource.indexOf(
+      '// Build request messages with system prompt',
+      requestBoundaryStart,
+    )
+    expect(requestBoundaryStart).toBeGreaterThan(-1)
+    expect(requestBoundaryEnd).toBeGreaterThan(requestBoundaryStart)
+    const requestBoundary = chatIpcSource.slice(
+      requestBoundaryStart,
+      requestBoundaryEnd,
+    )
+    const getOverridesHandler = chatIpcSource.slice(
+      chatIpcSource.indexOf('ipcMain.handle("chat:getOverrides"'),
+      chatIpcSource.indexOf('ipcMain.handle("chat:clearOverrides"'),
+    )
+
+    expect(requestBoundary).toContain('sanitizeChatOverrides({')
+    expect(requestBoundary).toContain('db.getChatOverrides(chatId)')
+    expect(requestBoundary.indexOf('db.getChatOverrides(chatId)')).toBeLessThan(
+      requestBoundary.lastIndexOf('chatId,'),
+    )
+    expect(getOverridesHandler).toContain('sanitizeChatOverrides({')
+    expect(getOverridesHandler).toContain('db.getChatOverrides(chatId)')
+    expect(getOverridesHandler.indexOf('db.getChatOverrides(chatId)')).toBeLessThan(
+      getOverridesHandler.lastIndexOf('chatId,'),
+    )
+  })
+
+  it('sanitizes legacy profiles before storage, renderer delivery, and default-profile inheritance', () => {
+    expect(sanitizeChatProfileOverrides({
+      temperature: 2.1,
+      topP: 0,
+      topK: 0,
+      minP: 0.25,
+      repeatPenalty: -1,
+      maxTokens: 1024,
+      shellEnabled: true,
+    })).toEqual({
+      topK: 0,
+      minP: 0.25,
+      maxTokens: 1024,
+      shellEnabled: true,
+    })
+
+    const inheritedProfile = Object.create({
+      systemPrompt: 'inherited prototype prompt',
+      shellEnabled: true,
+    })
+    Object.assign(inheritedProfile, {
+      temperature: Number.NaN,
+      topP: '0.9',
+      topK: 40.5,
+      minP: Number.POSITIVE_INFINITY,
+      repeatPenalty: 0,
+      maxTokens: '4096',
+      maxThinkingTokens: -1,
+      maxToolIterations: '10',
+      toolResultMaxChars: {},
+      systemPrompt: 42,
+      stopSequences: ['</s>'],
+      workingDirectory: false,
+      wireApi: 'anthropic',
+      reasoningEffort: 'ultra',
+      builtinToolsEnabled: 'true',
+      enableThinking: 1,
+      hideToolStatus: null,
+      webSearchEnabled: {},
+      braveSearchEnabled: [],
+      fetchUrlEnabled: 'false',
+      fileToolsEnabled: 0,
+      searchToolsEnabled: 1,
+      shellEnabled: 'yes',
+      gitEnabled: 'no',
+      utilityToolsEnabled: 1,
+      chatId: 'attacker-owned',
+      unknownSetting: 'must not survive',
+      __futureProfileField: true,
+    })
+
+    expect(sanitizeChatProfileOverrides(inheritedProfile)).toEqual({})
+    expect(sanitizeChatProfileOverrides({
+      systemPrompt: '',
+      stopSequences: '</s>,<|eot_id|>',
+      workingDirectory: '/Users/example/project',
+      wireApi: 'responses',
+      reasoningEffort: 'high',
+      builtinToolsEnabled: false,
+      enableThinking: false,
+      hideToolStatus: true,
+      webSearchEnabled: false,
+      braveSearchEnabled: true,
+      fetchUrlEnabled: false,
+      fileToolsEnabled: true,
+      searchToolsEnabled: false,
+      shellEnabled: true,
+      gitEnabled: false,
+      utilityToolsEnabled: true,
+    })).toEqual({
+      systemPrompt: '',
+      stopSequences: '</s>,<|eot_id|>',
+      workingDirectory: '/Users/example/project',
+      builtinToolsEnabled: false,
+      enableThinking: false,
+      hideToolStatus: true,
+      webSearchEnabled: false,
+      braveSearchEnabled: true,
+      fetchUrlEnabled: false,
+      fileToolsEnabled: true,
+      searchToolsEnabled: false,
+      shellEnabled: true,
+      gitEnabled: false,
+      utilityToolsEnabled: true,
+      wireApi: 'responses',
+      reasoningEffort: 'high',
+    })
+
+    const chatIpcSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/ipc/chat.ts'),
+      'utf8',
+    )
+    const profileHandlers = chatIpcSource.slice(
+      chatIpcSource.indexOf('// Chat Profiles (named presets for chat settings)'),
+      chatIpcSource.indexOf('ipcMain.handle("chat:deleteProfile"'),
+    )
+    const createHandler = chatIpcSource.slice(
+      chatIpcSource.indexOf('const createChatRecord'),
+      chatIpcSource.indexOf('ipcMain.handle(\n    "chat:create"'),
+    )
+
+    expect(profileHandlers).toContain('sanitizeChatProfileOverrides(overrides)')
+    expect(profileHandlers).toContain(
+      'overrides: sanitizeChatProfileOverrides(profile.overrides)',
+    )
+    expect(profileHandlers).toContain(
+      'profile ? sanitizeChatProfileOverrides(profile) : undefined',
+    )
+    expect(createHandler).toContain(
+      'sanitizeChatProfileOverrides(defaultProfile)',
+    )
+  })
+
+  it('chat:setOverrides preserves large model-scale topK overrides instead of clamping to the old UI range', () => {
+    const openPanguVocabTopK = 151_552
+
+    expect(sanitizeChatOverrides({ chatId: 'chat', topK: openPanguVocabTopK }).topK).toBe(openPanguVocabTopK)
+    expect(sanitizeChatOverrides({ chatId: 'chat', topK: CHAT_TOP_K_HARD_MAX + 1 }).topK).toBeUndefined()
+  })
+
+  it('chat settings expands the Top K slider range to the displayed model default', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/src/components/chat/ChatSettings.tsx'),
+      'utf8',
+    )
+
+    // Adaptive MTP never pins the displayed sampler: the user/model fallback
+    // chain is the whole expression.
+    expect(source).toContain('const displayedTopKValue = displayedOverrides.topK ?? displayedModelDefaults.topK')
+    expect(source).not.toContain('mtpGreedyEnforced')
+    expect(source).toContain('Math.max(0, Math.round(displayedTopKValue))')
+    expect(source).toContain('const topKSliderMax = Math.min(')
+    expect(source).toContain('Math.max(CHAT_TOP_K_SLIDER_DEFAULT_MAX, displayedTopK ?? 0)')
+    expect(source).toContain('max={topKSliderMax}')
+    expect(source).not.toContain('min={0} max={200} step={1}')
+  })
+
+  it('offers exact API-valid positive top_p and repetition values alongside the sliders', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/src/components/chat/ChatSettings.tsx'),
+      'utf8',
+    )
+
+    expect(source).toContain('min={topPSliderMin} max={TOP_P_MAX} step="any"')
+    expect(source).toContain('exactInput={{ min: Number.MIN_VALUE, max: TOP_P_MAX }}')
+    expect(source).toContain('exactInput={{ min: Number.MIN_VALUE }}')
+    expect(source).toContain('sanitizeTopPOverride(v)')
+    expect(source).toContain('sanitizeRepetitionPenaltyOverride(v)')
+    expect(source).not.toContain('min={0} max={1} step={0.05}')
+  })
+
+  it('validates and renders OpenAI frequency and presence penalties without making them model defaults', () => {
+    expect(sanitizeChatOverrides({ chatId: 'chat', frequencyPenalty: -2 }).frequencyPenalty).toBe(-2)
+    expect(sanitizeChatOverrides({ chatId: 'chat', frequencyPenalty: 0 }).frequencyPenalty).toBe(0)
+    expect(sanitizeChatOverrides({ chatId: 'chat', frequencyPenalty: 2 }).frequencyPenalty).toBe(2)
+    expect(sanitizeChatOverrides({ chatId: 'chat', frequencyPenalty: 2.01 }).frequencyPenalty).toBeUndefined()
+    expect(sanitizeChatOverrides({ chatId: 'chat', presencePenalty: -2.01 }).presencePenalty).toBeUndefined()
+    expect(sanitizeChatOverrides({ chatId: 'chat', presencePenalty: Number.NaN }).presencePenalty).toBeUndefined()
+
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/src/components/chat/ChatSettings.tsx'),
+      'utf8',
+    )
+    expect(source).toContain("update('frequencyPenalty', sanitized)")
+    expect(source).toContain("update('presencePenalty', sanitized)")
+    expect(source).toContain("t('chat.settings.frequencyPenalty')")
+    expect(source).toContain("t('chat.settings.presencePenalty')")
+  })
+
+  it('wires starred default profiles through the tool-only new-chat inheritance policy', () => {
+    const chatIpcSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/ipc/chat.ts'),
+      'utf8',
+    )
+    const createHandler = chatIpcSource.slice(
+      chatIpcSource.indexOf('const createChatRecord'),
+      chatIpcSource.indexOf('ipcMain.handle(\n    "chat:create"'),
+    )
+    const defaultProfileBranch = createHandler.slice(
+      createHandler.indexOf('if (defaultProfile)'),
+      createHandler.indexOf(
+        '} else {',
+        createHandler.indexOf('if (defaultProfile)'),
+      ),
+    )
+
+    expect(defaultProfileBranch).toContain('buildNewChatInheritedOverrides')
+    expect(defaultProfileBranch).not.toContain('Object.entries(defaultProfile)')
+  })
+
+  it('inherits tool settings from the newest override row across model switches', () => {
+    const chatIpcSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/ipc/chat.ts'),
+      'utf8',
+    )
+    const createHandler = chatIpcSource.slice(
+      chatIpcSource.indexOf('const createChatRecord'),
+      chatIpcSource.indexOf('ipcMain.handle(\n    "chat:create"'),
+    )
+
+    expect(createHandler).toContain('.getRecentChats(100)')
+    expect(createHandler).toContain('candidate.id !== chat.id')
+    expect(createHandler).toContain('db.getChatOverrides(candidate.id)')
+    expect(createHandler).toContain('candidate.overrides !== undefined')
+    expect(createHandler).not.toContain('db.getChatsByModelPath(modelPath)')
+  })
+
+  it('uses a single main-process ensure operation for the initial session chat', () => {
+    const chatIpcSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/ipc/chat.ts'),
+      'utf8',
+    )
+    const sessionViewSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/src/components/sessions/SessionView.tsx'),
+      'utf8',
+    )
+    const ensureHandler = chatIpcSource.slice(
+      chatIpcSource.indexOf('"chat:ensureForModel"'),
+      chatIpcSource.indexOf('ipcMain.handle("chat:getByModel"'),
+    )
+
+    expect(sessionViewSource).toContain('window.api.chat.ensureForModel(')
+    expect(ensureHandler).toContain('db.getChatsByModelPath(modelPath)[0]')
+    expect(ensureHandler).toContain('existing ?? createChatRecord(')
+  })
+})

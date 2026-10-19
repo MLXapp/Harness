@@ -1,0 +1,540 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
+
+vi.mock('electron', () => ({
+  ipcMain: { handle: vi.fn() },
+  dialog: { showOpenDialog: vi.fn() },
+  BrowserWindow: { getAllWindows: () => [] },
+}))
+
+vi.mock('../src/main/database', () => ({
+  db: {
+    getSetting: vi.fn(() => undefined),
+    saveBookmark: vi.fn(),
+  },
+}))
+
+import { hasUsableChatTemplate, readGenerationDefaults } from '../src/main/ipc/models'
+
+const createdDirs: string[] = []
+
+function makeModelDir(
+  files: Record<string, unknown>,
+  prefix = 'vmlx-generation-defaults-',
+): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  createdDirs.push(dir)
+  for (const [name, payload] of Object.entries(files)) {
+    writeFileSync(join(dir, name), JSON.stringify(payload, null, 2))
+  }
+  return dir
+}
+
+afterEach(() => {
+  while (createdDirs.length > 0) {
+    const dir = createdDirs.pop()
+    if (dir) rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+describe('hasUsableChatTemplate', () => {
+  it('accepts the canonical DeepSeek-V4 native Python encoder without Jinja', async () => {
+    const dir = makeModelDir({
+      'config.json': { model_type: 'deepseek_v4' },
+      'tokenizer_config.json': {},
+    }, 'vmlx-chat-template-dsv4-native-')
+    mkdirSync(join(dir, 'encoding'))
+    writeFileSync(
+      join(dir, 'encoding', 'encoding_dsv4.py'),
+      'def encode_messages(messages):\n    return ""\n\ndef parse_message_from_completion_text(text, thinking_mode):\n    return {}\n',
+    )
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(true)
+  })
+
+  it('accepts DeepSeek-V4 with no bundled encoder (engine supplies one)', async () => {
+    // Shipping DSV4 bundles ship no encoding/ dir at all. The engine falls back
+    // to jang_tools' bundled encoding adapter and injects a DSV4 chat template,
+    // so chat, reasoning and tool use all work — warning here was a false alarm.
+    const dir = makeModelDir({
+      'config.json': { model_type: 'deepseek_v4' },
+      'tokenizer_config.json': {},
+    }, 'vmlx-chat-template-dsv4-missing-native-')
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(true)
+  })
+
+  it('rejects DeepSeek-V4 when a bundled encoder is present but incomplete', async () => {
+    // The fail-closed case the check was written for: a truncated or
+    // placeholder encoder that would be picked up ahead of the fallback.
+    const dir = makeModelDir({
+      'config.json': { model_type: 'deepseek_v4' },
+      'tokenizer_config.json': {},
+    }, 'vmlx-chat-template-dsv4-broken-native-')
+    mkdirSync(join(dir, 'encoding'))
+    writeFileSync(
+      join(dir, 'encoding', 'encoding_dsv4.py'),
+      '# TODO: fill in the real encoder\n',
+    )
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(false)
+  })
+
+  it('accepts a current embedded tokenizer chat template', async () => {
+    const dir = makeModelDir({
+      'tokenizer_config.json': {
+        chat_template: '{% for message in messages %}{{ message.content }}{% endfor %}',
+      },
+    }, 'vmlx-chat-template-embedded-')
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(true)
+  })
+
+  it('accepts a standalone chat_template.jinja', async () => {
+    const dir = makeModelDir({}, 'vmlx-chat-template-standalone-')
+    writeFileSync(join(dir, 'chat_template.jinja'), '{{ messages }}')
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(true)
+  })
+
+  it('rejects a bundle with no non-empty chat template', async () => {
+    const dir = makeModelDir({
+      'tokenizer_config.json': { chat_template: '   ' },
+    }, 'vmlx-chat-template-missing-')
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(false)
+  })
+
+  it('rejects an include-only tokenizer stub when its referenced file is absent', async () => {
+    const dir = makeModelDir({
+      'tokenizer_config.json': {
+        chat_template: "{% include 'chat_template.jinja' %}",
+      },
+    }, 'vmlx-chat-template-missing-include-')
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(false)
+  })
+
+  it('accepts an include-only tokenizer stub when its referenced template exists', async () => {
+    const dir = makeModelDir({
+      'tokenizer_config.json': {
+        chat_template: "{% include 'chat_template.jinja' %}",
+      },
+    }, 'vmlx-chat-template-resolved-include-')
+    writeFileSync(
+      join(dir, 'chat_template.jinja'),
+      '{% for message in messages %}{{ message.content }}{% endfor %}',
+    )
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(true)
+  })
+
+  it('rejects an include-only tokenizer stub that traverses outside the bundle', async () => {
+    const outside = makeModelDir({}, 'vmlx-chat-template-outside-')
+    writeFileSync(join(outside, 'outside-template.jinja'), '{{ messages }}')
+    const dir = makeModelDir({
+      'tokenizer_config.json': {
+        chat_template: `{% include '../${basename(outside)}/outside-template.jinja' %}`,
+      },
+    }, 'vmlx-chat-template-traversal-')
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(false)
+  })
+
+  it('rejects an include-only tokenizer stub with an absolute external path', async () => {
+    const outside = makeModelDir({}, 'vmlx-chat-template-absolute-target-')
+    const outsideTemplate = join(outside, 'outside-template.jinja')
+    writeFileSync(outsideTemplate, '{{ messages }}')
+    const dir = makeModelDir({
+      'tokenizer_config.json': {
+        chat_template: `{% include '${outsideTemplate}' %}`,
+      },
+    }, 'vmlx-chat-template-absolute-')
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(false)
+  })
+
+  it('accepts an include-only tokenizer stub backed by a bundle symlink', async () => {
+    const outside = makeModelDir({}, 'vmlx-chat-template-symlink-target-')
+    writeFileSync(join(outside, 'outside-template.jinja'), '{{ messages }}')
+    const dir = makeModelDir({
+      'tokenizer_config.json': {
+        chat_template: "{% include 'chat_template.jinja' %}",
+      },
+    }, 'vmlx-chat-template-symlink-')
+    symlinkSync(
+      join(outside, 'outside-template.jinja'),
+      join(dir, 'chat_template.jinja'),
+    )
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(true)
+  })
+
+  it('accepts a tokenizer config symlink used by Hugging Face snapshots', async () => {
+    const outside = makeModelDir({
+      'outside-tokenizer.json': {
+        chat_template: '{{ messages }}',
+      },
+    }, 'vmlx-chat-template-tokenizer-target-')
+    const dir = makeModelDir({}, 'vmlx-chat-template-tokenizer-symlink-')
+    symlinkSync(
+      join(outside, 'outside-tokenizer.json'),
+      join(dir, 'tokenizer_config.json'),
+    )
+
+    await expect(hasUsableChatTemplate(dir)).resolves.toBe(true)
+  })
+})
+
+describe('readGenerationDefaults generation_config defaults', () => {
+  it('uses standard MLX generation_config.json for non-JANG and VLM bundles', async () => {
+    const dir = makeModelDir({
+      'generation_config.json': {
+        temperature: 0.8,
+        top_p: 0.9,
+        top_k: 40,
+        min_p: 0.02,
+        repetition_penalty: 1.05,
+        max_new_tokens: 8192,
+        max_thinking_tokens: 4096,
+      },
+    }, 'vmlx-generation-defaults-mlx-vl-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      temperature: 0.8,
+      topP: 0.9,
+      topK: 40,
+      minP: 0.02,
+      repeatPenalty: 1.05,
+      maxNewTokens: 8192,
+      maxThinkingTokens: 4096,
+      source: 'generation_config',
+    })
+  })
+
+  it('normalizes disabled top_k sentinels to Off/0 for UI and requests', async () => {
+    const dir = makeModelDir({
+      'generation_config.json': {
+        temperature: 1.0,
+        top_p: 1.0,
+        top_k: -1,
+      },
+    }, 'vmlx-generation-defaults-disabled-topk-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      temperature: 1.0,
+      topP: 1.0,
+      topK: 0,
+      source: 'generation_config',
+    })
+  })
+
+  it('preserves large bundle-owned top_k values for native vocab-sized samplers', async () => {
+    const dir = makeModelDir({
+      'generation_config.json': {
+        temperature: 1.0,
+        top_p: 0.8,
+        top_k: 151_552,
+      },
+    }, 'vmlx-generation-defaults-openpangu-topk-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      temperature: 1.0,
+      topP: 0.8,
+      topK: 151_552,
+      source: 'generation_config',
+    })
+  })
+
+  it('ignores non-positive max_new_tokens instead of surfacing an invalid output default', async () => {
+    const dir = makeModelDir({
+      'generation_config.json': {
+        temperature: 0.8,
+        max_new_tokens: -1,
+      },
+    }, 'vmlx-generation-defaults-invalid-max-new-tokens-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toEqual({
+      temperature: 0.8,
+      source: 'generation_config',
+    })
+  })
+
+  it('treats generation_config do_sample=false as effective greedy sampling', async () => {
+    const dir = makeModelDir({
+      'generation_config.json': {
+        do_sample: false,
+        temperature: 1.0,
+        top_p: 0.95,
+        top_k: 40,
+        max_new_tokens: 2048,
+      },
+    }, 'vmlx-generation-defaults-do-sample-false-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      doSample: false,
+      temperature: 0,
+      topP: 1,
+      topK: 0,
+      maxNewTokens: 2048,
+      source: 'generation_config',
+    })
+  })
+
+  it('lets JANG chat sampling metadata override generation_config.json', async () => {
+    const dir = makeModelDir({
+      'generation_config.json': {
+        do_sample: false,
+        temperature: 0.7,
+        top_p: 0.95,
+        top_k: 20,
+        repetition_penalty: 1.1,
+      },
+      'jang_config.json': {
+        chat: {
+          sampling_defaults: {
+            temperature: 0.55,
+            top_p: 0.92,
+            top_k: 64,
+            repetition_penalty: 1.0,
+          },
+        },
+      },
+    }, 'vmlx-generation-defaults-jang-override-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      temperature: 0.55,
+      topP: 0.92,
+      topK: 64,
+      repeatPenalty: 1.0,
+      source: 'jang_config',
+    })
+    const defaults = await readGenerationDefaults(dir)
+    expect(defaults?.doSample).toBeUndefined()
+  })
+
+  it('surfaces Step Flash JANG greedy chat metadata instead of treating zero temperature as missing', async () => {
+    const dir = makeModelDir({
+      'generation_config.json': {
+        bos_token_id: 0,
+        eos_token_id: [1, 2, 128007],
+      },
+      'jang_config.json': {
+        chat: {
+          reasoning: {
+            default_mode: 'no_think',
+            parser: 'qwen3',
+          },
+          sampling_defaults: {
+            temperature: 0.0,
+            top_p: 1.0,
+            top_k: 0,
+          },
+          tool_calling: {
+            parser: 'step3p5',
+            supported: true,
+          },
+        },
+      },
+    }, 'vmlx-generation-defaults-step37-flash-jang-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      temperature: 0.0,
+      topP: 1.0,
+      topK: 0,
+      source: 'jang_config',
+    })
+  })
+
+  it('returns the qwen3 reasoning-budget capability without inventing sampling defaults', async () => {
+    const dir = makeModelDir({
+      'generation_config.json': {
+        bos_token_id: 1,
+        eos_token_id: 2,
+      },
+      'config.json': {
+        model_type: 'qwen3',
+      },
+    }, 'vmlx-generation-defaults-empty-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toEqual({
+      supportsThinkingBudget: true,
+      source: 'generation_config',
+    })
+  })
+
+  it('marks thinking-budget unsupported when the template has thinking but no budget variable', async () => {
+    const dir = makeModelDir({
+      'generation_config.json': {
+        max_thinking_tokens: 4096,
+      },
+    }, 'vmlx-generation-defaults-thinking-budget-unsupported-')
+    writeFileSync(
+      join(dir, 'chat_template.jinja'),
+      '{% if enable_thinking %}<|think|>{% endif %}',
+    )
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      thinkingBudgetSupported: false,
+      source: 'generation_config',
+    })
+    const defaults = await readGenerationDefaults(dir)
+    expect(defaults?.maxThinkingTokens).toBeUndefined()
+  })
+
+  it('surfaces maxThinkingTokens only when the template consumes thinking_budget', async () => {
+    const dir = makeModelDir({
+      'generation_config.json': {
+        max_thinking_tokens: 4096,
+      },
+    }, 'vmlx-generation-defaults-thinking-budget-supported-')
+    writeFileSync(
+      join(dir, 'chat_template.jinja'),
+      '{% if enable_thinking %}{{ thinking_budget }}<|think|>{% endif %}',
+    )
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      maxThinkingTokens: 4096,
+      thinkingBudgetSupported: true,
+      source: 'generation_config',
+    })
+  })
+})
+
+describe('readGenerationDefaults JANG sampling defaults', () => {
+  it('uses Ling CRACK bundle startup defaults without hidden temperature override', async () => {
+    const dir = makeModelDir({
+      'jang_config.json': {
+        chat: {
+          sampling_defaults: {
+            temperature: 0.6,
+            top_p: 0.95,
+            top_k: 40,
+            min_p: 0.05,
+            repetition_penalty: 1.0,
+          },
+        },
+      },
+    }, 'vmlx-generation-defaults-Ling-2.6-flash-JANGTQ2-CRACK-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      temperature: 0.6,
+      topP: 0.95,
+      topK: 40,
+      minP: 0.05,
+      repeatPenalty: 1.0,
+      source: 'jang_config',
+    })
+  })
+
+  it('uses chat repetition penalty when bundle default reasoning mode is not thinking', async () => {
+    const dir = makeModelDir({
+      'jang_config.json': {
+        chat: {
+          reasoning: { default_mode: 'chat' },
+          sampling_defaults: {
+            temperature: 0.6,
+            top_p: 0.95,
+            repetition_penalty_thinking: 1.0,
+            repetition_penalty_chat: 1.05,
+            max_new_tokens: 4096,
+            thinking_budget: 2048,
+          },
+        },
+      },
+    })
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      temperature: 0.6,
+      topP: 0.95,
+      repeatPenalty: 1.05,
+      maxNewTokens: 4096,
+      maxThinkingTokens: 2048,
+      source: 'jang_config',
+    })
+  })
+
+  it('uses neutral generic repetition penalty for DSV4 direct chat defaults', async () => {
+    const dir = makeModelDir({
+      'config.json': {
+        model_type: 'deepseek_v4',
+      },
+      'jang_config.json': {
+        chat: {
+          reasoning: { default_mode: 'chat' },
+          sampling_defaults: {
+            temperature: 0.6,
+            top_p: 0.95,
+            repetition_penalty: 1.0,
+            repetition_penalty_thinking: 1.0,
+            repetition_penalty_chat: 1.05,
+            max_new_tokens: 4096,
+          },
+        },
+      },
+    }, 'vmlx-generation-defaults-dsv4-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      temperature: 0.6,
+      topP: 0.95,
+      repeatPenalty: 1.0,
+      maxNewTokens: 4096,
+      source: 'jang_config',
+    })
+  })
+
+  it('uses thinking repetition penalty when bundle default reasoning mode is thinking', async () => {
+    const dir = makeModelDir({
+      'jang_config.json': {
+        chat: {
+          reasoning: { default_mode: 'thinking' },
+          sampling_defaults: {
+            repetition_penalty_thinking: 1.0,
+            repetition_penalty_chat: 1.05,
+          },
+        },
+      },
+    })
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      repeatPenalty: 1.0,
+      source: 'jang_config',
+    })
+  })
+})
+
+describe('readGenerationDefaults supportsThinkingBudget capability surfacing', () => {
+  it('surfaces supportsThinkingBudget for an engine-honoring family (qwen3.5)', async () => {
+    const dir = makeModelDir({
+      'config.json': { model_type: 'qwen3_5' },
+      'generation_config.json': { temperature: 0.7 },
+    }, 'vmlx-generation-defaults-stb-qwen35-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      supportsThinkingBudget: true,
+    })
+  })
+
+  it('surfaces supportsThinkingBudget for plain qwen3', async () => {
+    const dir = makeModelDir({
+      'config.json': { model_type: 'qwen3' },
+      'generation_config.json': { temperature: 0.7 },
+    }, 'vmlx-generation-defaults-stb-qwen3-')
+
+    await expect(readGenerationDefaults(dir)).resolves.toMatchObject({
+      supportsThinkingBudget: true,
+    })
+  })
+
+  it('does NOT surface supportsThinkingBudget for deepseek-v4 (no engine thinking budget)', async () => {
+    const dir = makeModelDir({
+      'config.json': { model_type: 'deepseek_v4' },
+      'generation_config.json': { temperature: 0.7 },
+    }, 'vmlx-generation-defaults-stb-dsv4-')
+
+    const defaults = await readGenerationDefaults(dir)
+    expect(defaults?.supportsThinkingBudget).toBeUndefined()
+  })
+})
