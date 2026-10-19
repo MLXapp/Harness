@@ -56,7 +56,7 @@ export function UpdateBanner() {
         href="#"
         onClick={(e) => {
           e.preventDefault()
-          window.open('https://github.com/jjang-ai/mlxstudio')
+          window.open('https://github.com/MLXapp/studio/releases')
         }}
         className="shrink-0 text-muted-foreground hover:text-foreground"
       >

@@ -105,7 +105,7 @@ describe('update manifest validation', () => {
 function isValidUpdateUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
-    const trusted = ['github.com', 'mlx.studio']
+    const trusted = ['github.com', 'mlx.app']
     return parsed.protocol === 'https:' && trusted.some(d => parsed.hostname === d || parsed.hostname.endsWith(`.${d}`))
   } catch {
     return false
@@ -117,8 +117,8 @@ describe('update URL validation', () => {
     expect(isValidUpdateUrl('https://github.com/jjang-ai/mlxstudio/releases/tag/v1.0.0')).toBe(true)
   })
 
-  it('accepts trusted mlx.studio updater URL', () => {
-    expect(isValidUpdateUrl('https://mlx.studio/update/latest.json')).toBe(true)
+  it('accepts trusted studio.mlx.app updater URL', () => {
+    expect(isValidUpdateUrl('https://studio.mlx.app/update/latest.json')).toBe(true)
   })
 
   it('rejects githubusercontent.com (not github.com)', () => {
@@ -223,5 +223,42 @@ describe('multi-source update manifests', () => {
 
     expect(selectHighestRelease([staleSite, rawGitHub])).toEqual(rawGitHub)
     expect(selectHighestRelease([rawGitHub, staleSite])).toEqual(rawGitHub)
+  })
+})
+
+describe('MLX Studio update feed', () => {
+  it('reads latest.json from MLXapp/studio and trusts studio.mlx.app downloads', async () => {
+    const { LATEST_MANIFEST_URL, RELEASES_PAGE } = await import('../src/main/update-manifest')
+    expect(LATEST_MANIFEST_URL).toBe('https://raw.githubusercontent.com/MLXapp/studio/main/latest.json')
+    expect(RELEASES_PAGE).toBe('https://github.com/MLXapp/studio/releases')
+    expect(isValidUpdateUrlFromSource('https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Studio-0.2.0-arm64.dmg')).toBe(true)
+    expect(isValidUpdateUrlFromSource('https://studio.mlx.app/download')).toBe(true)
+    expect(isValidUpdateUrlFromSource('https://mlx.studio/update/latest.json')).toBe(false)
+    expect(isValidUpdateUrlFromSource('https://evilmlx.app/x.dmg')).toBe(false)
+  })
+
+  it('accepts a manifest without a download and stays quiet about it', async () => {
+    const { parseLatestRelease, decideUpdate } = await import('../src/main/update-manifest')
+    const fs = await import('fs')
+    const shipped = parseLatestRelease(JSON.parse(fs.readFileSync('../latest.json', 'utf-8')))
+    expect(shipped?.version).toBe('0.1.0')
+    expect(shipped?.url).toBe('')
+    expect(decideUpdate(shipped!, '0.1.0', '15.6.0')).toEqual({ kind: 'current' })
+
+    const announced = parseLatestRelease({ version: '0.2.0', downloads: {} })!
+    expect(decideUpdate(announced, '0.1.0', '15.6.0')).toEqual({ kind: 'no-download', version: '0.2.0' })
+    expect(decideUpdate(announced, '0.1.0', '26.1.0')).toEqual({ kind: 'no-download', version: '0.2.0' })
+    expect(parseLatestRelease({ url: 'https://github.com/x' })).toBeNull()
+    expect(parseLatestRelease('nope')).toBeNull()
+  })
+
+  it('announces a newer release only with a trusted download', async () => {
+    const { decideUpdate } = await import('../src/main/update-manifest')
+    const url = 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Studio-0.2.0-arm64.dmg'
+    const ok = decideUpdate({ version: '0.2.0', url }, '0.1.0', '15.6.0')
+    expect(ok.kind).toBe('available')
+    expect(ok.kind === 'available' && ok.release.url).toBe(url)
+    expect(decideUpdate({ version: '0.2.0', url: 'https://evil.example/x.dmg' }, '0.1.0', '15.6.0').kind).toBe('untrusted')
+    expect(decideUpdate({ version: '0.1.0', url }, '0.1.0', '15.6.0').kind).toBe('current')
   })
 })

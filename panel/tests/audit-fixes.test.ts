@@ -18,7 +18,7 @@ import {
 function isValidUpdateUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
-    const trusted = ['github.com', 'mlx.studio']
+    const trusted = ['github.com', 'mlx.app']
     return parsed.protocol === 'https:' && trusted.some(d => parsed.hostname === d || parsed.hostname.endsWith(`.${d}`))
   } catch {
     return false
@@ -34,8 +34,8 @@ describe('update URL validation', () => {
     expect(isValidUpdateUrl('https://releases.github.com/download/v1.0.0')).toBe(true)
   })
 
-  it('accepts trusted mlx.studio updater URL', () => {
-    expect(isValidUpdateUrl('https://mlx.studio/update/latest.json')).toBe(true)
+  it('accepts trusted studio.mlx.app updater URL', () => {
+    expect(isValidUpdateUrl('https://studio.mlx.app/update/latest.json')).toBe(true)
   })
 
   it('rejects evilgithub.com (lookalike)', () => {

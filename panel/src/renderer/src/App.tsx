@@ -383,7 +383,6 @@ function ChatModeContent({ activeChatId, sessionEndpoint, sessionStatus, activeS
   )
 }
 
-// vMLX / mlxstudio — authored by Jinho Jang
 function ChatEmptyState({ onNewChat }: { onNewChat: () => void }) {
   const { t } = useTranslation()
   return (
@@ -513,10 +512,9 @@ function ServerModeContent() {
               <p className="text-xs text-muted-foreground/70">{t('app.about.creator')}</p>
               <AppVersion />
               <div className="flex flex-wrap gap-4 text-xs">
-                <a href="https://mlx.studio" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">mlx.studio</a>
-                <a href="https://github.com/jjang-ai/vmlx" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">GitHub</a>
-                <a href="https://jangq.ai" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">JANG</a>
-                <a href="https://ko-fi.com/jinhojang" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Ko-fi</a>
+                <a href="https://studio.mlx.app" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">studio.mlx.app</a>
+                <a href="https://github.com/MLXapp/studio" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">GitHub</a>
+                <a href="https://github.com/jjang-ai/vmlx" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">vMLX</a>
               </div>
             </section>
           </div>
