@@ -39,7 +39,7 @@ export function classifyLargeModelMemoryPreflight(input: {
     return {
       action: 'warn',
       message: appendMetalWiredLimitGuidance(
-        `Memory warning: only ${availGB} GB free for a ~${modelGB} GB model (${usagePercent.toFixed(0)}% used). Loading anyway; if it fails with an out of memory error, closing other apps or stopping running vMLX sessions frees memory.`
+        `Memory warning: only ${availGB} GB free for a ~${modelGB} GB model (${usagePercent.toFixed(0)}% used). Loading anyway; if it fails with an out of memory error, closing other apps or stopping running MLX Studio sessions frees memory.`
       ),
     }
   }
