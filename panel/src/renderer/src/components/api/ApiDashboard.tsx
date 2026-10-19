@@ -182,8 +182,8 @@ export function ApiDashboard() {
           <p className="text-sm text-muted-foreground mt-1">
             {t('api.gatewayIntro')}
           </p>
-          <p className="text-[9px] text-muted-foreground/40 mt-0.5">
-            MLX Studio by Jinho Jang &middot; mlx.studio
+          <p className="text-[11px] text-muted-foreground/60 mt-1">
+            {t('api.credit')}
           </p>
         </div>
 

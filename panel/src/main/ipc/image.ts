@@ -1,4 +1,4 @@
-// MLX Studio Image System — mlx.studio — Jinho Jang
+// MLX Studio Image System (from vMLX by JANGQ AI)
 import { imageEditBody } from '../../shared/imageNativeInputs'
 import { ipcMain } from 'electron'
 import { v4 as uuidv4 } from 'uuid'

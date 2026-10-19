@@ -1,6 +1,6 @@
 import './user-data-dir'
 import { getPowerMode } from './powerMode'
-import { app, BrowserWindow, ipcMain, dialog, shell, session } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, session, nativeTheme } from 'electron'
 import { join } from 'path'
 import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -175,7 +175,8 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    backgroundColor: '#1A1C1D',
+    // Match the renderer's first paint (MLX tokens) so no flash on open.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#eceef2',
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -424,7 +425,16 @@ app.whenReady().then(async () => {
   if (is.dev && process.platform === 'darwin') {
     app.dock?.setIcon(join(app.getAppPath(), 'resources/icon.png'))
   }
-  electronApp.setAppUserModelId('net.vmlx.app')
+  electronApp.setAppUserModelId('app.mlx.studio')
+  // MLX Studio is a modified version of vMLX (Apache-2.0); the About panel
+  // always carries the credit.
+  app.setAboutPanelOptions({
+    applicationName: 'MLX Studio',
+    applicationVersion: app.getVersion(),
+    copyright: 'Copyright 2026 Flex UK Limited (MLX Network)',
+    credits: 'Built on vMLX by JANGQ AI (Apache License 2.0)',
+    website: 'https://studio.mlx.app',
+  })
 
   // Main-process i18n: load all 5 locale JSONs. The active locale is
   // restored from the DB setting on boot (if any) and overridden by the

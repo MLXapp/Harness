@@ -510,7 +510,7 @@ export function installEngineStreaming(
   if (app.isPackaged && process.mas) {
     onComplete({
       success: false,
-      error: 'In-app engine updates are disabled in the Mac App Store version due to App Sandbox constraints. Please update vMLX via the App Store to receive engine updates.'
+      error: 'In-app engine updates are disabled in the Mac App Store version due to App Sandbox constraints. Please update MLX Studio via the App Store to receive engine updates.'
     })
     return
   }

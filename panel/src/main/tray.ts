@@ -1,5 +1,5 @@
 /**
- * Menu bar tray for vMLX.
+ * Menu bar tray for MLX Studio.
  *
  * Shows model status, memory usage, and provides quick controls.
  * Window close keeps app alive in system tray when enabled.
@@ -84,7 +84,7 @@ function createTrayIcon(color: 'green' | 'yellow' | 'red' | 'gray'): Electron.Na
 
 function reportActionError(error: unknown): void {
   console.error('[TRAY] Action failed:', error)
-  void dialog.showMessageBox({ type: 'error', title: 'vMLX', message: t('main.tray.actionFailed'), detail: String(error) }).catch(failure => console.warn('[TRAY] Could not show error:', failure))
+  void dialog.showMessageBox({ type: 'error', title: 'MLX Studio', message: t('main.tray.actionFailed'), detail: String(error) }).catch(failure => console.warn('[TRAY] Could not show error:', failure))
 }
 
 async function runSessionAction(id: string, action: () => Promise<unknown>, processManager: ProcessManager, getWindow: () => BrowserWindow | null): Promise<void> {
@@ -334,7 +334,7 @@ export function createTray(
 
   // macOS: clicking tray icon opens the context menu automatically (setContextMenu).
   // No 'click' handler — adding one causes BOTH the menu AND window to open on every click.
-  // "Open vMLX Window" menu item handles showing the window explicitly.
+  // "Open MLX Studio Window" menu item handles showing the window explicitly.
 
   // Listen for process state changes to update tray (store refs for cleanup)
   boundProcessManager = processManager

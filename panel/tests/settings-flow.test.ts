@@ -1014,7 +1014,7 @@ describe('KV Cache Quantization', () => {
         )
         const help = locale.chat.settings.thinkingHelp
 
-        expect(help).toContain('local vMLX')
+        expect(help).toContain('local MLX Studio')
         expect(help).toContain('model/runtime reasoning default')
         expect(help).toContain('request thinking')
         expect(help).toContain('Off')
@@ -4890,7 +4890,7 @@ describe('Settings → CLI Round-Trip Completeness', () => {
         const sessions = readFileSync('src/main/sessions.ts', 'utf8')
         expect(sessions).toContain('ensureOwnedSessionPortAvailable(session)')
         expect(sessions).toContain('terminateDetectedEngineForSession(session)')
-        expect(sessions).toContain('vMLX did not terminate the unowned process')
+        expect(sessions).toContain('MLX Studio did not terminate the unowned process')
         expect(sessions).not.toContain('lsof -ti tcp:')
         expect(sessions).not.toContain('killByPort(')
     })

@@ -3281,7 +3281,7 @@ export class SessionManager extends EventEmitter {
         const message = appendMetalWiredLimitGuidance(
           `Memory estimate: ${admissionAdvisory}. Starting anyway — this is an ` +
           `estimate, not a limit. If it does fail to load, closing other apps or ` +
-          `stopping running vMLX sessions frees memory.`
+          `stopping running MLX Studio sessions frees memory.`
         )
         console.warn(`[SESSION] ${message}`)
         this.emit('session:log', { sessionId, data: `⚠️  ${message}\n` })
@@ -3921,7 +3921,7 @@ export class SessionManager extends EventEmitter {
       if (config.port !== session.port && !(await this.isPortFree(config.port))) {
         throw new Error(
           `Port ${config.port} is already in use by another application. ` +
-          'vMLX will not stop or replace an unowned process.',
+          'MLX Studio will not stop or replace an unowned process.',
         )
       }
     }
@@ -5677,7 +5677,7 @@ export class SessionManager extends EventEmitter {
         // reports we've seen. Fail fast with a clear message instead.
         console.error(
           '[SESSIONS] Bundled Python present but vmlx_engine dist-info is missing. ' +
-          'Reinstall vMLX from the latest DMG — spawning a system binary would ship ' +
+          'Reinstall MLX Studio from the latest DMG — spawning a system binary would ship ' +
           'outdated code.'
         )
         return null
@@ -5834,7 +5834,7 @@ export class SessionManager extends EventEmitter {
     if (terminated && await this.isPortFree(session.port)) return
     throw new Error(
       `Port ${session.port} is already in use by another application. ` +
-      'vMLX did not terminate the unowned process; choose another port.',
+      'MLX Studio did not terminate the unowned process; choose another port.',
     )
   }
 
