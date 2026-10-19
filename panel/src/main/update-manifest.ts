@@ -1,6 +1,7 @@
 export interface ReleaseAsset {
   url: string
   sha256?: string
+  size?: number
 }
 
 /** Where MLX Studio releases are published (the updater feed lives in that repo). */
@@ -12,6 +13,9 @@ export interface LatestRelease {
   /** Empty until a build has been published for this version. */
   url: string
   sha256?: string
+  /** DMG size in bytes (for `url`). */
+  size?: number
+  date?: string
   notes?: string
   tahoeUrl?: string
   tahoeSha256?: string
@@ -63,6 +67,12 @@ function currentMacOSVersion(): string | undefined {
   return typeof getter === 'function' ? getter() : undefined
 }
 
+/** An asset's size: its own, or the top-level one when it is the same file as `url`. */
+function assetSize(asset: ReleaseAsset, release: LatestRelease): number | undefined {
+  if (typeof asset.size === 'number') return asset.size
+  return asset.url === release.url && typeof release.size === 'number' ? release.size : undefined
+}
+
 export function selectDownloadForMacOS(
   release: LatestRelease,
   systemVersion = currentMacOSVersion(),
@@ -70,21 +80,24 @@ export function selectDownloadForMacOS(
   const major = macOSMajorVersion(systemVersion)
   if (major === null || major < 26) {
     const sequoia = release.downloads?.sequoia
-    return sequoia?.url ? { ...release, url: sequoia.url, sha256: sequoia.sha256 ?? release.sha256 } : release
+    return sequoia?.url
+      ? { ...release, url: sequoia.url, sha256: sequoia.sha256 ?? (sequoia.url === release.url ? release.sha256 : undefined), size: assetSize(sequoia, release) }
+      : release
   }
 
   const tahoe = release.downloads?.tahoe
   if (tahoe?.url) {
-    return { ...release, url: tahoe.url, sha256: tahoe.sha256 }
+    return { ...release, url: tahoe.url, sha256: tahoe.sha256, size: assetSize(tahoe, release) }
   }
   if (release.tahoeUrl) {
-    return { ...release, url: release.tahoeUrl, sha256: release.tahoeSha256 }
+    return { ...release, url: release.tahoeUrl, sha256: release.tahoeSha256, size: undefined }
   }
   if (release.url.includes('-sequoia-arm64.dmg')) {
     return {
       ...release,
       url: release.url.replace('-sequoia-arm64.dmg', '-tahoe-arm64.dmg'),
       sha256: undefined,
+      size: undefined,
     }
   }
   return release

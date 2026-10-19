@@ -4,7 +4,7 @@ const { app, Menu } = vi.hoisted(() => ({
   Menu: { buildFromTemplate: vi.fn(x => x), setApplicationMenu: vi.fn() },
 }))
 vi.mock('electron', () => ({ app, Menu }))
-import { acknowledgeMenuReadiness, installApplicationMenu, navigateFromMenu, resetMenuReadiness } from '../src/main/application-menu'
+import { acknowledgeMenuReadiness, installApplicationMenu, navigateFromMenu, resetMenuReadiness, setUpdateCheckHandler } from '../src/main/application-menu'
 import { isNativeNavigationAction } from '../src/shared/nativeNavigation'
 
 function windowMock(id = 1) {
@@ -54,5 +54,24 @@ describe('native menu navigation lifecycle', () => {
     expect(isNativeNavigationAction('new-chat')).toBe(true)
     expect(isNativeNavigationAction({ mode: 'servers' })).toBe(false)
     expect(isNativeNavigationAction('run-command')).toBe(false)
+  })
+  it('puts Check for Updates… right under About in the MLX Studio menu', () => {
+    const real = process.platform
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
+    try {
+      const check = vi.fn()
+      setUpdateCheckHandler(check)
+      installApplicationMenu(() => windowMock())
+      const template = Menu.buildFromTemplate.mock.calls.at(-1)[0]
+      const appMenu = template[0].submenu
+      expect(appMenu[0]).toEqual({ role: 'about' })
+      expect(appMenu[1].label).toBe('Check for Updates…')
+      appMenu[1].click()
+      expect(check).toHaveBeenCalledOnce()
+      setUpdateCheckHandler(null)
+      expect(() => appMenu[1].click()).not.toThrow()
+    } finally {
+      Object.defineProperty(process, 'platform', { value: real })
+    }
   })
 })

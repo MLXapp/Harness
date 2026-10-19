@@ -399,14 +399,19 @@ declare global {
       app: {
         getPowerMode: () => Promise<import('./shared/powerMode').PowerModeStatus>;
         getVersion: () => Promise<string>;
-        onUpdateAvailable: (
-          callback: (data: {
-            currentVersion: string;
-            latestVersion: string;
-            url: string;
-            notes?: string;
-          }) => void,
+        /** In-app updater state (see src/shared/appUpdate.ts). */
+        getUpdateState: () => Promise<import('./shared/appUpdate').UpdateState>;
+        onUpdateState: (
+          callback: (state: import('./shared/appUpdate').UpdateState) => void,
         ) => () => void;
+        /** Update: download, verify and stage (or open the download when this copy can't update itself). */
+        installUpdate: () => Promise<void>;
+        /** Quit; the staged update is swapped in and MLX Studio relaunches. */
+        restartToUpdate: () => Promise<void>;
+        /** Later: hide the banner until the next version or the next launch. */
+        dismissUpdate: () => Promise<void>;
+        /** Download manually (the DMG, or the release page after a failed install). */
+        openUpdateDownload: () => Promise<void>;
         onMtpComponentUpdateAvailable: (
           callback: (data: {
             repoId: string;

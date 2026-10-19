@@ -71,8 +71,30 @@ are a crypto asset; read the [risks](https://mlx.app/risks).
 ## Install
 
 Download the DMG from [Releases](https://github.com/MLXapp/studio/releases) when one
-is published (macOS 14.5 or newer, Apple Silicon). The app checks
-`latest.json` in this repository for updates.
+is published (macOS 14.5 or newer, Apple Silicon) and drag MLX Studio to
+Applications.
+
+### Updates
+
+MLX Studio updates itself. It checks `latest.json` in this repository at launch,
+every 6 hours, and when you choose **MLX Studio → Check for Updates…**. When a new
+version is out, a banner appears at the top of the window (and a notification, once
+per version, if MLX Studio isn't in front). Click **Update**: it downloads the new
+version with a progress bar, checks it (size, SHA-256, Developer ID signature from
+our team, Apple notarization, newer version), then shows **Restart to update**.
+MLX Studio quits, swaps in the new copy at the same place and opens again. If you
+quit instead, the update is installed for the next launch. **Later** hides the
+banner until the next version or the next launch.
+
+If MLX Studio can't replace itself (it runs from the disk image or straight from
+Downloads under App Translocation, or its folder isn't writable), the banner says
+why and **Download** gets the DMG instead; drag the new copy over the old one.
+
+**Shipping an update:** bump `version` in `panel/package.json`, commit to `main`,
+then run the **MLX Studio** workflow (Actions → MLX Studio → Run workflow) with
+**release** checked. It builds, signs and notarizes the DMG, publishes the
+`v<version>` release and rewrites `latest.json`; running copies find it within 6
+hours, or right away with Check for Updates…. Details: [docs/MLX-STUDIO.md](docs/MLX-STUDIO.md#updates).
 
 ## Build from source
 

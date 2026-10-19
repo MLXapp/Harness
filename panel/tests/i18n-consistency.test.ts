@@ -470,40 +470,53 @@ describe('i18n locale consistency', () => {
     )
     expect(appSrc).toMatch(/<UpdateBanner\s*\/>/)
     expect(updateBannerSrc).toContain('useTranslation')
-    expect(updateBannerSrc).toContain('window.api.app.onUpdateAvailable')
-    expect(updateBannerSrc).toContain('return unsub')
-    expect(updateBannerSrc).toContain(
-      "localStorage.getItem('vmlx-dismissed-update')",
-    )
-    expect(updateBannerSrc).toContain('prev !== data.latestVersion')
-    expect(updateBannerSrc).toContain(
-      "localStorage.setItem('vmlx-dismissed-update', update.latestVersion)",
-    )
+    expect(updateBannerSrc).toContain('window.api.app.onUpdateState')
+    expect(updateBannerSrc).toContain('unsub()')
     for (const key of [
       'update.banner.versionLabel',
       'update.banner.available',
+      'update.banner.update',
+      'update.banner.later',
       'update.banner.download',
-      'update.banner.starOnGitHub',
-      'update.banner.dismissTitle',
+      'update.banner.downloadManually',
+      'update.banner.downloading',
+      'update.banner.progress',
+      'update.banner.verifying',
+      'update.banner.verifyingDetail',
+      'update.banner.ready',
+      'update.banner.restart',
+      'update.banner.failed',
+      'update.banner.retry',
     ]) {
       expect(updateBannerSrc).toContain(`t('${key}'`)
     }
     for (const staleLiteral of [
       "CURRENT_NOTICE_VERSION = '1.5.45'",
       '>Download<',
+      '>Update<',
+      '>Later<',
       '>Star on GitHub<',
       'title="Dismiss"',
     ]) {
       expect(updateBannerSrc).not.toContain(staleLiteral)
     }
 
+    const reasons = Object.keys(locales.en.update.reason)
+    expect(reasons.length).toBeGreaterThanOrEqual(19)
     for (const l of LOCALES) {
-      const banner = locales[l].update.banner
-      expect(banner.versionLabel).toContain('{version}')
-      expect(banner.available.trim()).not.toBe('')
-      expect(banner.download.trim()).not.toBe('')
-      expect(banner.starOnGitHub.trim()).not.toBe('')
-      expect(locales[l].update.notice).toBeUndefined()
+      const update = locales[l].update
+      expect(update.banner.versionLabel).toContain('{version}')
+      for (const k of ['downloading', 'verifying', 'ready', 'failed']) expect(update.banner[k]).toContain('{version}')
+      expect(update.banner.progress).toContain('{received}')
+      expect(update.banner.progress).toContain('{total}')
+      expect(update.banner.available.trim()).not.toBe('')
+      expect(update.banner.restart.trim()).not.toBe('')
+      expect(Object.keys(update.reason)).toEqual(reasons)
+      expect(update.menu.check.endsWith('…')).toBe(true)
+      expect(update.notification.title).toContain('{version}')
+      expect(update.dialog.upToDateDetail).toContain('{version}')
+      expect(update.dialog.availableDetail).toContain('{current}')
+      expect(update.notice).toBeUndefined()
     }
   })
 
