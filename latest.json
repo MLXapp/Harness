@@ -1,6 +1,14 @@
 {
   "version": "0.1.0",
-  "url": "",
-  "downloads": {},
-  "notes": "MLX Studio 0.1.0. No download has been published yet; releases will appear at https://github.com/MLXapp/studio/releases."
+  "url": "https://github.com/MLXapp/studio/releases/download/v0.1.0/MLX-Studio-0.1.0-arm64.dmg",
+  "sha256": "30ae29d2ece41ea303756fffcff49b4855b54ff6296d128d0c765b64e20d4c1b",
+  "size": 587884316,
+  "date": "2026-10-19",
+  "downloads": {
+    "sequoia": {
+      "url": "https://github.com/MLXapp/studio/releases/download/v0.1.0/MLX-Studio-0.1.0-arm64.dmg",
+      "sha256": "30ae29d2ece41ea303756fffcff49b4855b54ff6296d128d0c765b64e20d4c1b"
+    }
+  },
+  "notes": "MLX Studio 0.1.0. Signed and notarized. Carries MLX Node inside."
 }
