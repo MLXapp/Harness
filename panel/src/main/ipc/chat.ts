@@ -38,6 +38,12 @@ import {
 import { FileReadTracker } from "../agent/readGuard";
 import { RepeatCallTracker, appendReminder } from "../agent/repeatCallReminder";
 import { parseStoredTodos, parseTodoWriteArgs, renderTodoList } from "../agent/todos";
+import {
+  LEAN_AGENTIC_SYSTEM_PROMPT,
+  applyToolPreset,
+  normalizeToolPreset,
+  orderToolsForPrefixCache,
+} from "../agent/toolPresets";
 import { loadProjectInstructions } from "../agent/projectInstructions";
 import { detectModelConfigFromDir } from "../model-config-registry";
 import { localEngineReadyFromHealthBody } from "../engineReadiness";
@@ -648,6 +654,11 @@ function clearChatAgentRuntime(chatId: string): void {
     rmSync(join(agentSpillRoot(), chatId), { recursive: true, force: true });
   } catch (_) {}
 }
+
+/** Canonical tool order for the cached prompt prefix (registry order). */
+const BUILTIN_TOOL_ORDER: readonly string[] = BUILTIN_TOOLS.map(
+  (tool) => tool.function.name,
+);
 
 // Tool category definitions for per-category filtering
 const FILE_TOOLS = new Set([
@@ -1751,11 +1762,25 @@ export function registerChatHandlers(
         (chatIsMultimodal || isRemote) && attachBuiltinToolsForCurrentTurn
           ? DIRECT_MEDIA_ATTACHMENT_TOOL_RULE
           : "";
+      // Lean preset: a minimal tool set (and a shorter system prompt) for
+      // small models. The AppleScript specialist keeps its bundle-owned
+      // single-tool catalog either way.
+      const leanToolPreset =
+        normalizeToolPreset(overrides?.toolPreset) === "lean" &&
+        !chatUsesZayaAppleScriptToolBundle;
+      // Prefix-cache discipline: the catalog depends only on chat settings
+      // and is always emitted in the registry's canonical order.
       const unscopedCurrentTurnToolDefinitions =
         attachBuiltinToolsForCurrentTurn
-          ? filterTools(overrides || {}, {
-              zayaAppleScriptToolBundle: chatUsesZayaAppleScriptToolBundle,
-            })
+          ? orderToolsForPrefixCache(
+              applyToolPreset(
+                filterTools(overrides || {}, {
+                  zayaAppleScriptToolBundle: chatUsesZayaAppleScriptToolBundle,
+                }),
+                leanToolPreset ? "lean" : "full",
+              ),
+              BUILTIN_TOOL_ORDER,
+            )
           : [];
       const exactFinalToolNames =
         overrides?.builtinToolsEnabled === true
@@ -1849,7 +1874,9 @@ export function registerChatHandlers(
       ) {
         requestMessages.push({
           role: "system",
-          content: AGENTIC_SYSTEM_PROMPT + directMediaAttachmentRule,
+          content: leanToolPreset
+            ? LEAN_AGENTIC_SYSTEM_PROMPT + directMediaAttachmentRule
+            : AGENTIC_SYSTEM_PROMPT + directMediaAttachmentRule,
         });
       } else if (directMediaAttachmentRule) {
         requestMessages.push({
@@ -2358,6 +2385,22 @@ export function registerChatHandlers(
             },
           );
 
+        // ── Prefix-cache discipline ─────────────────────────────────────────
+        // The engine (paged/memory/disk prefix caches) and remote providers
+        // only reuse work for an IDENTICAL token prefix: system prompt, then
+        // tool schemas, then messages in order. Within a chat session:
+        //  1. The system prompt is built once per turn from chat settings
+        //     (custom prompt / agentic prompt / project instructions) and is
+        //     never edited afterwards.
+        //  2. The tool catalog depends on chat settings only and is emitted in
+        //     the registry's canonical order (orderToolsForPrefixCache).
+        //  3. Per-turn additions — tool results, repeat-call notes, media
+        //     follow-ups, recovery prompts — are APPENDED to requestMessages.
+        //     Earlier messages are never rewritten in place.
+        //  4. Compaction is the single deliberate exception: it replaces one
+        //     older span with a checkpoint once, and its summary request
+        //     replays the same prefix + tools with the instruction appended
+        //     last, so even that call reuses the warm cache.
         // Build request body — shared between initial request and tool follow-ups
         const buildRequestBody = (): Record<string, any> => {
           const resolvedOutputBudget = dsv4OutputBudget(
