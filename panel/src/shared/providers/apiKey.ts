@@ -51,6 +51,26 @@ export function checkApiKey(raw: string): ApiKeyCheck {
 }
 
 /**
+ * Tidy a pasted key before it is judged: surrounding whitespace, one pair of
+ * quotes, an `export NAME=` / `NAME=` / `NAME: ` prefix, `Bearer ` and a
+ * trailing `;` are removed, so a line copied from a .env file or a curl
+ * example still works. Anything else is left for `checkApiKey` to judge.
+ */
+export function cleanPastedKey(raw: string): string {
+  let value = typeof raw === 'string' ? raw.trim() : ''
+  for (let pass = 0; pass < 3; pass++) {
+    const before = value
+    value = value.replace(/^export\s+/, '')
+    const env = /^[A-Z][A-Z0-9_]*\s*[=:]\s*(?!=)([\s\S]+)$/.exec(value)
+    if (env) value = env[1].trim()
+    if (isQuoted(value)) value = value.slice(1, -1).trim()
+    value = value.replace(/^Bearer\s+/i, '').replace(/;$/, '').trim()
+    if (value === before) break
+  }
+  return value
+}
+
+/**
  * Field-level verdict for the key input. An empty field is not a failure (it
  * means "keep the stored key"); whitespace only is.
  */

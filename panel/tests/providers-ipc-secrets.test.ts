@@ -122,7 +122,7 @@ describe('provider IPC never returns secrets', () => {
     expect(providersBlock).toContain("ipcRenderer.invoke('providers:setKey'")
     expect(providersBlock).not.toMatch(/getKey|resolveCredential|readKey/)
     expect([...h.handlers.keys()].filter(c => c.startsWith('providers:')).sort()).toEqual([
-      'providers:catalog', 'providers:clearChatModel', 'providers:clearKey', 'providers:delete', 'providers:discover',
+      'providers:catalog', 'providers:checkKey', 'providers:clearChatModel', 'providers:clearKey', 'providers:delete', 'providers:discover',
       'providers:getChatModel', 'providers:importRemoteSession', 'providers:list', 'providers:probeLocal',
       'providers:remoteSessionCandidates', 'providers:save', 'providers:setChatModel', 'providers:setKey',
     ])

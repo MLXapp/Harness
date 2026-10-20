@@ -3059,7 +3059,7 @@ describe('Default IP and New Settings', () => {
         const detectEnd = source.indexOf('// Auto-detect image model type', detectStart)
         const detectBlock = source.slice(detectStart, detectEnd)
         const launchStart = source.indexOf('const handleLaunch = async')
-        const launchEnd = source.indexOf('const handleLaunchRemote', launchStart)
+        const launchEnd = source.indexOf('const handleBrowseDirectory', launchStart)
         const launchBlock = source.slice(launchStart, launchEnd)
 
         expect(detectBlock).toContain('usePagedCache: false')

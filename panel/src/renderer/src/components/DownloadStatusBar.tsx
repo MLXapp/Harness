@@ -93,7 +93,10 @@ export function DownloadStatusBar({ onComplete }: DownloadStatusBarProps) {
       });
       // Download moved from queue to active — decrement queue count
       setQueueCount((prev) => Math.max(0, prev - 1));
-      window.api.models.openDownloadWindow();
+      // First-run setup shows its own progress; no extra window over it.
+      if (!document.documentElement.hasAttribute("data-mlx-onboarding")) {
+        window.api.models.openDownloadWindow();
+      }
     });
     const unsubQueued = window.api.models.onDownloadQueued?.((_data: any) => {
       setQueueCount((prev) => prev + 1);

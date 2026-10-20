@@ -163,7 +163,7 @@ export function readListing(body: unknown): DiscoveredModel[] {
   return out
 }
 
-async function readBounded(response: Response, url: string): Promise<string> {
+export async function readBounded(response: Response, url: string): Promise<string> {
   const oversized = () => new DiscoveryError(`${url} answered with more than ${MAX_RESPONSE_BYTES} bytes`, 'DISCOVERY_FAILED')
   const declared = Number(response.headers?.get?.('content-length') ?? Number.NaN)
   if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {

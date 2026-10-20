@@ -20,9 +20,13 @@ import { MetalMemoryNotice } from './components/MetalMemoryNotice'
 import { useAppState } from './contexts/AppStateContext'
 import { useSessionsContext } from './contexts/SessionsContext'
 import { ChatModeToolbar } from './components/layout/ChatModeToolbar'
-import { ModelProvidersPreference } from './components/settings/ModelProvidersPreference'
+import { AccountsPreference } from './components/accounts/AccountsPreference'
+import { AccountSheetsHost } from './components/accounts/AccountSheetsHost'
+import { ONBOARDING_EVENT } from './components/accounts/events'
+import { Onboarding } from './components/setup/Onboarding'
+import { ONBOARDING_DONE_KEY, shouldShowOnboarding, type StartChoice } from '../../shared/accountSetup'
 import { groupPickerEntries } from '../../shared/providers/pickerGroups'
-import type { ChatModelBinding } from '../../shared/providers/types'
+import type { ChatModelBinding, ProviderReasoningLevel } from '../../shared/providers/types'
 import { ToolsDashboard } from './components/tools/ToolsDashboard'
 import { ModelInspector } from './components/tools/ModelInspector'
 import { ModelDoctor } from './components/tools/ModelDoctor'
@@ -43,6 +47,9 @@ function App() {
   const [creatingChatSession, setCreatingChatSession] = useState(false)
   const [downloadModelType, setDownloadModelType] = useState<DownloadModelType>('text')
   const [chatCreationError, setChatCreationError] = useState<string | null>(null)
+  // A downloaded model to preselect when the chat page asks to launch one (first-run setup).
+  const [chatCreateModelPath, setChatCreateModelPath] = useState<string | null>(null)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
   const { state, restored, dispatch, setMode, openChat } = useAppState()
   const { sessions: allSessions, ready: sessionsReady } = useSessionsContext()
 
@@ -67,10 +74,35 @@ function App() {
     clear().catch((err) => console.error('Failed to clear chat locks:', err))
   }, [])
 
+  // First-run setup: once, after the engine is installed, until finished or skipped.
+  useEffect(() => {
+    if (!setupDone) return
+    let alive = true
+    window.api.settings.get(ONBOARDING_DONE_KEY)
+      .then(done => { if (alive && shouldShowOnboarding(true, done)) setOnboardingOpen(true) })
+      .catch(() => undefined)
+    return () => { alive = false }
+  }, [setupDone])
+
+  useEffect(() => {
+    const open = () => setOnboardingOpen(true)
+    window.addEventListener(ONBOARDING_EVENT, open)
+    return () => window.removeEventListener(ONBOARDING_EVENT, open)
+  }, [])
+
+  const finishOnboarding = useCallback(() => {
+    setOnboardingOpen(false)
+    window.api.settings.set(ONBOARDING_DONE_KEY, String(Date.now())).catch(() => undefined)
+  }, [])
+
   // Listen for navigation events from child components (e.g. toolbar "Add a model")
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail
+      if (detail?.mode === 'onboarding') {
+        setOnboardingOpen(true)
+        return
+      }
       if (detail?.mode === 'models') {
         setDownloadModelType(resolveDownloadModelType(detail.downloadModelType))
       }
@@ -166,6 +198,37 @@ function App() {
     }
   }, [sessions, openChat, dispatch])
 
+  /** A new chat bound to one provider model; false when it could not be created. */
+  const createChatOnProvider = useCallback(async (
+    providerId: string,
+    model: { id: string; name?: string },
+    reasoningEffort?: ProviderReasoningLevel,
+  ): Promise<boolean> => {
+    const api = window.api.providers
+    if (!api) return false
+    try {
+      const modelPath = `provider://${providerId}/${model.id}`
+      const result = await window.api.chat.create(
+        t('chat.quickStart.chatWithModel', { model: model.name || model.id }),
+        model.id,
+        undefined,
+        modelPath,
+      )
+      if (!result?.id) return false
+      const bound = await api.setChatModel({
+        chatId: result.id, providerId, modelId: model.id,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      })
+      if (!bound.ok) return false
+      setCreatingChatSession(false)
+      setMode('chat')
+      dispatch({ type: 'OPEN_CHAT', chatId: result.id, sessionId: '' })
+      return true
+    } catch {
+      return false
+    }
+  }, [dispatch, setMode, t])
+
   /** A new chat on a provider model, local servers first; false when none is usable. */
   const createProviderChat = useCallback(async (): Promise<boolean> => {
     const api = window.api.providers
@@ -181,23 +244,11 @@ function App() {
       const pick = [...groups.localServers, ...groups.cloud][0]
       const model = pick?.models[0]
       if (!pick || !model) return false
-      const modelPath = `provider://${pick.provider.id}/${model.id}`
-      const result = await window.api.chat.create(
-        t('chat.quickStart.chatWithModel', { model: model.name || model.id }),
-        model.id,
-        undefined,
-        modelPath,
-      )
-      if (!result?.id) return false
-      const bound = await api.setChatModel({ chatId: result.id, providerId: pick.provider.id, modelId: model.id })
-      if (!bound.ok) return false
-      setMode('chat')
-      dispatch({ type: 'OPEN_CHAT', chatId: result.id, sessionId: '' })
-      return true
+      return await createChatOnProvider(pick.provider.id, model)
     } catch {
       return false
     }
-  }, [dispatch, setMode, t])
+  }, [createChatOnProvider])
 
   const handleNewChat = useCallback(async () => {
     setCreatingChatSession(false)
@@ -259,8 +310,25 @@ function App() {
     })
   }, [restored, sessionsReady, checkingSetup, handleNewChat, setMode, dispatch])
 
+  /** First-run setup's "Start a chat": best cloud model, else a downloaded local one. */
+  const startFromOnboarding = useCallback(async (choice: StartChoice) => {
+    finishOnboarding()
+    if (choice.kind === 'cloud') {
+      if (await createChatOnProvider(choice.providerId, { id: choice.modelId, name: choice.name }, choice.effort)) return
+    } else if (choice.kind === 'local') {
+      // Launch it with the chat defaults (one click on the chat page).
+      setChatCreateModelPath(choice.modelPath)
+      setMode('chat')
+      setCreatingChatSession(true)
+      return
+    }
+    setMode('chat')
+    await handleNewChat().catch(error => setChatCreationError(String(error)))
+  }, [finishOnboarding, createChatOnProvider, setMode, handleNewChat])
+
   const handleChatSessionCreated = async (sessionId: string) => {
     setCreatingChatSession(false)
+    setChatCreateModelPath(null)
     setChatCreationError(null)
     try {
       const session = await window.api.sessions.get(sessionId)
@@ -343,8 +411,8 @@ function App() {
             )}
 
             {state.mode === 'chat' && creatingChatSession && (
-              <CreateSession defaultsOnly filterType="text"
-                onBack={() => setCreatingChatSession(false)} onCreated={handleChatSessionCreated} />
+              <CreateSession defaultsOnly filterType="text" initialModelPath={chatCreateModelPath}
+                onBack={() => { setCreatingChatSession(false); setChatCreateModelPath(null) }} onCreated={handleChatSessionCreated} />
             )}
             {state.mode === 'chat' && !creatingChatSession && (
               <ChatModeContent
@@ -386,6 +454,8 @@ function App() {
             </div>
           </main>
         </div>
+        <AccountSheetsHost />
+        <Onboarding open={onboardingOpen} onFinish={finishOnboarding} onStart={(choice) => void startFromOnboarding(choice)} />
       </div>
     </ToastProvider>
   )
@@ -557,7 +627,7 @@ function ServerModeContent() {
             <h2 className="text-2xl font-bold">{t('console.preferences')}</h2>
             <AppearancePreference />
             <SingleModelPreference />
-            <ModelProvidersPreference />
+            <AccountsPreference />
             <MlxNodePreference />
             <div className="border border-border rounded-lg p-5">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">{t('app.about.language')}</h3>

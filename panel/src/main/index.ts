@@ -2,13 +2,14 @@
 import './app-identity'
 import './user-data-dir'
 import { getPowerMode } from './powerMode'
-import { app, BrowserWindow, ipcMain, dialog, shell, session, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, session, nativeTheme, clipboard } from 'electron'
 import { join } from 'path'
 import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerSessionHandlers } from './ipc/sessions'
 import { registerChatHandlers, activeAgentChatIds, abortAllChatRequests } from './ipc/chat'
 import { registerProviderHandlers } from './ipc/providers'
+import { getHardware } from './hardware'
 import { runningSpawnedProcessCount, killSpawnedProcesses } from './tools/executor'
 import { QuitConfirmation } from './agent/quitConfirmation'
 import { registerModelHandlers, killActiveDownload } from './ipc/models'
@@ -311,6 +312,12 @@ function createWindow(): void {
     // is disabled on the basis of this number.
     ipcMain.handle('app:totalMemoryGB', () =>
       Math.round(require('os').totalmem() / (1024 ** 3)))
+    // Chip, Mac model, memory and free disk for first-run recommendations.
+    ipcMain.handle('app:hardware', () =>
+      getHardware(db.getSetting('model_download_directory') || undefined))
+    // Paste button in the Connect sheet (renderer clipboard reads need a gesture
+    // and a permission prompt; this is one user click).
+    ipcMain.handle('clipboard:readText', () => clipboard.readText())
 
     // App-level settings (API keys, preferences)
     ipcMain.handle('settings:get', (_e, key: string) => {

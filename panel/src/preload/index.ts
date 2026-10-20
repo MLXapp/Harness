@@ -352,6 +352,7 @@ const api = {
     getPowerMode: (): Promise<import('../shared/powerMode').PowerModeStatus> => ipcRenderer.invoke('app:powerMode'),
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getTotalMemoryGB: (): Promise<number> => ipcRenderer.invoke('app:totalMemoryGB'),
+    getHardware: (): Promise<import('../shared/hardware').HardwareInfo> => ipcRenderer.invoke('app:hardware'),
     // In-app updater (src/main/app-updater.ts): one state, pushed on every change.
     getUpdateState: (): Promise<import('../shared/appUpdate').UpdateState> => ipcRenderer.invoke('app:updateState'),
     onUpdateState: (callback: (state: import('../shared/appUpdate').UpdateState) => void) => {
@@ -398,6 +399,7 @@ const api = {
     setKey: (id: string, apiKey: string) => ipcRenderer.invoke('providers:setKey', id, apiKey),
     clearKey: (id: string) => ipcRenderer.invoke('providers:clearKey', id),
     discover: (request: unknown) => ipcRenderer.invoke('providers:discover', request),
+    checkKey: (request: unknown) => ipcRenderer.invoke('providers:checkKey', request),
     getChatModel: (chatId: string) => ipcRenderer.invoke('providers:getChatModel', chatId),
     setChatModel: (binding: unknown) => ipcRenderer.invoke('providers:setChatModel', binding),
     clearChatModel: (chatId: string) => ipcRenderer.invoke('providers:clearChatModel', chatId),
@@ -408,6 +410,10 @@ const api = {
       ipcRenderer.on('providers:changed', handler)
       return () => { ipcRenderer.removeListener('providers:changed', handler) }
     },
+  },
+
+  clipboard: {
+    readText: (): Promise<string> => ipcRenderer.invoke('clipboard:readText'),
   },
 
   // App-level settings (API keys, preferences)

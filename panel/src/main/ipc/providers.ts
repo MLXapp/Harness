@@ -9,6 +9,8 @@
 import { BrowserWindow, ipcMain, net } from 'electron'
 import { db } from '../database'
 import { discoverModels, probeLocalServers, type DiscoveryFetch, type LocalServerProbe } from '../providers/discovery'
+import { checkProviderKey } from '../providers/keyCheck'
+import type { KeyCheckRequest, KeyCheckResult } from '../../shared/providers/keyCheck'
 import { PROVIDER_CATALOG, localServer } from '../../shared/providers/catalog'
 import { remoteServerBaseUrl } from '../../shared/remoteApiUrl'
 import {
@@ -185,6 +187,18 @@ export function registerProviderHandlers(getWindow: () => BrowserWindow | null):
       }
     },
   )
+
+  /**
+   * Live key check for the Connect sheet: one cheap authenticated request.
+   * The key is used once and not stored; the reply never contains it.
+   */
+  ipcMain.handle('providers:checkKey', async (_, request: KeyCheckRequest): Promise<KeyCheckResult> => {
+    try {
+      return await checkProviderKey(request ?? {}, discoveryFetch, AbortSignal.timeout(15_000))
+    } catch {
+      return { ok: false, reason: 'network', message: 'Could not reach the service' }
+    }
+  })
 
   ipcMain.handle('providers:getChatModel', (_, chatId: string): ChatModelBinding | null => {
     try {
