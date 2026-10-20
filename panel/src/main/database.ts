@@ -284,6 +284,16 @@ class DatabaseManager {
         FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
       );
 
+      -- Coding-agent state that must survive restarts: the compaction
+      -- checkpoint (summary + the last message it covers) and the todo list.
+      CREATE TABLE IF NOT EXISTS chat_agent_state (
+        chat_id TEXT PRIMARY KEY,
+        compaction_json TEXT,
+        todos_json TEXT,
+        updated_at INTEGER,
+        FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+      );
+
       CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
       CREATE INDEX IF NOT EXISTS idx_chats_folder ON chats(folder_id);
       CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id);
@@ -1831,6 +1841,36 @@ class DatabaseManager {
       "DELETE FROM chat_overrides WHERE chat_id = ?",
     );
     stmt.run(chatId);
+  }
+
+  // Coding-agent state (compaction checkpoint, todo list) per chat
+
+  getChatAgentState(chatId: string): { compactionJson: string | null; todosJson: string | null } {
+    this.ensureOpen();
+    const row = this.db
+      .prepare("SELECT compaction_json, todos_json FROM chat_agent_state WHERE chat_id = ?")
+      .get(chatId) as { compaction_json: string | null; todos_json: string | null } | undefined;
+    return { compactionJson: row?.compaction_json ?? null, todosJson: row?.todos_json ?? null };
+  }
+
+  private upsertChatAgentState(chatId: string, column: "compaction_json" | "todos_json", value: string | null): void {
+    this.ensureOpen();
+    // Without its chat row (deleted mid-request) there is nothing to attach to.
+    if (!this.db.prepare("SELECT 1 FROM chats WHERE id = ?").get(chatId)) return;
+    this.db
+      .prepare(
+        `INSERT INTO chat_agent_state (chat_id, ${column}, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(chat_id) DO UPDATE SET ${column} = excluded.${column}, updated_at = excluded.updated_at`,
+      )
+      .run(chatId, value, Date.now());
+  }
+
+  setChatCompactionState(chatId: string, compactionJson: string | null): void {
+    this.upsertChatAgentState(chatId, "compaction_json", compactionJson);
+  }
+
+  setChatTodos(chatId: string, todosJson: string | null): void {
+    this.upsertChatAgentState(chatId, "todos_json", todosJson);
   }
 
   // Chat Profiles (named presets for chat settings)

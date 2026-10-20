@@ -236,6 +236,10 @@ declare global {
         getRecent: (limit?: number) => Promise<any[]>;
         onAskUser: (callback: (data: any) => void) => () => void;
         answerUser: (chatId: string, answer: string) => void;
+        getTodos: (
+          chatId: string,
+        ) => Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" }>>;
+        onTodos: (callback: (data: any) => void) => () => void;
         setOverrides: (
           chatId: string,
           overrides: any,
