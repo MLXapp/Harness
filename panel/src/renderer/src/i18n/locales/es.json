@@ -528,6 +528,15 @@
       "toolPresetFull": "Completo (todas las herramientas activadas)",
       "toolPresetLean": "Ligero (modelos pequeños)",
       "toolPresetHelp": "Ligero da al modelo solo read_file, write_file, edit_file, list_directory, search_files, run_command y ask_user, con un prompt de sistema más corto. Un prompt más pequeño y menos opciones ayudan a los modelos pequeños. Cambiarlo vuelve a procesar todo el prompt una vez.",
+      "permissions": "Permisos",
+      "permissionsReadOnly": "Solo lectura",
+      "permissionsWorkspace": "Espacio de trabajo (predeterminado)",
+      "permissionsFull": "Acceso total",
+      "permissionsReadOnlyHelp": "El agente puede leer y buscar. Escribir archivos, los comandos de shell, AppleScript y las herramientas MCP te piden permiso primero.",
+      "permissionsWorkspaceHelp": "El agente puede cambiar archivos en el directorio de trabajo. Los comandos de shell se ejecutan en un sandbox de macOS que solo permite escribir ahí y en carpetas temporales, y bloquea internet. AppleScript, git push/pull y todo lo que esté fuera de la carpeta te piden permiso primero.",
+      "permissionsFullHelp": "Sin avisos ni sandbox: los comandos se ejecutan con todos tus permisos de usuario.",
+      "permissionsFullWarning": "El acceso total permite al modelo ejecutar cualquier comando, cambiar o borrar cualquier archivo que tú puedas y acceder a internet sin preguntar. Úsalo solo con modelos y proyectos de confianza.",
+      "permissionsNoSandbox": "El sandbox de macOS no está disponible aquí, así que cada comando de shell te pide permiso primero.",
       "toolCategories": "Categorías de herramientas",
       "toolFileIO": "E/S de archivos",
       "toolFileIOHelp": "leer, escribir, editar, copiar, mover y eliminar archivos y directorios",
@@ -690,6 +699,32 @@
       "button": "Exportar sesión",
       "success": "Sesión exportada",
       "failed": "Error al exportar"
+    },
+    "approval": {
+      "title": "¿Permitir esta acción?",
+      "kind": {
+        "shell": "Ejecutar comando",
+        "escalation": "Ejecutar fuera del sandbox",
+        "write": "Cambiar archivo",
+        "applescript": "Ejecutar AppleScript",
+        "git": "Ejecutar git",
+        "mcp": "Usar herramienta MCP",
+        "tool": "Usar herramienta"
+      },
+      "why": {
+        "read-only": "Este chat está en Solo lectura.",
+        "no-sandbox": "El sandbox no está disponible, así que los comandos necesitan tu aprobación.",
+        "escalation": "El sandbox bloqueó este comando. El modelo pide ejecutarlo sin sandbox.",
+        "network": "Este comando de git se conecta a un remoto.",
+        "outside": "Este comando de git puede actuar fuera del directorio de trabajo.",
+        "git-internals": "Esto cambia hooks o ajustes de git, que luego se ejecutan fuera del sandbox.",
+        "workspace": "Los permisos de Espacio de trabajo piden aprobación para esto."
+      },
+      "reason": "Motivo del modelo",
+      "allowOnce": "Permitir una vez",
+      "deny": "Denegar",
+      "alwaysAllow": "Permitir siempre este comando en este chat",
+      "autoDeny": "Se denegará automáticamente en {time}"
     }
   },
   "sessions": {
@@ -2255,7 +2290,13 @@
         "occupied": "Ya hay otra app llamada MLX Node en Aplicaciones, así que no se ha cambiado nada. Puedes descargar MLX Node en mlx.app.",
         "signature": "La copia de MLX Node incluida en MLX Studio no ha superado la comprobación de firma, así que no se ha instalado. Puedes descargarla en mlx.app.",
         "failed": "Algo ha fallado y no se ha cambiado nada. Puedes descargar MLX Node en mlx.app."
-      }
+      },
+      "quitAgentTitle": "¿Salir de MLX Studio?",
+      "quitAgentChats": "El agente de código sigue trabajando en: {names}.",
+      "quitAgentProcesses": "Procesos en segundo plano iniciados por el agente: {count}.",
+      "quitAgentDetail": "Salir detiene este trabajo. Si cierras solo la ventana, sigue en marcha.",
+      "quitAgentQuit": "Salir",
+      "quitAgentCancel": "Cancelar"
     },
     "window": {
       "downloads": "Descargas"
@@ -2317,6 +2358,9 @@
       "initializingEngine": "Inicializando el motor...",
       "restoringAcceleration": "Restaurando la aceleración...",
       "preparing": "Preparando..."
+    },
+    "notify": {
+      "approvalTitle": "MLX Studio necesita tu aprobación"
     }
   },
   "tools": {

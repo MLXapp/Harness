@@ -528,6 +528,15 @@
       "toolPresetFull": "完整（所有已启用的工具）",
       "toolPresetLean": "精简（小模型）",
       "toolPresetHelp": "精简模式只向模型提供 read_file、write_file、edit_file、list_directory、search_files、run_command 和 ask_user，并使用更短的系统提示词。更小的提示词和更少的选择有助于小模型。更改后会重新处理一次完整提示词。",
+      "permissions": "权限",
+      "permissionsReadOnly": "只读",
+      "permissionsWorkspace": "工作区（默认）",
+      "permissionsFull": "完全访问",
+      "permissionsReadOnlyHelp": "代理可以读取和搜索。写入文件、Shell 命令、AppleScript 和 MCP 工具会先征求你的同意。",
+      "permissionsWorkspaceHelp": "代理可以修改工作目录中的文件。Shell 命令在 macOS 沙盒中运行，只能写入工作目录和临时文件夹，并阻止访问互联网。AppleScript、git push/pull 以及工作目录之外的操作会先征求你的同意。",
+      "permissionsFullHelp": "没有确认，也没有沙盒：命令以你的全部用户权限运行。",
+      "permissionsFullWarning": "完全访问允许模型无需询问即可运行任何命令、修改或删除你有权限的任何文件并访问互联网。仅在你信任的模型和项目中使用。",
+      "permissionsNoSandbox": "此处无法使用 macOS 沙盒，因此每条 Shell 命令都会先征求你的同意。",
       "toolCategories": "工具类别",
       "toolFileIO": "文件 I/O",
       "toolFileIOHelp": "读取、写入、编辑、复制、移动、删除文件和目录",
@@ -690,6 +699,32 @@
       "button": "导出会话",
       "success": "会话已导出",
       "failed": "导出失败"
+    },
+    "approval": {
+      "title": "允许此操作吗？",
+      "kind": {
+        "shell": "运行命令",
+        "escalation": "在沙盒外运行",
+        "write": "修改文件",
+        "applescript": "运行 AppleScript",
+        "git": "运行 git",
+        "mcp": "使用 MCP 工具",
+        "tool": "使用工具"
+      },
+      "why": {
+        "read-only": "此聊天设置为只读。",
+        "no-sandbox": "沙盒不可用，因此命令需要你的批准。",
+        "escalation": "沙盒阻止了此命令。模型请求在沙盒外运行它。",
+        "network": "此 git 命令会连接远程仓库。",
+        "outside": "此 git 命令可能在工作目录之外执行操作。",
+        "git-internals": "这会修改 git 钩子或配置，它们之后会在沙盒外运行。",
+        "workspace": "工作区权限要求先确认此操作。"
+      },
+      "reason": "模型给出的理由",
+      "allowOnce": "允许一次",
+      "deny": "拒绝",
+      "alwaysAllow": "在此聊天中始终允许此命令",
+      "autoDeny": "{time} 后自动拒绝"
     }
   },
   "sessions": {
@@ -2255,7 +2290,13 @@
         "occupied": "“应用程序”中已有另一个名为 MLX Node 的应用，因此没有做任何更改。你可以从 mlx.app 下载 MLX Node。",
         "signature": "MLX Studio 附带的 MLX Node 未通过签名检查，因此没有安装。你可以从 mlx.app 下载。",
         "failed": "出现问题，没有做任何更改。你可以从 mlx.app 下载 MLX Node。"
-      }
+      },
+      "quitAgentTitle": "退出 MLX Studio？",
+      "quitAgentChats": "编程代理仍在以下聊天中工作：{names}。",
+      "quitAgentProcesses": "代理启动的后台进程：{count} 个。",
+      "quitAgentDetail": "退出会停止这些工作。只关闭窗口则会继续运行。",
+      "quitAgentQuit": "退出",
+      "quitAgentCancel": "取消"
     },
     "window": {
       "downloads": "下载"
@@ -2317,6 +2358,9 @@
       "initializingEngine": "正在初始化引擎...",
       "restoringAcceleration": "正在恢复加速...",
       "preparing": "准备中..."
+    },
+    "notify": {
+      "approvalTitle": "MLX Studio 需要你的批准"
     }
   },
   "tools": {

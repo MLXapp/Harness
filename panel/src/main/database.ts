@@ -185,6 +185,8 @@ export interface ChatOverrides {
   utilityToolsEnabled?: boolean;
   /** Built-in tool set: undefined/"full" = every enabled tool, "lean" = minimal set for small models. */
   toolPreset?: "full" | "lean";
+  /** Agent permissions: undefined/"workspace" = sandboxed workspace (default), "read-only", "full". */
+  permissionPreset?: "read-only" | "workspace" | "full";
 }
 
 class DatabaseManager {
@@ -543,6 +545,9 @@ class DatabaseManager {
       }
       if (!overrideColumns.find((c) => c.name === "tool_preset")) {
         this.db.exec("ALTER TABLE chat_overrides ADD COLUMN tool_preset TEXT");
+      }
+      if (!overrideColumns.find((c) => c.name === "permission_preset")) {
+        this.db.exec("ALTER TABLE chat_overrides ADD COLUMN permission_preset TEXT");
       }
 
       // Fix: older migrations used DEFAULT 1 and later DEFAULT 0 for
@@ -1748,8 +1753,8 @@ class DatabaseManager {
        hide_tool_status,
        web_search_enabled, brave_search_enabled, fetch_url_enabled, file_tools_enabled,
        search_tools_enabled, shell_enabled, tool_result_max_chars,
-       git_enabled, utility_tools_enabled, tool_preset)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       git_enabled, utility_tools_enabled, tool_preset, permission_preset)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
       // enable_thinking tri-state: undefined/null → NULL (Auto), true → 1, false → 0
       const enableThinkingVal =
@@ -1758,6 +1763,11 @@ class DatabaseManager {
           : overrides.enableThinking === false
             ? 0
             : null; // Auto
+      // Workspace is the default and stored as NULL.
+      const permissionPresetVal =
+        overrides.permissionPreset === "read-only" || overrides.permissionPreset === "full"
+          ? overrides.permissionPreset
+          : null;
       stmt.run(
         overrides.chatId,
         overrides.temperature,
@@ -1789,6 +1799,7 @@ class DatabaseManager {
         overrides.gitEnabled === false ? 0 : 1,
         overrides.utilityToolsEnabled === false ? 0 : 1,
         overrides.toolPreset === "lean" ? "lean" : null,
+        permissionPresetVal,
       );
     }); // end upsert transaction
     upsert();
@@ -1839,6 +1850,10 @@ class DatabaseManager {
       gitEnabled: row.git_enabled !== 0,
       utilityToolsEnabled: row.utility_tools_enabled !== 0,
       toolPreset: row.tool_preset === "lean" ? "lean" : undefined,
+      permissionPreset:
+        row.permission_preset === "read-only" || row.permission_preset === "full"
+          ? row.permission_preset
+          : undefined,
     };
   }
 

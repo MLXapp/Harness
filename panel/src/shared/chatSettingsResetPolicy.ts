@@ -28,6 +28,7 @@ export interface ChatSettingsResetOverrides {
   gitEnabled?: boolean
   utilityToolsEnabled?: boolean
   toolPreset?: 'full' | 'lean'
+  permissionPreset?: 'read-only' | 'workspace' | 'full'
 }
 
 export interface ChatSettingsGenerationDefaults {
@@ -56,6 +57,7 @@ export const CHAT_SETTINGS_RESET_PRESERVE_KEYS = [
   'maxToolIterations',
   'toolResultMaxChars',
   'toolPreset',
+  'permissionPreset',
 ] as const
 
 export function buildChatSettingsResetOverrides<T extends ChatSettingsResetOverrides>(

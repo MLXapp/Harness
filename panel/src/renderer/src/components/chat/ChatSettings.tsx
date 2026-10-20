@@ -73,6 +73,7 @@ interface ChatOverrides {
   gitEnabled?: boolean
   utilityToolsEnabled?: boolean
   toolPreset?: 'full' | 'lean'
+  permissionPreset?: 'read-only' | 'workspace' | 'full'
 }
 
 interface SessionInfo {
@@ -324,6 +325,16 @@ export function ChatSettings({ chatId, session, reasoningParser, onClose, onOver
     persistedModelDefaults,
     loadProfiles,
   ])
+
+  // Whether macOS Seatbelt is usable: without it, Workspace asks before every command.
+  const [sandboxAvailable, setSandboxAvailable] = useState<boolean | null>(null)
+  useEffect(() => {
+    let alive = true
+    window.api.chat.sandboxStatus?.()
+      .then(status => { if (alive) setSandboxAvailable(!!status?.available) })
+      .catch(() => { if (alive) setSandboxAvailable(null) })
+    return () => { alive = false }
+  }, [])
 
   const update = <K extends keyof ChatOverrides>(key: K, value: ChatOverrides[K]) => {
     setOverrides(prev => ({ ...prev, [key]: value }))
@@ -1045,6 +1056,46 @@ function statusToneClass(status: string): string {
                       <option value="lean">{t('chat.settings.toolPresetLean')}</option>
                     </select>
                     <p className="text-xs text-muted-foreground">{t('chat.settings.toolPresetHelp')}</p>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-border space-y-1">
+                    <label className="text-sm font-medium" htmlFor="chat-permission-preset">{t('chat.settings.permissions')}</label>
+                    <select
+                      id="chat-permission-preset"
+                      data-vmlx-control="permission-preset"
+                      value={overrides.permissionPreset === 'read-only' || overrides.permissionPreset === 'full' ? overrides.permissionPreset : 'workspace'}
+                      onChange={e => {
+                        const v = e.target.value
+                        update('permissionPreset', v === 'read-only' || v === 'full' ? v : undefined)
+                      }}
+                      className="w-full px-3 py-2 bg-background border border-input rounded text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="read-only">{t('chat.settings.permissionsReadOnly')}</option>
+                      <option value="workspace">{t('chat.settings.permissionsWorkspace')}</option>
+                      <option value="full">{t('chat.settings.permissionsFull')}</option>
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                      {overrides.permissionPreset === 'read-only'
+                        ? t('chat.settings.permissionsReadOnlyHelp')
+                        : overrides.permissionPreset === 'full'
+                          ? t('chat.settings.permissionsFullHelp')
+                          : t('chat.settings.permissionsWorkspaceHelp')}
+                    </p>
+                    {overrides.permissionPreset === 'full' && (
+                      <div
+                        data-vmlx-control="permission-full-warning"
+                        role="alert"
+                        className="flex items-start gap-2 rounded border border-destructive/30 bg-destructive/10 p-2 text-[11px] text-destructive leading-snug"
+                      >
+                        <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                        <p>{t('chat.settings.permissionsFullWarning')}</p>
+                      </div>
+                    )}
+                    {overrides.permissionPreset !== 'read-only' && overrides.permissionPreset !== 'full' && sandboxAvailable === false && (
+                      <div className="px-2 py-1.5 rounded text-[11px] bg-warning/10 border border-warning/30 text-warning leading-tight">
+                        {t('chat.settings.permissionsNoSandbox')}
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-3 pt-3 border-t border-border space-y-2">
