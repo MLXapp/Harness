@@ -91,6 +91,7 @@ import {
 import {
   applyPostToolRequestFields,
   captureToolRequestFields,
+  DEFAULT_MAX_TOOL_ITERATIONS,
   isToolAuthorizedForCurrentTurn,
   noVisibleToolAnswerWarning,
   requiredToolChoiceNamesForCurrentTurn,
@@ -3114,7 +3115,8 @@ export function registerChatHandlers(
         // Track finish_reason from server to detect truncation (length), content filter, etc.
         // (declared outside try block so catch can access it for abort recovery)
         // Track tool iteration count (declared here so processLine closure can access it)
-        const MAX_TOOL_ITERATIONS = overrides?.maxToolIterations ?? 10;
+        const MAX_TOOL_ITERATIONS =
+          overrides?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
         let toolIteration = 0;
 
         // Track the length of content last emitted to renderer (for inline tool call positioning)

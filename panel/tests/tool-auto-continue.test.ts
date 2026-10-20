@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import {
   applyPostToolRequestFields,
   captureToolRequestFields,
+  DEFAULT_MAX_TOOL_ITERATIONS,
   isToolAuthorizedForCurrentTurn,
   isToolNameProvidedForCurrentTurn,
   noVisibleToolAnswerWarning,
@@ -996,11 +997,14 @@ describe('tool auto-continue policy', () => {
   it('panel max tool iterations caps tool loops', () => {
     const source = readFileSync('src/main/ipc/chat.ts', 'utf8')
     const branch = source.slice(
-      source.indexOf('const MAX_TOOL_ITERATIONS = overrides?.maxToolIterations ?? 10;'),
+      source.indexOf('const MAX_TOOL_ITERATIONS ='),
       source.indexOf('if (toolIteration > 0 || collectedToolStatuses.length > 0)'),
     )
 
-    expect(branch).toContain('const MAX_TOOL_ITERATIONS = overrides?.maxToolIterations ?? 10')
+    expect(branch).toContain(
+      'const MAX_TOOL_ITERATIONS =\n          overrides?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;',
+    )
+    expect(DEFAULT_MAX_TOOL_ITERATIONS).toBe(50)
     expect(branch).toContain('while (toolIteration < MAX_TOOL_ITERATIONS)')
     expect(branch).toContain('toolIteration++')
   })
