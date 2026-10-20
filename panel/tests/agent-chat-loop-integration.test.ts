@@ -133,6 +133,25 @@ function handle(req: IncomingMessage, res: ServerResponse) {
       res.end(JSON.stringify({ error: { message: reply.message } }))
       return
     }
+    if (reply.kind === 'text' && req.url === '/v1/responses') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      const events: Array<[string, unknown]> = [
+        ['response.created', { type: 'response.created', response: { id: 'resp_1', status: 'in_progress' } }],
+        ['response.output_text.delta', { type: 'response.output_text.delta', delta: reply.text }],
+        ['response.output_text.done', { type: 'response.output_text.done', text: reply.text }],
+        ['response.completed', {
+          type: 'response.completed',
+          response: {
+            id: 'resp_1', status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: reply.text }] }],
+            usage: { input_tokens: 100, output_tokens: 5 },
+          },
+        }],
+      ]
+      for (const [event, data] of events) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+      res.end()
+      return
+    }
     if (reply.kind === 'text') {
       sse(res, [
         { choices: [{ index: 0, delta: { role: 'assistant', content: reply.text } }] },
@@ -314,6 +333,23 @@ describe('compaction inside a tool loop', () => {
     expect(result.content).toBe('It is late.')
     expect(isSummaryRequest(requests[2])).toBe(true)
     expect(requests[3].messages.some((m: any) => m.tool_call_id === 'd1')).toBe(true)
+  })
+})
+
+describe('compaction over the Responses API (local default wire)', () => {
+  it('sends the same instructions and tools, with the instruction as the last input item', async () => {
+    h.state.overrides = { ...h.state.overrides, wireApi: 'responses' }
+    seedHistory(4)
+    replies = [() => ({ kind: 'text', text: SUMMARY }), () => ({ kind: 'text', text: 'Responses answer.' })]
+    const result = await send('next')
+    expect(result.content).toBe('Responses answer.')
+    const [summary, main] = requests
+    expect(summary.input.at(-1).content).toContain('compaction engine')
+    expect(summary.instructions).toBe(main.instructions)
+    expect(summary.tools.map((t: any) => t.name)).toEqual(main.tools.map((t: any) => t.name))
+    expect(summary.max_output_tokens).toBeGreaterThan(0)
+    expect(main.input[0].content).toContain('<compacted-summary>')
+    expect(main.input.at(-1).content).toBe('next')
   })
 })
 
