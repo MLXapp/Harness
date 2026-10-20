@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { Check, ChevronRight, ChevronsUpDown, Loader2, Play, Plus, Search, SlidersHorizontal, Square } from 'lucide-react'
+import { Check, ChevronRight, ChevronsUpDown, CirclePlay, CircleStop, Loader2, Plus, Search, SlidersHorizontal } from 'lucide-react'
 import { AccountGlyph } from '../accounts/AccountGlyph'
 import { Reveal } from '../ui/Reveal'
 import { useChatModel } from './ChatModelContext'
@@ -74,6 +74,8 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
   const popRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const listInnerRef = useRef<HTMLDivElement>(null)
+  const [listHeight, setListHeight] = useState<number | null>(null)
   const measureRef = useRef<HTMLSpanElement>(null)
   const [labelWidth, setLabelWidth] = useState<number | null>(null)
   const listId = useId()
@@ -161,6 +163,17 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [chat, toggle])
+
+  // Follow the list content's height so the popover grows and shrinks smoothly.
+  useLayoutEffect(() => {
+    const inner = listInnerRef.current
+    if (!mounted || !inner || typeof ResizeObserver === 'undefined') return
+    const measure = () => setListHeight(Math.ceil(inner.getBoundingClientRect().height))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(inner)
+    return () => observer.disconnect()
+  }, [mounted])
 
   // Keep the keyboard row in view (again once a "More from …" group has unfolded).
   useEffect(() => {
@@ -423,7 +436,7 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
             title={running ? t('sessions.toolbar.stopModel') : t('sessions.toolbar.startModel')}
             aria-label={running ? t('sessions.toolbar.stopModel') : t('sessions.toolbar.startModel')}
           >
-            {running ? <Square className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+            {running ? <CircleStop className="h-4 w-4" /> : <CirclePlay className="h-4 w-4" />}
           </button>
         )}
         {selectedMark(selected)}
@@ -517,7 +530,16 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
             {busy && <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-muted-foreground" aria-hidden />}
           </div>
 
-          <div ref={listRef} id={listId} role="listbox" aria-label={t('chat.switcher.title')} className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1.5">
+          {/* The list's height glides as search narrows it (the popover is anchored at the bottom). */}
+          <div
+            ref={listRef}
+            id={listId}
+            role="listbox"
+            aria-label={t('chat.switcher.title')}
+            className="min-h-0 flex-shrink overflow-y-auto transition-[height] duration-200 ease-mlx"
+            style={{ height: listHeight ?? undefined }}
+          >
+            <div ref={listInnerRef} className="px-1.5 pb-1.5">
             {groups.featured.length > 0 && (
               <div role="group" aria-label={t('chat.switcher.topModels')}>
                 {header(t('chat.switcher.topModels'))}
@@ -605,9 +627,10 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
             {nothing && (
               <p className="px-2.5 py-6 text-center text-[13px] text-muted-foreground">{t('chat.switcher.noMatches', { query: query.trim() })}</p>
             )}
+            </div>
           </div>
 
-          <Reveal open={!!levels && levels.length > 0}>
+          <Reveal open={!!levels && levels.length > 0} className="flex-shrink-0">
             {levels && levels.length > 0 && (
               <div className="flex flex-col gap-1.5 border-t border-border/70 px-3 pb-3 pt-2" data-vmlx-switcher-reasoning>
                 <span className="text-[12px] font-medium text-muted-foreground">{t('chat.switcher.reasoning')}</span>
