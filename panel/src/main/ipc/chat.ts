@@ -35,6 +35,8 @@ import {
   resolvePruneBudget,
   writeSpillFile,
 } from "../agent/toolResultPruning";
+import { FileReadTracker } from "../agent/readGuard";
+import { RepeatCallTracker, appendReminder } from "../agent/repeatCallReminder";
 import { detectModelConfigFromDir } from "../model-config-registry";
 import { localEngineReadyFromHealthBody } from "../engineReadiness";
 import { getAuthHeaders } from "./utils";
@@ -628,8 +630,17 @@ function agentSpillRoot(): string {
   return join(app.getPath("userData"), "agent-spill");
 }
 
+/**
+ * Per-chat agent session state that lives as long as the app: which files the
+ * model has read (read-before-edit guard) and how often it repeated a call.
+ */
+const fileReadTracker = new FileReadTracker();
+const repeatCallTracker = new RepeatCallTracker();
+
 /** Forget a deleted chat's agent session state and spilled tool results. */
 function clearChatAgentRuntime(chatId: string): void {
+  fileReadTracker.clear(chatId);
+  repeatCallTracker.clear(chatId);
   if (typeof chatId !== "string" || !/^[A-Za-z0-9_-]+$/.test(chatId)) return;
   try {
     rmSync(join(agentSpillRoot(), chatId), { recursive: true, force: true });
@@ -4249,43 +4260,69 @@ export function registerChatHandlers(
                   // guard above lets through; executeBuiltinTool never reads it
                   // for those, and for every other tool the guard proves it set.
                   const workDir = overrides?.workingDirectory ?? "";
-                  console.log(`[CHAT] Builtin tool: ${tc.function.name}`);
-                  const result = await executeBuiltinTool(
+                  // Read-before-edit: an edit to an existing file must follow
+                  // a read of its current content in this chat session.
+                  const readGuardRefusal = fileReadTracker.checkTool(
+                    chatId,
                     tc.function.name,
                     toolArgs,
                     workDir,
                   );
-                  resultText = result.content;
-                  if (replaySafeKey && !result.is_error) {
-                    lastReplaySafeToolResultKey = replaySafeKey;
-                  }
-                  // For read_image/read_video: inject media as multimodal
-                  // content for VLM follow-ups. Tool result text is not enough
-                  // for vision models to actually inspect local media bytes.
-                  // Keep local text-only models on text; vmlx-engine will
-                  // reject image_url/video_url content when the loaded runtime
-                  // is not multimodal. Remote endpoints may be multimodal even
-                  // when the local session registry cannot infer it.
-                  if ((result.imageDataUrl || result.videoDataUrl) && !(chatIsMultimodal || isRemote)) {
-                    resultText += "\n\n[Media bytes were not sent because this local session is text-only. Use a VL-compatible model/session to inspect the file visually.]";
-                    console.log(
-                      `[CHAT] Skipping tool media bytes for text-only local session (${tc.function.name})`,
+                  if (readGuardRefusal) {
+                    resultText = readGuardRefusal;
+                    emitToolStatus(
+                      "error",
+                      tc.function.name,
+                      resultText,
+                      toolIteration,
+                      tc.id,
                     );
                   } else {
-                    if (result.imageDataUrl) {
-                      pendingImageDataUrls.push(result.imageDataUrl);
+                    console.log(`[CHAT] Builtin tool: ${tc.function.name}`);
+                    const result = await executeBuiltinTool(
+                      tc.function.name,
+                      toolArgs,
+                      workDir,
+                    );
+                    fileReadTracker.afterTool(
+                      chatId,
+                      tc.function.name,
+                      toolArgs,
+                      workDir,
+                      !result.is_error,
+                    );
+                    resultText = result.content;
+                    if (replaySafeKey && !result.is_error) {
+                      lastReplaySafeToolResultKey = replaySafeKey;
                     }
-                    if (result.videoDataUrl) {
-                      pendingVideoDataUrls.push(result.videoDataUrl);
+                    // For read_image/read_video: inject media as multimodal
+                    // content for VLM follow-ups. Tool result text is not enough
+                    // for vision models to actually inspect local media bytes.
+                    // Keep local text-only models on text; vmlx-engine will
+                    // reject image_url/video_url content when the loaded runtime
+                    // is not multimodal. Remote endpoints may be multimodal even
+                    // when the local session registry cannot infer it.
+                    if ((result.imageDataUrl || result.videoDataUrl) && !(chatIsMultimodal || isRemote)) {
+                      resultText += "\n\n[Media bytes were not sent because this local session is text-only. Use a VL-compatible model/session to inspect the file visually.]";
+                      console.log(
+                        `[CHAT] Skipping tool media bytes for text-only local session (${tc.function.name})`,
+                      );
+                    } else {
+                      if (result.imageDataUrl) {
+                        pendingImageDataUrls.push(result.imageDataUrl);
+                      }
+                      if (result.videoDataUrl) {
+                        pendingVideoDataUrls.push(result.videoDataUrl);
+                      }
                     }
+                    emitToolStatus(
+                      result.is_error ? "error" : "result",
+                      tc.function.name,
+                      resultText,
+                      toolIteration,
+                      tc.id,
+                    );
                   }
-                  emitToolStatus(
-                    result.is_error ? "error" : "result",
-                    tc.function.name,
-                    resultText,
-                    toolIteration,
-                    tc.id,
-                  );
                 }
               } else if (isRemote) {
                 // MCP tool passthrough is only available on local vmlx-engine servers
@@ -4368,6 +4405,12 @@ export function registerChatHandlers(
             // full text spilled to a file it can read (the card above keeps
             // the raw output).
             resultText = prepareToolResultForModel(tc.function.name, resultText);
+            // Advisory only (3rd/5th/8th identical call): appended to the
+            // END of the newest result so the cached prefix is untouched.
+            resultText = appendReminder(
+              resultText,
+              repeatCallTracker.record(chatId, tc.function.name, tc.function.arguments),
+            );
             requestMessages.push(
               useResponsesApi
                 ? {
