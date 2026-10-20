@@ -62,6 +62,14 @@ export const PROVIDER_CATALOG: readonly CatalogProvider[] = [
     note: "Gemini's OpenAI-compatible endpoint (DSH uses the native Gemini API at /v1beta).",
   },
   {
+    id: 'wavespeed',
+    displayName: 'WaveSpeed AI',
+    api: 'openai-completions',
+    baseURL: 'https://llm.wavespeed.ai/v1',
+    dshBaseURL: null,
+    note: "WaveSpeed AI's LLM gateway (one key for Claude, GPT, Gemini, DeepSeek and more); DSH ships no WaveSpeed entry.",
+  },
+  {
     id: 'openrouter',
     displayName: 'OpenRouter',
     api: 'openai-completions',
