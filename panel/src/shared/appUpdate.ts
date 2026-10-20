@@ -1,5 +1,5 @@
 /**
- * MLX Studio's in-app updater: the pure rules (shared with the renderer and
+ * MLX Harness's in-app updater: the pure rules (shared with the renderer and
  * the tests). Network, processes and the file system live in
  * src/main/app-updater.ts.
  *
@@ -11,14 +11,26 @@
  * running app as a hidden staged copy → Restart to update quits, and a
  * detached shell script swaps the staged copy into the original path with two
  * renames on the same volume, then relaunches it.
+ *
+ * The rename (0.2.0): up to 0.1.x the app was "MLX Studio.app". A copy still
+ * named that is moved to "MLX Harness.app" in the same folder: by the swap
+ * when an update is staged, otherwise by a small detached script after quit
+ * (renameCommand). An existing "MLX Harness.app" is never replaced; if the
+ * rename can't happen the app keeps working under the old name and tries
+ * again at the next quit. Bundle id, team and the designated requirement are
+ * unchanged (they are the identity; the folder name is not).
  */
 
+// Internal identifiers: unchanged by the rename (compatibility with 0.1.x).
 export const STUDIO_BUNDLE_ID = 'app.mlx.studio'
 export const STUDIO_TEAM_ID = 'CCKXS9W488'
-export const STUDIO_APP_NAME = 'MLX Studio.app'
+/** The app's bundle name: in the DMG, and where an installed copy should live. */
+export const STUDIO_APP_NAME = 'MLX Harness.app'
+/** Bundle names of earlier versions that are renamed to STUDIO_APP_NAME. */
+export const LEGACY_APP_NAMES: readonly string[] = ['MLX Studio.app']
 
 /**
- * Designated requirement a downloaded MLX Studio must satisfy: Apple-anchored
+ * Designated requirement a downloaded MLX Harness must satisfy: Apple-anchored
  * chain, a Developer ID Application certificate (the two Apple OIDs: Developer
  * ID intermediate and Developer ID leaf), our team, our bundle id.
  */
@@ -50,7 +62,7 @@ export type UpdateFailure =
   | 'size' // byte count differs from the manifest
   | 'checksum' // SHA-256 differs from the manifest
   | 'mount' // hdiutil could not attach the DMG
-  | 'notFound' // no MLX Studio.app in the DMG
+  | 'notFound' // no MLX Harness app (our bundle id) in the DMG
   | 'notOurs' // the app in the DMG has another bundle id
   | 'signature' // codesign: not signed by us / broken seal
   | 'notarization' // spctl: not accepted as Notarized Developer ID
@@ -106,7 +118,7 @@ export function isNewerVersion(candidate: string, running: string): boolean {
 // ---------------------------------------------------------------------------
 // Where the running app lives, and whether it may replace itself
 
-/** "/Applications/MLX Studio.app/Contents/MacOS/MLX Studio" → "/Applications/MLX Studio.app". */
+/** "/Applications/MLX Harness.app/Contents/MacOS/MLX Harness" → "/Applications/MLX Harness.app". */
 export function appBundlePath(exePath: string): string | null {
   const m = /^(\/.+\.app)\/Contents\/MacOS\/[^/]+$/.exec(String(exePath ?? ''))
   return m ? m[1] : null
@@ -118,7 +130,7 @@ export function isTranslocated(path: string): boolean {
 
 /**
  * Running from a mounted volume that isn't an Applications folder on another
- * disk (a DMG mount: /Volumes/MLX Studio/MLX Studio.app). An app installed
+ * disk (a DMG mount: /Volumes/MLX Harness/MLX Harness.app). An app installed
  * in /Volumes/<disk>/Applications/ is a real install.
  */
 export function isOnMountedImage(path: string): boolean {
@@ -140,15 +152,74 @@ function join(dir: string, name: string): string {
   return dir.endsWith('/') ? dir + name : `${dir}/${name}`
 }
 
-/** Hidden staged copy next to the app (same folder, so the swap is a rename): ".MLX Studio.update.app". */
-export function stagingPathFor(appPath: string): string {
-  return join(dirname(appPath), `.${basename(appPath).replace(/\.app$/, '')}.update.app`)
+/**
+ * Where this copy should live: next to itself under STUDIO_APP_NAME when it
+ * still carries a 0.1.x name ("/Applications/MLX Studio.app" →
+ * "/Applications/MLX Harness.app"), otherwise where it is (a name the user
+ * chose is kept).
+ */
+export function preferredAppPath(appPath: string): string {
+  return LEGACY_APP_NAMES.includes(basename(appPath)) ? join(dirname(appPath), STUDIO_APP_NAME) : appPath
 }
 
-/** Where the current copy is moved aside during the swap: ".MLX Studio.old-<tag>.app". */
+/**
+ * Hidden staged copy next to the app (same folder, so the swap is a rename),
+ * named after where the app should live: ".MLX Harness.update.app" (also for
+ * a copy still called "MLX Studio.app").
+ */
+export function stagingPathFor(appPath: string): string {
+  return join(dirname(appPath), `.${basename(preferredAppPath(appPath)).replace(/\.app$/, '')}.update.app`)
+}
+
+/** Where the current copy is moved aside during the swap: ".MLX Harness.old-<tag>.app" (named after the copy itself). */
 export function backupPathFor(appPath: string, tag: string | number): string {
   const safe = String(tag).replace(/[^A-Za-z0-9_-]/g, '')
   return join(dirname(appPath), `.${basename(appPath).replace(/\.app$/, '')}.old-${safe}.app`)
+}
+
+/**
+ * Names of earlier attempts' leftovers next to the app, for the current and
+ * the 0.1.x names: staged copies (".MLX Harness.update.app",
+ * ".MLX Studio.update.app") and the prefixes of moved-aside copies
+ * (".MLX Harness.old-", ".MLX Studio.old-"; each followed by a tag and ".app").
+ */
+export function leftoverNames(appPath: string): { staging: string[]; oldPrefixes: string[] } {
+  const stems = new Set<string>([
+    basename(appPath),
+    basename(preferredAppPath(appPath)),
+    STUDIO_APP_NAME,
+    ...LEGACY_APP_NAMES,
+  ].map(n => n.replace(/\.app$/, '')))
+  return {
+    staging: [...stems].map(n => `.${n}.update.app`),
+    oldPrefixes: [...stems].map(n => `.${n}.old-`),
+  }
+}
+
+export interface RenameFacts {
+  platform: string
+  /** app.isPackaged */
+  packaged: boolean
+  /** Bundle around the running executable (appBundlePath), if any. */
+  appPath: string | null
+  parentWritable: boolean
+  appWritable: boolean
+  /** Something already exists at the new name (it is never replaced). */
+  targetExists: boolean
+}
+
+/**
+ * Whether this copy should be renamed after quitting: a packaged macOS copy
+ * still called by a 0.1.x name, in a writable folder that isn't a disk image
+ * or a translocated copy, with nothing at the new name yet.
+ */
+export function planRename(f: RenameFacts): { from: string; to: string } | null {
+  if (f.platform !== 'darwin' || !f.packaged || !f.appPath) return null
+  const to = preferredAppPath(f.appPath)
+  if (to === f.appPath) return null
+  if (isTranslocated(f.appPath) || isOnMountedImage(f.appPath)) return null
+  if (!f.parentWritable || !f.appWritable || f.targetExists) return null
+  return { from: f.appPath, to }
 }
 
 export interface InstallFacts {
@@ -240,7 +311,7 @@ export function spctlAccepted(ok: boolean, output: string): boolean {
 // ---------------------------------------------------------------------------
 // Notifications and the banner
 
-/** Notify once per version, and only when no MLX Studio window has focus. */
+/** Notify once per version, and only when no MLX Harness window has focus. */
 export function shouldNotify(x: {
   version: string
   notifiedVersion: string | null | undefined
@@ -273,45 +344,48 @@ export function bannerVisible(state: UpdateState | null | undefined): boolean {
 // The swap after quit
 
 /**
- * Runs detached under /bin/sh after MLX Studio quits. Every path arrives as
+ * Runs detached under /bin/sh after MLX Harness quits. Every path arrives as
  * a positional argument and is only ever used inside double quotes, so no
  * path is ever parsed by the shell (spaces, quotes, $ and ; are all inert).
  *
  *   $1 pid to wait for   $2 app path        $3 staged app   $4 backup path
  *   $5 relaunch (1|0)    $6 open binary     $7 xattr binary $8 log file
+ *   $9 where the new copy goes (the app path, or "MLX Harness.app" next to a
+ *      copy still called "MLX Studio.app"; the app path when that exists)
  *
- * Two renames on the same volume: current app → backup, staged → app path.
+ * Two renames on the same volume: current app → backup, staged → target.
  * If the second fails, the backup is renamed back. The new copy loses the
  * quarantine flag only if it has one; it is relaunched with `open`; the old
  * copy is deleted last.
  */
 export const SWAP_SCRIPT = `
-PID="$1"; APP="$2"; NEW="$3"; OLD="$4"; RELAUNCH="$5"; OPEN="$6"; XATTR="$7"; LOG="$8"
+PID="$1"; APP="$2"; NEW="$3"; OLD="$4"; RELAUNCH="$5"; OPEN="$6"; XATTR="$7"; LOG="$8"; DEST="\${9:-$2}"
 trap '' HUP INT TERM
 exec >>"$LOG" 2>&1
-echo "[$(date)] MLX Studio update: waiting for pid $PID"
+echo "[$(date)] MLX Harness update: waiting for pid $PID"
 i=0
 while kill -0 "$PID" 2>/dev/null; do
   i=$((i + 1))
-  if [ "$i" -gt 1200 ]; then echo "MLX Studio is still running; update not installed"; exit 1; fi
+  if [ "$i" -gt 1200 ]; then echo "MLX Harness is still running; update not installed"; exit 1; fi
   sleep 0.25
 done
 if [ ! -d "$NEW" ]; then echo "staged app missing: $NEW"; exit 1; fi
 if [ ! -d "$APP" ]; then echo "current app missing: $APP"; exit 1; fi
 if [ -e "$OLD" ]; then echo "backup path already exists: $OLD"; exit 1; fi
+if [ "$DEST" != "$APP" ] && [ -e "$DEST" ]; then echo "$DEST already exists; updating in place"; DEST="$APP"; fi
 if ! mv "$APP" "$OLD"; then echo "could not move the current app aside"; exit 1; fi
-if [ -e "$APP" ] || ! mv "$NEW" "$APP"; then
+if [ -e "$DEST" ] || ! mv "$NEW" "$DEST"; then
   echo "could not move the new app into place; restoring the current one"
   if [ ! -e "$APP" ]; then mv "$OLD" "$APP"; fi
   if [ "$RELAUNCH" = "1" ]; then "$OPEN" "$APP"; fi
   exit 1
 fi
-if "$XATTR" -p com.apple.quarantine "$APP" >/dev/null 2>&1; then
-  "$XATTR" -dr com.apple.quarantine "$APP"
+if "$XATTR" -p com.apple.quarantine "$DEST" >/dev/null 2>&1; then
+  "$XATTR" -dr com.apple.quarantine "$DEST"
 fi
-if [ "$RELAUNCH" = "1" ]; then "$OPEN" "$APP"; fi
+if [ "$RELAUNCH" = "1" ]; then "$OPEN" "$DEST"; fi
 rm -rf "$OLD"
-echo "[$(date)] MLX Studio update installed: $APP"
+echo "[$(date)] MLX Harness update installed: $DEST"
 exit 0
 `.trim()
 
@@ -322,6 +396,8 @@ export interface SwapCommandInput {
   backupPath: string
   relaunch: boolean
   logPath: string
+  /** Where the new copy goes (default: appPath). Must sit next to the app. */
+  targetPath?: string
   openBin?: string
   xattrBin?: string
 }
@@ -338,12 +414,83 @@ export function swapCommand(x: SwapCommandInput): { file: string; args: string[]
   if (dirname(x.appPath) !== dirname(x.stagedPath) || dirname(x.appPath) !== dirname(x.backupPath)) {
     throw new Error('swapCommand: staged and backup copies must sit next to the app (same volume)')
   }
+  const target = x.targetPath ?? x.appPath
+  if (typeof target !== 'string' || !target.startsWith('/') || target.includes('\0') || !target.endsWith('.app')) {
+    throw new Error('swapCommand: bad target path')
+  }
+  if (dirname(target) !== dirname(x.appPath)) throw new Error('swapCommand: the target must sit next to the app')
+  if (target === x.stagedPath || target === x.backupPath) throw new Error('swapCommand: paths must differ')
   return {
     file: '/bin/sh',
     args: [
-      '-c', SWAP_SCRIPT, 'mlx-studio-update',
+      '-c', SWAP_SCRIPT, 'mlx-harness-update',
       String(x.pid), x.appPath, x.stagedPath, x.backupPath, x.relaunch ? '1' : '0',
-      x.openBin ?? '/usr/bin/open', x.xattrBin ?? '/usr/bin/xattr', x.logPath,
+      x.openBin ?? '/usr/bin/open', x.xattrBin ?? '/usr/bin/xattr', x.logPath, target,
+    ],
+  }
+}
+
+/**
+ * Renames a copy still called "MLX Studio.app" to "MLX Harness.app" after
+ * MLX Harness quits (no update staged). Same rules as SWAP_SCRIPT: every
+ * path is a positional argument used only inside double quotes.
+ *
+ *   $1 pid to wait for   $2 app path   $3 new path   $4 log file
+ *   $5 ps binary         $6 grep binary
+ *
+ * Waits for the app to exit and for nothing to run from inside the bundle
+ * any more (helpers, the engine: `ps -o comm` is each process's executable
+ * path on macOS, so the grep never matches its own arguments), never replaces anything at the new name,
+ * and is one rename on the same volume. On any doubt it leaves the app where
+ * it is (the next quit tries again).
+ */
+export const RENAME_SCRIPT = `
+PID="$1"; APP="$2"; DEST="$3"; LOG="$4"; PS="$5"; GREP="$6"
+trap '' HUP INT TERM
+exec >>"$LOG" 2>&1
+echo "[$(date)] MLX Harness: renaming $APP after pid $PID exits"
+i=0
+while kill -0 "$PID" 2>/dev/null; do
+  i=$((i + 1))
+  if [ "$i" -gt 1200 ]; then echo "MLX Harness is still running; not renamed"; exit 1; fi
+  sleep 0.25
+done
+if [ ! -d "$APP" ]; then echo "app missing: $APP"; exit 1; fi
+j=0
+while "$PS" -axo comm= | "$GREP" -F -q -- "$APP/Contents/"; do
+  j=$((j + 1))
+  if [ "$j" -gt 60 ]; then echo "something still runs from $APP; not renamed"; exit 1; fi
+  sleep 0.25
+done
+if [ -e "$DEST" ]; then echo "$DEST already exists; keeping $APP"; exit 0; fi
+if ! mv "$APP" "$DEST"; then echo "could not rename $APP"; exit 1; fi
+echo "[$(date)] renamed to $DEST"
+exit 0
+`.trim()
+
+export interface RenameCommandInput {
+  pid: number
+  appPath: string
+  targetPath: string
+  logPath: string
+  psBin?: string
+  grepBin?: string
+}
+
+/** The exact argv for spawn('/bin/sh', args, { detached: true }). */
+export function renameCommand(x: RenameCommandInput): { file: string; args: string[] } {
+  if (!Number.isInteger(x.pid) || x.pid <= 0) throw new Error('renameCommand: bad pid')
+  for (const p of [x.appPath, x.targetPath, x.logPath]) {
+    if (typeof p !== 'string' || !p.startsWith('/') || p.includes('\0')) throw new Error('renameCommand: paths must be absolute')
+  }
+  if (!x.appPath.endsWith('.app') || !x.targetPath.endsWith('.app')) throw new Error('renameCommand: not an app bundle')
+  if (x.appPath === x.targetPath) throw new Error('renameCommand: paths must differ')
+  if (dirname(x.appPath) !== dirname(x.targetPath)) throw new Error('renameCommand: the new name must sit next to the app')
+  return {
+    file: '/bin/sh',
+    args: [
+      '-c', RENAME_SCRIPT, 'mlx-harness-rename',
+      String(x.pid), x.appPath, x.targetPath, x.logPath, x.psBin ?? '/bin/ps', x.grepBin ?? '/usr/bin/grep',
     ],
   }
 }

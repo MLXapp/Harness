@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   dmgInfo: {} as Record<string, unknown>,
   ok: { runningSig: true, candidateSig: true, stagedSig: true, spctl: true, attach: true },
   mounts: new Set<string>(),
+  dmgAppName: 'MLX Harness.app',
 }))
 
 vi.mock('electron', () => {
@@ -70,7 +71,7 @@ vi.mock('child_process', () => ({
     switch (cmd) {
       case '/usr/bin/plutil': return existsSync(target) ? done(true, readFileSync(target, 'utf8')) : done(false)
       case '/usr/bin/codesign': {
-        if (target.includes('mlx-studio-update-')) return done(h.ok.candidateSig, 'codesign says no')
+        if (target.includes('mlx-harness-update-')) return done(h.ok.candidateSig, 'codesign says no')
         if (target.endsWith('.update.app')) return done(h.ok.stagedSig)
         return done(h.ok.runningSig)
       }
@@ -80,7 +81,7 @@ vi.mock('child_process', () => ({
         if (args[0] === 'attach') {
           if (!h.ok.attach) return done(false, 'hdiutil: attach failed')
           const mp = args[args.indexOf('-mountpoint') + 1]
-          const app = join(mp, 'MLX Studio.app', 'Contents')
+          const app = join(mp, h.dmgAppName, 'Contents')
           mkdirSync(app, { recursive: true })
           writeFileSync(join(app, 'Info.plist'), JSON.stringify(h.dmgInfo))
           h.mounts.add(mp)
@@ -124,7 +125,7 @@ const updatesDir = () => join(h.paths.userData, 'updates')
 const leftovers = () => ({
   dmgs: existsSync(updatesDir()) ? readdirSync(updatesDir()).filter(n => /\.(dmg|part)$/.test(n)) : [],
   mounts: [...h.mounts],
-  staged: existsSync(join(root, 'Applications', '.MLX Studio.update.app')),
+  staged: existsSync(join(root, 'Applications', '.MLX Harness.update.app')),
 })
 
 beforeAll(() => { Object.defineProperty(process, 'platform', { value: 'darwin' }) })
@@ -132,14 +133,15 @@ afterAll(() => { Object.defineProperty(process, 'platform', { value: realPlatfor
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'studio-updater-'))
-  appPath = join(root, 'Applications', 'MLX Studio.app')
+  appPath = join(root, 'Applications', 'MLX Harness.app')
   makeApp(appPath, { CFBundleIdentifier: 'app.mlx.studio', CFBundleShortVersionString: '0.1.0' })
-  h.paths = { exe: join(appPath, 'Contents', 'MacOS', 'MLX Studio'), userData: join(root, 'userData') }
+  h.paths = { exe: join(appPath, 'Contents', 'MacOS', 'MLX Harness'), userData: join(root, 'userData') }
+  h.dmgAppName = 'MLX Harness.app'
   h.dmg = Buffer.from('pretend this is a disk image')
   h.dmgInfo = { CFBundleIdentifier: 'app.mlx.studio', CFBundleShortVersionString: '0.2.0' }
   h.manifest = {
     version: '0.2.0',
-    url: 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Studio-0.2.0-arm64.dmg',
+    url: 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg',
     sha256: createHash('sha256').update(h.dmg).digest('hex'),
     size: h.dmg.length,
     notes: 'Faster model loading.',
@@ -177,9 +179,9 @@ describe('in-app updater flow', () => {
     expect(file).toBe('/bin/sh')
     expect(opts).toMatchObject({ detached: true, stdio: 'ignore' })
     expect(args.slice(3)).toEqual([
-      String(process.pid), appPath, join(root, 'Applications', '.MLX Studio.update.app'),
-      join(root, 'Applications', `.MLX Studio.old-${process.pid}.app`), '1', '/usr/bin/open', '/usr/bin/xattr',
-      join(updatesDir(), 'swap.log'),
+      String(process.pid), appPath, join(root, 'Applications', '.MLX Harness.update.app'),
+      join(root, 'Applications', `.MLX Harness.old-${process.pid}.app`), '1', '/usr/bin/open', '/usr/bin/xattr',
+      join(updatesDir(), 'swap.log'), appPath,
     ])
   })
 
@@ -222,7 +224,7 @@ describe('in-app updater flow', () => {
 
   it('falls back to the DMG when running from a disk image', async () => {
     // isOnMountedImage looks at the absolute path
-    h.paths.exe = '/Volumes/MLX Studio/MLX Studio.app/Contents/MacOS/MLX Studio'
+    h.paths.exe = '/Volumes/MLX Harness/MLX Harness.app/Contents/MacOS/MLX Harness'
     const mod = await freshUpdater()
     await mod.checkNow()
     expect(state()).toMatchObject({ phase: 'available', blocked: 'mountedDmg' })
@@ -264,7 +266,7 @@ describe('in-app updater flow', () => {
     mod = await freshUpdater()
     await mod.checkNow()
     expect(h.notifications).toHaveLength(1)
-    expect(h.notifications[0]).toMatchObject({ title: 'MLX Studio 0.2.0 is available', body: 'Faster model loading.' })
+    expect(h.notifications[0]).toMatchObject({ title: 'MLX Harness 0.2.0 is available', body: 'Faster model loading.' })
     expect(h.settings.get('studio_update_notified_version')).toBe('0.2.0')
     mod = await freshUpdater() // next launch
     await mod.checkNow()
@@ -287,16 +289,100 @@ describe('in-app updater flow', () => {
   })
 
   it('removes leftovers of earlier attempts (all ours) before checking', async () => {
-    mkdirSync(join(root, 'Applications', '.MLX Studio.update.app'))
-    mkdirSync(join(root, 'Applications', '.MLX Studio.old-123.app'))
+    mkdirSync(join(root, 'Applications', '.MLX Harness.update.app'))
+    mkdirSync(join(root, 'Applications', '.MLX Harness.old-123.app'))
     mkdirSync(join(root, 'Applications', 'Other.app'))
     mkdirSync(updatesDir(), { recursive: true })
-    writeFileSync(join(updatesDir(), 'MLX-Studio-0.2.0.dmg.part'), 'x')
+    writeFileSync(join(updatesDir(), 'MLX-Harness-0.2.0.dmg.part'), 'x')
     writeFileSync(join(updatesDir(), 'swap.log'), 'kept')
     const mod = await freshUpdater()
     h.manifest.version = '0.1.0'
     await mod.checkNow()
-    expect(readdirSync(join(root, 'Applications')).sort()).toEqual(['MLX Studio.app', 'Other.app'])
+    expect(readdirSync(join(root, 'Applications')).sort()).toEqual(['MLX Harness.app', 'Other.app'])
     expect(readdirSync(updatesDir())).toEqual(['swap.log'])
+  })
+})
+
+describe('a copy still called MLX Studio.app (0.1.x, or 0.2.0 installed by 0.1.1\'s updater)', () => {
+  const legacy = () => join(root, 'Applications', 'MLX Studio.app')
+  const harness = () => join(root, 'Applications', 'MLX Harness.app')
+  beforeEach(() => {
+    rmSync(appPath, { recursive: true, force: true })
+    appPath = legacy()
+    makeApp(appPath, { CFBundleIdentifier: 'app.mlx.studio', CFBundleShortVersionString: '0.1.0' })
+    h.paths.exe = join(appPath, 'Contents', 'MacOS', 'MLX Harness')
+  })
+
+  it('stages under the new name and swaps the update in as MLX Harness.app', async () => {
+    const mod = await freshUpdater()
+    await mod.checkNow()
+    await h.handlers.get('app:updateInstall')!()
+    expect(state()).toMatchObject({ phase: 'ready' })
+    expect(existsSync(join(root, 'Applications', '.MLX Harness.update.app'))).toBe(true)
+    await h.handlers.get('app:updateRestart')!()
+    mod.runPendingUpdateSwap()
+    expect(h.spawned).toHaveLength(1)
+    expect(h.spawned[0].args.slice(3)).toEqual([
+      String(process.pid), appPath, join(root, 'Applications', '.MLX Harness.update.app'),
+      join(root, 'Applications', `.MLX Studio.old-${process.pid}.app`), '1', '/usr/bin/open', '/usr/bin/xattr',
+      join(updatesDir(), 'swap.log'), harness(),
+    ])
+  })
+
+  it('finds a 0.1.x-named app in an older DMG too', async () => {
+    h.dmgAppName = 'MLX Studio.app'
+    const mod = await freshUpdater()
+    await mod.checkNow()
+    await h.handlers.get('app:updateInstall')!()
+    expect(state()).toMatchObject({ phase: 'ready' })
+  })
+
+  it('with nothing staged, renames itself to MLX Harness.app after quit', async () => {
+    const mod = await freshUpdater()
+    mod.runPendingUpdateSwap()
+    expect(h.spawned).toHaveLength(1)
+    const { file, args, opts } = h.spawned[0]
+    expect(file).toBe('/bin/sh')
+    expect(opts).toMatchObject({ detached: true, stdio: 'ignore' })
+    expect(args[2]).toBe('mlx-harness-rename')
+    expect(args.slice(3)).toEqual([String(process.pid), appPath, harness(), join(updatesDir(), 'rename.log'), '/bin/ps', '/usr/bin/grep'])
+  })
+
+  it('never renames over an existing MLX Harness.app, and keeps working under the old name', async () => {
+    makeApp(harness(), { CFBundleIdentifier: 'app.mlx.studio', CFBundleShortVersionString: '0.2.0' })
+    const mod = await freshUpdater()
+    mod.runPendingUpdateSwap()
+    expect(h.spawned).toHaveLength(0)
+  })
+
+  it('does not rename development builds or copies running from a disk image', async () => {
+    h.packaged = false
+    let mod = await freshUpdater()
+    mod.runPendingUpdateSwap()
+    h.packaged = true
+    h.paths.exe = '/Volumes/MLX Studio/MLX Studio.app/Contents/MacOS/MLX Studio'
+    mod = await freshUpdater()
+    mod.runPendingUpdateSwap()
+    expect(h.spawned).toHaveLength(0)
+  })
+
+  it('an already renamed copy is left alone after quit', async () => {
+    rmSync(appPath, { recursive: true, force: true })
+    appPath = harness()
+    makeApp(appPath, { CFBundleIdentifier: 'app.mlx.studio', CFBundleShortVersionString: '0.2.0' })
+    h.paths.exe = join(appPath, 'Contents', 'MacOS', 'MLX Harness')
+    const mod = await freshUpdater()
+    mod.runPendingUpdateSwap()
+    expect(h.spawned).toHaveLength(0)
+  })
+
+  it('cleans up leftovers under both names', async () => {
+    for (const n of ['.MLX Studio.update.app', '.MLX Studio.old-9.app', '.MLX Harness.update.app', '.MLX Harness.old-9.app', 'Other.app']) {
+      mkdirSync(join(root, 'Applications', n))
+    }
+    const mod = await freshUpdater()
+    h.manifest.version = '0.1.0'
+    await mod.checkNow()
+    expect(readdirSync(join(root, 'Applications')).sort()).toEqual(['MLX Studio.app', 'Other.app'])
   })
 })
