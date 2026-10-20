@@ -89,6 +89,8 @@ describe('model switcher grouping', () => {
     const local = buildSwitcherGroups({ sessions, localServers: [ollama], providers, query: 'gem' })
     expect(local.onThisMac.map(r => r.key)).toEqual(['session:gemma'])
     expect(local.showConnect).toBe(false)
+    // Fields are matched one by one: a query never threads through a path and a name.
+    expect(buildSwitcherGroups({ sessions, localServers: [], providers, query: 'son' }).onThisMac).toEqual([])
   })
 
   it('adds a featured model to its account with the levels it offers, and describes the selection', () => {
@@ -124,7 +126,7 @@ describe('Apple Dictation', () => {
     const main = readFileSync('src/main/index.ts', 'utf8')
     expect(main).toContain('registerDictationIpc()')
     const preload = readFileSync('src/preload/index.ts', 'utf8')
-    expect(preload).toContain("supported: process.platform === 'darwin'")
+    expect(preload).toContain("supported: (): boolean => process.platform === 'darwin'")
     expect(preload).toContain("ipcRenderer.invoke('dictation:start')")
     const input = readFileSync('src/renderer/src/components/chat/InputBox.tsx', 'utf8')
     expect(input).toContain('await window.api.dictation?.start()')

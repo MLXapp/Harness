@@ -765,7 +765,7 @@
     "voiceInput": {
       "title": "음성 입력",
       "apple": "Apple 받아쓰기",
-      "whisper": "Whisper (이 Mac)",
+      "whisper": "Whisper",
       "hint": "Apple 받아쓰기는 macOS 시스템 받아쓰기를 사용합니다. Whisper는 이 Mac의 모델로 녹음하고 받아씁니다."
     }
   },

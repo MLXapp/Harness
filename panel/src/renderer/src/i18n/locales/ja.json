@@ -765,7 +765,7 @@
     "voiceInput": {
       "title": "音声入力",
       "apple": "Apple の音声入力",
-      "whisper": "Whisper（このMac）",
+      "whisper": "Whisper",
       "hint": "Apple の音声入力は macOS のシステム音声入力を使います。Whisper はこのMacのモデルで録音して文字に起こします。"
     }
   },

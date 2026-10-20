@@ -17,7 +17,11 @@ export function resolveVoiceInput(saved: string | null | undefined, appleSupport
 }
 
 export function appleDictationSupported(): boolean {
-  return window.api?.dictation?.supported === true
+  try {
+    return window.api?.dictation?.supported() === true
+  } catch {
+    return false
+  }
 }
 
 export function useVoiceInput(): { mode: VoiceInputMode; appleSupported: boolean; setMode: (mode: VoiceInputMode) => void } {

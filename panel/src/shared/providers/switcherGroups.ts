@@ -112,6 +112,12 @@ export function subsequenceMatch(query: string, text: string): boolean {
   return i === q.length
 }
 
+/** One field must hold the whole query as a subsequence (fields are not run together). */
+export function matchesAny(query: string, ...fields: Array<string | undefined>): boolean {
+  if (!query.trim()) return true
+  return fields.some(field => !!field && subsequenceMatch(query, field))
+}
+
 /** Accounts (provider ids) the user can use: keys stored, or no key needed. */
 export function connectedProviderIds(providers: readonly ProviderView[]): Set<string> {
   return new Set(
@@ -125,8 +131,15 @@ function isHidden(model: ProviderModel): boolean {
   return (model as ProviderModel & { hidden?: boolean }).hidden === true
 }
 
-function sessionName(s: PickerSession): string {
-  return s.modelName || s.modelPath.split('/').pop() || s.modelPath
+/** A session's name for lists: its model name, else the repo name from the path. */
+export function sessionName(s: PickerSession): string {
+  return s.modelName || repoName(s.modelPath) || s.modelPath
+}
+
+/** "…/models--mlx-community--Qwen3.5-9B-4bit" → "Qwen3.5-9B-4bit" (Hugging Face cache folder names). */
+function repoName(path: string): string {
+  const last = path.split('/').filter(Boolean).pop() ?? path
+  return last.replace(/^models--/, '').split('--').pop() ?? last
 }
 
 function isChatSession(s: PickerSession): boolean {
@@ -164,17 +177,17 @@ export function buildSwitcherGroups<S extends PickerSession>(input: {
         present: !!provider?.models.some(m => m.id === r.modelId),
       }
     })
-    .filter(row => subsequenceMatch(query, `${row.model.name} ${featuredAccount(row.model.account)?.name ?? ''}`))
+    .filter(row => matchesAny(query, row.model.name, featuredAccount(row.model.account)?.name))
 
   const onThisMac: Array<SwitcherSessionRow<S> | SwitcherProviderRow> = [
     ...base.onThisMac
       .filter(isChatSession)
-      .filter(s => subsequenceMatch(query, `${sessionName(s)} ${s.modelPath}`))
+      .filter(s => matchesAny(query, sessionName(s), repoName(s.modelPath)))
       .map(session => ({ kind: 'session' as const, key: `session:${session.id}`, session })),
     ...base.localServers.flatMap(group =>
       group.models
         .filter(m => !isHidden(m) && isChatModelRepo(m.id))
-        .filter(m => subsequenceMatch(query, `${m.name ?? ''} ${m.id} ${group.provider.displayName}`))
+        .filter(m => matchesAny(query, m.name, m.id, group.provider.displayName))
         .map(model => ({
           kind: 'provider-model' as const,
           key: `${group.provider.id}/${model.id}`,
@@ -193,7 +206,7 @@ export function buildSwitcherGroups<S extends PickerSession>(input: {
         label,
         rows: group.models
           .filter(m => !isHidden(m) && isChatModelRepo(m.id) && !featuredKeys.has(`${group.provider.id}/${m.id}`))
-          .filter(m => subsequenceMatch(query, `${m.name ?? ''} ${m.id} ${label}`))
+          .filter(m => matchesAny(query, m.name, m.id, label))
           .map(model => ({
             kind: 'provider-model' as const,
             key: `${group.provider.id}/${model.id}`,
@@ -206,7 +219,7 @@ export function buildSwitcherGroups<S extends PickerSession>(input: {
     .filter(group => group.rows.length > 0)
 
   const remoteSessions = base.remoteSessions
-    .filter(s => subsequenceMatch(query, `${sessionName(s)} ${s.modelPath}`))
+    .filter(s => matchesAny(query, sessionName(s), s.modelPath))
     .map(session => ({ kind: 'session' as const, key: `session:${session.id}`, session }))
 
   const anyFeaturedConnected = FEATURED_ACCOUNTS.some(a => connected.has(a.catalogId))

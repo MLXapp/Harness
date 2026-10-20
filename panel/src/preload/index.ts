@@ -412,7 +412,7 @@ const api = {
 
   // Apple Dictation for the chat composer (macOS only; see main/dictation.ts).
   dictation: {
-    supported: process.platform === 'darwin',
+    supported: (): boolean => process.platform === 'darwin',
     start: (): Promise<{ ok: boolean; reason?: 'unsupported' }> => ipcRenderer.invoke('dictation:start'),
   },
 
