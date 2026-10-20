@@ -169,6 +169,15 @@ const api = {
     answerUser: (chatId: string, answer: string) =>
       ipcRenderer.send('chat:answerUser', chatId, answer),
 
+    // Coding agent: context compaction (/compact) and its automatic runs
+    compact: (chatId: string, endpoint?: { host: string; port: number }) =>
+      ipcRenderer.invoke('chat:compact', chatId, endpoint),
+    onCompaction: (callback: (data: any) => void) => {
+      const handler = (_: any, data: any) => callback(data)
+      ipcRenderer.on('chat:compaction', handler)
+      return () => { ipcRenderer.removeListener('chat:compaction', handler) }
+    },
+
     // Coding agent: todo list written by the todo_write tool
     getTodos: (chatId: string) => ipcRenderer.invoke('chat:getTodos', chatId),
     onTodos: (callback: (data: any) => void) => {

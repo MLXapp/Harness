@@ -45,6 +45,31 @@ import {
   orderToolsForPrefixCache,
 } from "../agent/toolPresets";
 import { loadProjectInstructions } from "../agent/projectInstructions";
+import {
+  SummaryStreamCollector,
+  TokenCalibrator,
+  acceptSummary,
+  applyCompaction,
+  buildSummarizationMessages,
+  checkpointMessage,
+  compactionRetainTokens,
+  estimateMessageTokens,
+  estimateRequestTokens,
+  historySourceId,
+  isCheckpointMessage,
+  isPromptOverflowError,
+  messagesAfterCompaction,
+  parseCompactionState,
+  persistedBoundaryForRange,
+  resolveContextWindow,
+  selectCompactionRange,
+  shiftIndexAfterCompaction,
+  shouldCompact,
+  summaryMaxTokens,
+  tagHistoryMessage,
+  type ChatCompactionState,
+  type SummaryStreamResult,
+} from "../agent/compaction";
 import { detectModelConfigFromDir } from "../model-config-registry";
 import { localEngineReadyFromHealthBody } from "../engineReadiness";
 import { getAuthHeaders } from "./utils";
@@ -644,11 +669,22 @@ function agentSpillRoot(): string {
  */
 const fileReadTracker = new FileReadTracker();
 const repeatCallTracker = new RepeatCallTracker();
+/** Heuristic→measured prompt-token ratio per chat (feeds auto compaction). */
+const tokenCalibrators = new Map<string, TokenCalibrator>();
+function tokenCalibratorFor(chatId: string): TokenCalibrator {
+  let calibrator = tokenCalibrators.get(chatId);
+  if (!calibrator) {
+    calibrator = new TokenCalibrator();
+    tokenCalibrators.set(chatId, calibrator);
+  }
+  return calibrator;
+}
 
 /** Forget a deleted chat's agent session state and spilled tool results. */
 function clearChatAgentRuntime(chatId: string): void {
   fileReadTracker.clear(chatId);
   repeatCallTracker.clear(chatId);
+  tokenCalibrators.delete(chatId);
   if (typeof chatId !== "string" || !/^[A-Za-z0-9_-]+$/.test(chatId)) return;
   try {
     rmSync(join(agentSpillRoot(), chatId), { recursive: true, force: true });
@@ -1075,10 +1111,12 @@ export function registerChatHandlers(
   // `kind` distinguishes image, video, audio, and text so we emit the right
   // OpenAI content part. Back-compat: undefined `kind` falls back to detection
   // via the data URL mime prefix below.
-  ipcMain.handle(
-    "chat:sendMessage",
-    async (
-      _,
+  //
+  // mode "compact" (chat:compact, the /compact command) runs the same setup —
+  // endpoint, wake, health, system prompt, tools, history replay — and then
+  // only compacts the history instead of sending a new user turn.
+  const handleSendMessage = async (
+      _: unknown,
       chatId: string,
       content: string,
       endpoint?: { host: string; port: number },
@@ -1090,7 +1128,8 @@ export function registerChatHandlers(
         size?: number;
         text?: string;
       }>,
-    ) => {
+      mode: "send" | "compact" = "send",
+    ): Promise<any> => {
       // B6: Concurrency guard — reject if a request is already active for this chat
       // B6: Concurrency guard with stale lock recovery
       const existing = activeRequests.get(chatId);
@@ -1142,6 +1181,7 @@ export function registerChatHandlers(
       let chatIsMultimodal = false;
       let chatModelForceTextOnly = false;
       let chatDetectedFamily: string | undefined;
+      let chatModelMaxContextLength: number | undefined;
       let chatUsesZayaAppleScriptToolBundle = false;
       let thinkingBudgetSupported: boolean | undefined;
       let supportsThinkingBudget: boolean | undefined;
@@ -1216,6 +1256,7 @@ export function registerChatHandlers(
               thinkingBudgetSupported = undefined;
             }
             chatDetectedFamily = detected.family;
+            chatModelMaxContextLength = detected.maxContextLength;
             chatModelForceTextOnly = detected.forceTextOnly === true;
             chatUsesZayaAppleScriptToolBundle = isZayaAppleScriptToolBundle(
               chatDetectedFamily,
@@ -1639,7 +1680,7 @@ export function registerChatHandlers(
         content: userContentForDb,
         timestamp: Date.now(),
       };
-      db.addMessage(userMessage);
+      if (mode === "send") db.addMessage(userMessage);
 
       // Generate assistant message ID upfront so typing indicator can reference it
       const assistantMessageId = uuidv4();
@@ -1662,7 +1703,7 @@ export function registerChatHandlers(
 
       // Signal to renderer that the model is processing (typing indicator during TTFT)
       try {
-        const win = getWindow();
+        const win = mode === "send" ? getWindow() : null;
         if (win && !win.isDestroyed()) {
           win.webContents.send("chat:typing", {
             chatId,
@@ -1951,9 +1992,31 @@ export function registerChatHandlers(
         );
       };
 
+      // A compaction checkpoint from an earlier turn replaces every row up to
+      // its boundary. When that row is gone (deleted, regenerated) the
+      // checkpoint is stale: drop it and replay the full history.
+      let compactionState: ChatCompactionState | null = parseCompactionState(
+        db.getChatAgentState(chatId).compactionJson,
+      );
+      let replayRows = messages;
+      if (compactionState) {
+        const rowsAfterCheckpoint = messagesAfterCompaction(messages, compactionState);
+        if (rowsAfterCheckpoint) {
+          replayRows = rowsAfterCheckpoint;
+          requestMessages.push(
+            checkpointMessage(compactionState.summary, compactionState.throughMessageId),
+          );
+        } else {
+          compactionState = null;
+          db.setChatCompactionState(chatId, null);
+        }
+      }
+
       // Add conversation messages (skip any existing system messages to avoid duplicates)
       // Messages with JSON content arrays (multimodal) are parsed back to content parts for the API
-      for (const m of messages) {
+      // Every replayed item is tagged with its row id (never serialized) so
+      // compaction knows which persisted rows a checkpoint fully covers.
+      for (const m of replayRows) {
         if (
           m.role === "system" &&
           (hasSystemPrompt || overrides?.builtinToolsEnabled)
@@ -1967,6 +2030,8 @@ export function registerChatHandlers(
         // replaying it re-413s every later turn in the chat.
         if (m.role === "assistant" && isPromptTooLongBubbleContent(m.content)) {
           const prev = requestMessages[requestMessages.length - 1];
+          // A compaction checkpoint is not the oversized payload: keep it.
+          if (prev && isCheckpointMessage(prev)) continue;
           if (prev && prev.role === "user") requestMessages.pop();
           continue;
         }
@@ -2057,12 +2122,12 @@ export function registerChatHandlers(
             },
           );
           if (replay.length > 0) {
-            requestMessages.push(...replay);
+            requestMessages.push(...replay.map((item: any) => tagHistoryMessage(item, m.id)));
             continue;
           }
         }
         const reqMsg: any = { role: m.role, content: msgContent };
-        requestMessages.push(reqMsg);
+        requestMessages.push(tagHistoryMessage(reqMsg, m.id));
       }
 
       // Fix role alternation: merge consecutive same-role messages to prevent
@@ -2079,6 +2144,8 @@ export function registerChatHandlers(
           typeof msg.content === "string"
         ) {
           prev.content = prev.content + "\n\n" + msg.content;
+          // The merged message now ends with msg's persisted row.
+          tagHistoryMessage(prev, historySourceId(msg));
         } else {
           mergedMessages.push({ ...msg });
         }
@@ -2288,7 +2355,7 @@ export function registerChatHandlers(
 
       // Pre-insert assistant message to DB immediately so periodic updates have a row to update.
       // Uses INSERT OR REPLACE so the final addMessage at completion overwrites cleanly.
-      db.addMessage(assistantMessage);
+      if (mode === "send") db.addMessage(assistantMessage);
 
       const startPeriodicSave = () => {
         if (periodicSaveInterval) return;
@@ -2323,7 +2390,7 @@ export function registerChatHandlers(
       };
 
       try {
-        if (unavailableExactlyOnceBuiltinToolNames.length > 0) {
+        if (mode === "send" && unavailableExactlyOnceBuiltinToolNames.length > 0) {
           const quotedNames = unavailableExactlyOnceBuiltinToolNames
             .map((name) => `"${name}"`)
             .join(", ");
@@ -2402,7 +2469,21 @@ export function registerChatHandlers(
         //     replays the same prefix + tools with the instruction appended
         //     last, so even that call reuses the warm cache.
         // Build request body — shared between initial request and tool follow-ups
-        const buildRequestBody = (): Record<string, any> => {
+        //
+        // `auxiliary` builds the compaction summary request: the SAME body
+        // (model, sampler, reasoning fields, tool schemas in the same order)
+        // over the given messages, with only the output cap changed and no
+        // forced tool_choice. It records no generation pass.
+        const buildRequestBody = (
+          auxiliary?: { messages: any[]; maxTokens: number },
+        ): Record<string, any> => {
+          const bodyMessages = auxiliary?.messages ?? requestMessages;
+          const finalizeAuxiliaryBody = (obj: Record<string, any>) => {
+            if (useResponsesApi) obj.max_output_tokens = auxiliary!.maxTokens;
+            else obj.max_tokens = auxiliary!.maxTokens;
+            delete obj.tool_choice;
+            return obj;
+          };
           const resolvedOutputBudget = dsv4OutputBudget(
             overrides?.maxTokens,
             overrides?.enableThinking,
@@ -2500,7 +2581,7 @@ export function registerChatHandlers(
           if (useResponsesApi) {
             const { systemMessages, inputMessages } =
               splitResponsesSystemMessages(
-                requestMessages,
+                bodyMessages,
                 chatDetectedFamily === "deepseek-v4",
               );
             const instructions =
@@ -2601,11 +2682,12 @@ export function registerChatHandlers(
             // explicit request timeout as a hard wall-clock budget, while its
             // server default is progress-aware. The app owns the saved value
             // as the inactivity watchdog armed above.
+            if (auxiliary) return finalizeAuxiliaryBody(obj);
             return finalizeRequestBody(obj);
           } else {
             const obj: Record<string, any> = {
               model: modelName,
-              messages: requestMessages,
+              messages: bodyMessages,
               // Same effective sampler contract as the Responses branch.
               ...(effectiveSamplerOverrides?.temperature != null
                 ? { temperature: effectiveSamplerOverrides.temperature }
@@ -2672,6 +2754,7 @@ export function registerChatHandlers(
             // Keep the local engine on its progress-aware server default. An
             // API caller that explicitly sends `timeout` still gets the
             // documented hard wall-clock behavior.
+            if (auxiliary) return finalizeAuxiliaryBody(obj);
             return finalizeRequestBody(obj);
           }
         };
@@ -2700,12 +2783,6 @@ export function registerChatHandlers(
             })}`,
           );
         };
-        const requestBody = JSON.stringify(buildRequestBody());
-        logRequestShape(requestBody, "initial");
-
-        fetchStartTime = Date.now(); // Capture just before fetch for accurate TTFT
-        exchangeFirstTokenClock.beginPass(fetchStartTime);
-        remoteMetrics?.beginPass(fetchStartTime);
         // Remote internet providers use Electron's net.fetch for certificates
         // and proxies; loopback model servers use Node streaming for SSE.
         const useNodeStreamingFetch = !isRemote || isLoopbackUrl(apiUrl);
@@ -2717,60 +2794,257 @@ export function registerChatHandlers(
           !isRemote
             ? { "X-vMLX-Stream-Usage": "incremental" }
             : {};
-        // Inference begins HERE — arm the inactivity watchdog now, not at
-        // entry, so queued load/wake waiting never counts against it.
-        armFetchInactivityTimeout();
-        const response = useNodeStreamingFetch
-          ? await streamingFetch(apiUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...authHeaders,
-                ...vmlxUsageHeaders,
-                ...nextLocalRequestCorrelationHeaders(),
-              },
-              body: requestBody,
-              signal: abortController.signal,
-            })
-          : await remoteFetch(apiUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...authHeaders,
-                ...vmlxUsageHeaders,
-                ...nextLocalRequestCorrelationHeaders(),
-              },
-              body: requestBody,
-              signal: abortController.signal,
-            });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          // Try to extract structured error detail from JSON responses
-          let errorDetail = errorText;
+        // ─── Context compaction ─────────────────────────────────────────────
+        // At 80% of the context window the older history is replaced by one
+        // structured checkpoint written by this same model; the newest ~16%
+        // stays verbatim and a tool call is never split from its result. The
+        // summary request replays the current prefix (system prompt, tools,
+        // leading messages) and appends the instruction last, so the engine's
+        // prefix cache is reused. Also runs once after a "prompt too long"
+        // rejection, and on demand for /compact.
+        const contextWindow = resolveContextWindow({
+          engineMaxPromptTokens: generationHealth?.max_prompt_tokens,
+          sessionMaxContextLength: isRemote ? undefined : chatSessionConfig.maxContextLength,
+          modelMaxContextLength: chatModelMaxContextLength,
+        });
+        const tokenCalibrator = tokenCalibratorFor(chatId);
+        let lastSentHeuristicTokens = 0;
+        let autoCompactionFailures = 0;
+        // This turn's tool exchange items that a checkpoint replaced. They are
+        // still persisted on the assistant row (what really happened), even
+        // though the model now sees them summarized.
+        const compactedCurrentTurnItems: any[] = [];
+        const toolsForEstimate = () =>
+          attachBuiltinToolsForCurrentTurn ? availableToolDefinitions() : [];
+        const notePromptSent = () => {
+          lastSentHeuristicTokens = estimateRequestTokens(requestMessages, toolsForEstimate());
+        };
+        const emitCompactionEvent = (event: Record<string, unknown>) => {
           try {
-            const parsed = JSON.parse(errorText);
-            if (parsed.detail) {
-              errorDetail =
-                typeof parsed.detail === "string"
-                  ? parsed.detail
-                  : Array.isArray(parsed.detail)
-                    ? parsed.detail
-                        .map((d: any) => d.msg || JSON.stringify(d))
-                        .join("; ")
-                    : JSON.stringify(parsed.detail);
-            } else if (
-              typeof parsed.error?.message === "string" &&
-              parsed.error.message
-            ) {
-              // OpenAI-style envelope — what the engine actually sends for
-              // 4xx rejections like prompt_too_long
-              errorDetail = parsed.error.message;
+            const win = getWindow();
+            if (win && !win.isDestroyed()) {
+              win.webContents.send("chat:compaction", { chatId, ...event });
             }
-          } catch {
-            /* use raw text */
+          } catch (_) {}
+        };
+        const runSummaryRequest = async (
+          summaryMessages: any[],
+          maxTokens: number,
+        ): Promise<SummaryStreamResult> => {
+          const summaryBody = JSON.stringify(
+            buildRequestBody({ messages: summaryMessages, maxTokens }),
+          );
+          const summaryInit = {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            body: summaryBody,
+            signal: abortController.signal,
+          };
+          armFetchInactivityTimeout();
+          const summaryResponse = useNodeStreamingFetch
+            ? await streamingFetch(apiUrl, summaryInit)
+            : await remoteFetch(apiUrl, summaryInit);
+          if (!summaryResponse.ok) {
+            const detail = await summaryResponse.text();
+            return { text: "", error: `${summaryResponse.status} ${detail.slice(0, 500)}` };
           }
-          throw new Error(`API error: ${response.status} - ${errorDetail}`);
+          const summaryReader = summaryResponse.body?.getReader();
+          if (!summaryReader) return { text: "", error: "empty response body" };
+          const collector = new SummaryStreamCollector();
+          const decoder = new TextDecoder();
+          for (;;) {
+            const { done, value } = await summaryReader.read();
+            if (done) break;
+            if (value && value.byteLength > 0) {
+              armFetchInactivityTimeout();
+              collector.push(decoder.decode(value, { stream: true }));
+            }
+          }
+          collector.push(decoder.decode());
+          return collector.finish();
+        };
+        const compactRequestHistory = async (
+          reason: "threshold" | "overflow" | "manual",
+        ): Promise<{ compacted: boolean; beforeTokens: number; afterTokens: number }> => {
+          const tools = toolsForEstimate();
+          const beforeTokens = tokenCalibrator.estimate(
+            estimateRequestTokens(requestMessages, tools),
+          );
+          // Automatic compaction keeps 16% of the window verbatim. After an
+          // overflow (the known window was wrong) and for /compact on a short
+          // chat, at most the newest quarter of the history is kept.
+          const retainTokens =
+            reason !== "threshold"
+              ? Math.min(
+                  compactionRetainTokens(contextWindow.tokens),
+                  Math.floor(estimateRequestTokens(requestMessages) * 0.25),
+                )
+              : compactionRetainTokens(contextWindow.tokens);
+          const range = selectCompactionRange(requestMessages, retainTokens);
+          if (!range) return { compacted: false, beforeTokens, afterTokens: beforeTokens };
+          const replacedTokens = requestMessages
+            .slice(range.start, range.end + 1)
+            .reduce((total, message) => total + estimateMessageTokens(message), 0);
+          console.log(
+            `[CHAT] Compacting (${reason}): ~${beforeTokens} of ${contextWindow.tokens} tokens (${contextWindow.source}), summarizing items ${range.start}-${range.end}`,
+          );
+          if (reason !== "manual") emitCompactionEvent({ phase: "start", reason });
+          const summary = acceptSummary(
+            await runSummaryRequest(
+              buildSummarizationMessages(requestMessages, range),
+              summaryMaxTokens(contextWindow.tokens),
+            ),
+            replacedTokens,
+          );
+          if (range.end >= currentTurnToolStart) {
+            compactedCurrentTurnItems.push(
+              ...requestMessages.slice(Math.max(range.start, currentTurnToolStart), range.end + 1),
+            );
+          }
+          const boundaryId = persistedBoundaryForRange(requestMessages, range);
+          const compactedMessages = applyCompaction(requestMessages, range, summary, boundaryId);
+          currentTurnToolStart = shiftIndexAfterCompaction(currentTurnToolStart, range);
+          requestMessages.length = 0;
+          requestMessages.push(...compactedMessages);
+          if (boundaryId) {
+            const nextState: ChatCompactionState = {
+              version: 1,
+              summary,
+              throughMessageId: boundaryId,
+              createdAt: Date.now(),
+              compactions: (compactionState?.compactions ?? 0) + 1,
+            };
+            compactionState = nextState;
+            db.setChatCompactionState(chatId, JSON.stringify(nextState));
+          }
+          const afterTokens = tokenCalibrator.estimate(
+            estimateRequestTokens(requestMessages, tools),
+          );
+          pushChatSessionLog(
+            requestDiagSessionId,
+            `[CHAT_DIAG] compaction=${JSON.stringify({ chatId: chatId.slice(0, 8), reason, contextWindow: contextWindow.tokens, beforeTokens, afterTokens, persisted: !!boundaryId })}`,
+          );
+          if (reason !== "manual") {
+            emitCompactionEvent({ phase: "done", reason, beforeTokens, afterTokens });
+          }
+          return { compacted: true, beforeTokens, afterTokens };
+        };
+        const maybeAutoCompact = async () => {
+          // A remote endpoint that reports no window compacts only after an
+          // actual "prompt too long" rejection.
+          if (isRemote && !contextWindow.known) return;
+          if (autoCompactionFailures >= 2) return;
+          const estimate = tokenCalibrator.estimate(
+            estimateRequestTokens(requestMessages, toolsForEstimate()),
+          );
+          if (!shouldCompact(estimate, contextWindow.tokens)) return;
+          try {
+            await compactRequestHistory("threshold");
+          } catch (err) {
+            if (abortController.signal.aborted) throw err;
+            autoCompactionFailures += 1;
+            console.warn("[CHAT] Automatic compaction failed; continuing with the full history", err);
+            emitCompactionEvent({ phase: "failed", reason: "threshold", error: (err as Error)?.message });
+          }
+        };
+        const compactAfterOverflow = async (): Promise<boolean> => {
+          try {
+            return (await compactRequestHistory("overflow")).compacted;
+          } catch (err) {
+            if (abortController.signal.aborted) throw err;
+            console.warn("[CHAT] Compaction after a prompt-too-long rejection failed", err);
+            emitCompactionEvent({ phase: "failed", reason: "overflow", error: (err as Error)?.message });
+            return false;
+          }
+        };
+
+        if (mode === "compact") {
+          try {
+            const outcome = await compactRequestHistory("manual");
+            return { success: true, ...outcome, contextWindow: contextWindow.tokens };
+          } catch (err) {
+            if (abortController.signal.aborted) return { success: false, error: "aborted" };
+            return { success: false, error: (err as Error)?.message || String(err) };
+          }
+        }
+
+        await maybeAutoCompact();
+        let response!: Awaited<ReturnType<typeof streamingFetch>> | Response;
+        for (let overflowRetry = 0; ; overflowRetry++) {
+          const requestBody = JSON.stringify(buildRequestBody());
+          logRequestShape(requestBody, "initial");
+          notePromptSent();
+
+          if (overflowRetry === 0) {
+            fetchStartTime = Date.now(); // Capture just before fetch for accurate TTFT
+            exchangeFirstTokenClock.beginPass(fetchStartTime);
+            remoteMetrics?.beginPass(fetchStartTime);
+          }
+          // Inference begins HERE — arm the inactivity watchdog now, not at
+          // entry, so queued load/wake waiting never counts against it.
+          armFetchInactivityTimeout();
+          response = useNodeStreamingFetch
+            ? await streamingFetch(apiUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...authHeaders,
+                  ...vmlxUsageHeaders,
+                  ...nextLocalRequestCorrelationHeaders(),
+                },
+                body: requestBody,
+                signal: abortController.signal,
+              })
+            : await remoteFetch(apiUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...authHeaders,
+                  ...vmlxUsageHeaders,
+                  ...nextLocalRequestCorrelationHeaders(),
+                },
+                body: requestBody,
+                signal: abortController.signal,
+              });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            // Try to extract structured error detail from JSON responses
+            let errorDetail = errorText;
+            try {
+              const parsed = JSON.parse(errorText);
+              if (parsed.detail) {
+                errorDetail =
+                  typeof parsed.detail === "string"
+                    ? parsed.detail
+                    : Array.isArray(parsed.detail)
+                      ? parsed.detail
+                          .map((d: any) => d.msg || JSON.stringify(d))
+                          .join("; ")
+                      : JSON.stringify(parsed.detail);
+              } else if (
+                typeof parsed.error?.message === "string" &&
+                parsed.error.message
+              ) {
+                // OpenAI-style envelope — what the engine actually sends for
+                // 4xx rejections like prompt_too_long
+                errorDetail = parsed.error.message;
+              }
+            } catch {
+              /* use raw text */
+            }
+            // "Prompt too long": compact once and retry instead of failing.
+            if (
+              overflowRetry === 0 &&
+              isPromptOverflowError(response.status, errorDetail) &&
+              (await compactAfterOverflow())
+            ) {
+              continue;
+            }
+            throw new Error(`API error: ${response.status} - ${errorDetail}`);
+          }
+          break;
         }
 
         // Stream response
@@ -3938,6 +4212,10 @@ export function registerChatHandlers(
 
         // ─── Helper: send follow-up request and stream response ────────────
         const sendFollowUp = async (): Promise<boolean> => {
+          // Calibrate the token heuristic with the pass that just finished,
+          // then compact before this pass if the history reached 80%.
+          tokenCalibrator.observe(lastSentHeuristicTokens, promptTokens);
+          await maybeAutoCompact();
           finishServerDecodePass();
           completedPrefillPasses.push(currentPrefillUsage);
           currentPrefillUsage = undefined;
@@ -3966,32 +4244,48 @@ export function registerChatHandlers(
             : `${baseUrl}/v1/chat/completions`;
           // Remote internet providers use Electron net.fetch; loopback model
           // servers use Node streaming so SSE tool events are not buffered.
-          const followUpBody = JSON.stringify(buildRequestBody());
-          logRequestShape(followUpBody, "follow_up");
-          const followUpInit = {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...authHeaders,
-              // Every local Responses HTTP pass needs the same private usage
-              // negotiation. Omitting it only on tool follow-ups left the
-              // final footer with first-pass token/decode counts paired to
-              // final-pass TTFT/prefill throughput.
-              ...vmlxUsageHeaders,
-              ...nextLocalRequestCorrelationHeaders(),
-              ...(!isRemote && plannedDirectAnswerPass && !finalAnswerRecovery
-                ? { "X-vMLX-Tool-Choice-Fulfilled": "1" }
-                : {}),
-            },
-            body: followUpBody,
-            signal: abortController.signal,
+          const postFollowUp = async () => {
+            const followUpBody = JSON.stringify(buildRequestBody());
+            logRequestShape(followUpBody, "follow_up");
+            notePromptSent();
+            const followUpInit = {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...authHeaders,
+                // Every local Responses HTTP pass needs the same private usage
+                // negotiation. Omitting it only on tool follow-ups left the
+                // final footer with first-pass token/decode counts paired to
+                // final-pass TTFT/prefill throughput.
+                ...vmlxUsageHeaders,
+                ...nextLocalRequestCorrelationHeaders(),
+                ...(!isRemote && plannedDirectAnswerPass && !finalAnswerRecovery
+                  ? { "X-vMLX-Tool-Choice-Fulfilled": "1" }
+                  : {}),
+              },
+              body: followUpBody,
+              signal: abortController.signal,
+            };
+            const useNodeStreamingFetch = !isRemote || isLoopbackUrl(url);
+            return useNodeStreamingFetch
+              ? await streamingFetch(url, followUpInit as any)
+              : await remoteFetch(url, followUpInit);
           };
-          const useNodeStreamingFetch = !isRemote || isLoopbackUrl(url);
-          const res = useNodeStreamingFetch
-            ? await streamingFetch(url, followUpInit as any)
-            : await remoteFetch(url, followUpInit);
+          let res = await postFollowUp();
+          let followUpErrorText = "";
           if (!res.ok) {
-            const errText = await res.text();
+            followUpErrorText = await res.text();
+            // "Prompt too long" after the tool results: compact once, retry.
+            if (
+              isPromptOverflowError(res.status, followUpErrorText) &&
+              (await compactAfterOverflow())
+            ) {
+              res = await postFollowUp();
+              followUpErrorText = res.ok ? "" : await res.text();
+            }
+          }
+          if (!res.ok) {
+            const errText = followUpErrorText;
             console.log(`[CHAT] Follow-up failed: ${res.status} ${errText}`);
             emitToolStatus(
               "error",
@@ -5145,7 +5439,10 @@ export function registerChatHandlers(
           // Only THIS turn's fresh tool exchange (from currentTurnToolStart) —
           // never the replayed prior-turn tool calls/results, which would
           // otherwise be re-persisted into this row and multiply on each replay.
-          for (const m of requestMessages.slice(currentTurnToolStart)) {
+          for (const m of [
+            ...compactedCurrentTurnItems,
+            ...requestMessages.slice(currentTurnToolStart),
+          ]) {
             if (
               m &&
               m.role === "assistant" &&
@@ -5572,7 +5869,22 @@ export function registerChatHandlers(
           activeRequests.delete(chatId);
         }
       }
-    },
+    };
+  ipcMain.handle(
+    "chat:sendMessage",
+    (
+      event,
+      chatId: string,
+      content: string,
+      endpoint?: { host: string; port: number },
+      attachments?: Parameters<typeof handleSendMessage>[4],
+    ) => handleSendMessage(event, chatId, content, endpoint, attachments, "send"),
+  );
+  // Manual compaction (/compact): summarize the older history now.
+  ipcMain.handle(
+    "chat:compact",
+    (event, chatId: string, endpoint?: { host: string; port: number }) =>
+      handleSendMessage(event, chatId, "", endpoint, undefined, "compact"),
   );
 
   // B5: Abort active generation for a chat

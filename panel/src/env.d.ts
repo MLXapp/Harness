@@ -240,6 +240,18 @@ declare global {
           chatId: string,
         ) => Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" }>>;
         onTodos: (callback: (data: any) => void) => () => void;
+        compact: (
+          chatId: string,
+          endpoint?: { host: string; port: number },
+        ) => Promise<{
+          success: boolean;
+          compacted?: boolean;
+          beforeTokens?: number;
+          afterTokens?: number;
+          contextWindow?: number;
+          error?: string;
+        }>;
+        onCompaction: (callback: (data: any) => void) => () => void;
         setOverrides: (
           chatId: string,
           overrides: any,
