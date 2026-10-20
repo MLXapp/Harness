@@ -11,6 +11,11 @@ let prematureAccessWarned = false;
  * every safeStorage call is synchronous that prompt blocks the main thread
  * before any window exists, so the app just looks hung. Callers must therefore
  * wait for ready; this reports whether that has happened.
+ *
+ * The item is "MLX Studio Safe Storage" on Macs that ran 0.1.x (the app's
+ * name then) and "MLX Harness Safe Storage" on fresh installs; app-identity.ts
+ * holds the matching app name while Electron picks it, so secrets saved by
+ * 0.1.x keep decrypting after the rename.
  */
 function keychainReady(operation: string): boolean {
   if (app.isReady()) return true;

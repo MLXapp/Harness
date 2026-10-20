@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { app, Menu } = vi.hoisted(() => ({
-  app: { name: 'vMLX', emit: vi.fn() },
+  app: { name: 'MLX Studio', emit: vi.fn() },
   Menu: { buildFromTemplate: vi.fn(x => x), setApplicationMenu: vi.fn() },
 }))
 vi.mock('electron', () => ({ app, Menu }))
@@ -55,7 +55,7 @@ describe('native menu navigation lifecycle', () => {
     expect(isNativeNavigationAction({ mode: 'servers' })).toBe(false)
     expect(isNativeNavigationAction('run-command')).toBe(false)
   })
-  it('puts Check for Updates… right under About in the MLX Studio menu', () => {
+  it('puts Check for Updates… right under About in the MLX Harness menu, named explicitly', () => {
     const real = process.platform
     Object.defineProperty(process, 'platform', { value: 'darwin' })
     try {
@@ -64,7 +64,12 @@ describe('native menu navigation lifecycle', () => {
       installApplicationMenu(() => windowMock())
       const template = Menu.buildFromTemplate.mock.calls.at(-1)[0]
       const appMenu = template[0].submenu
-      expect(appMenu[0]).toEqual({ role: 'about' })
+      // Never app.name: it holds the 0.1.x name until will-finish-launching on a legacy Mac.
+      expect(template[0].label).toBe('MLX Harness')
+      expect(appMenu[0]).toEqual({ role: 'about', label: 'About MLX Harness' })
+      expect(appMenu.find((x: any) => x.role === 'hide').label).toBe('Hide MLX Harness')
+      expect(appMenu.find((x: any) => x.role === 'quit').label).toBe('Quit MLX Harness')
+      expect(JSON.stringify(template)).not.toContain('Studio')
       expect(appMenu[1].label).toBe('Check for Updates…')
       appMenu[1].click()
       expect(check).toHaveBeenCalledOnce()

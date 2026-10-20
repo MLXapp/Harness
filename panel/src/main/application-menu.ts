@@ -1,11 +1,12 @@
 import { app, Menu, type BrowserWindow } from 'electron'
 import { t } from './i18n'
 import type { NativeNavigationAction } from '../shared/nativeNavigation'
+import { APP_DISPLAY_NAME } from '../shared/appIdentity'
 
 let readyContentsId: number | null = null
 let updateCheckHandler: (() => void) | null = null
 
-/** "Check for Updates…" (MLX Studio menu) calls this; set by the app updater. */
+/** "Check for Updates…" (MLX Harness menu) calls this; set by the app updater. */
 export function setUpdateCheckHandler(handler: (() => void) | null): void { updateCheckHandler = handler }
 let pendingAction: NativeNavigationAction | null = null
 
@@ -45,11 +46,12 @@ export function installApplicationMenu(getWindow: () => BrowserWindow | null): v
   const preferences = { label: t('console.preferences'), accelerator: 'CmdOrCtrl+,', click: go('preferences') }
   const checkForUpdates = { label: t('update.menu.check'), click: () => updateCheckHandler?.() }
   const template: Electron.MenuItemConstructorOptions[] = [
-    ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [
-      { role: 'about' }, checkForUpdates, { type: 'separator' }, preferences,
+    // Explicit names: app.name can briefly hold the 0.1.x name for the Keychain (see app-identity.ts).
+    ...(process.platform === 'darwin' ? [{ label: APP_DISPLAY_NAME, submenu: [
+      { role: 'about', label: `About ${APP_DISPLAY_NAME}` }, checkForUpdates, { type: 'separator' }, preferences,
       { type: 'separator' }, { role: 'services' }, { type: 'separator' },
-      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
-      { type: 'separator' }, { role: 'quit' },
+      { role: 'hide', label: `Hide ${APP_DISPLAY_NAME}` }, { role: 'hideOthers' }, { role: 'unhide' },
+      { type: 'separator' }, { role: 'quit', label: `Quit ${APP_DISPLAY_NAME}` },
     ] } as Electron.MenuItemConstructorOptions] : []),
     { role: 'fileMenu', submenu: [
       { label: t('chat.interface.newChat'), accelerator: 'CmdOrCtrl+N', click: go('new-chat') },
