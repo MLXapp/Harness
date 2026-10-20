@@ -239,6 +239,11 @@ export async function readDetectedModelConfig(
       await readRemoteCapabilities(modelPath),
     );
   }
+  // Provider models (Preferences → Models) have no bundle to read; their
+  // capabilities come from the provider's model row.
+  if (modelPath.startsWith("provider://")) {
+    return detectedConfigFromRemoteCapabilities(null);
+  }
   return detectModelConfigFromDir(modelPath);
 }
 
@@ -331,6 +336,9 @@ export async function readGenerationDefaults(
     return generationDefaultsFromRemoteCapabilities(
       await readRemoteCapabilities(modelPath),
     );
+  }
+  if (modelPath.startsWith("provider://")) {
+    return generationDefaultsFromRemoteCapabilities(null);
   }
   try {
     const defaults: GenerationDefaults = {};
