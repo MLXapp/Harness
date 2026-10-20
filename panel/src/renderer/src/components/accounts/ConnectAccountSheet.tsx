@@ -156,7 +156,7 @@ export function ConnectAccountSheet({ account: accountId, open, existing, onClos
                       event.preventDefault()
                       setDraft(cleanPastedKey(text))
                     }}
-                    className="h-8 w-full rounded-[8px] border border-input bg-background pl-2.5 pr-9 font-mono text-[13px] leading-[18px] transition-[border-color,box-shadow] duration-200 placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/25"
+                    className="h-8 w-full rounded-[8px] border border-input bg-background pl-2.5 pr-9 font-mono placeholder:font-sans text-[13px] leading-[18px] transition-[border-color,box-shadow] duration-200 placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/25"
                   />
                   <button
                     type="button"

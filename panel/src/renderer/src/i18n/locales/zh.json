@@ -2791,7 +2791,7 @@
       "rejectedCustom": "服务器拒绝了此密钥。",
       "noCredit": "密钥有效，但账户没有余额。请在 {site} 充值。",
       "noCreditCustom": "密钥有效，但账户没有余额。",
-      "network": "无法连接 {service}。请检查网络连接。",
+      "network": "无法连接 {service}。",
       "retry": "重试",
       "format": "这看起来不像密钥。请只粘贴密钥本身。"
     },

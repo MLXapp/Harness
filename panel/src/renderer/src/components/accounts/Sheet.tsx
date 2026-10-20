@@ -70,7 +70,7 @@ export function Sheet({ open, onClose, onClosed, width = 460, labelledBy, childr
     if (!open) return
     const previous = document.activeElement as HTMLElement | null
     const timer = window.setTimeout(() => {
-      const target = panel.current?.querySelector<HTMLElement>('[data-autofocus], input, button[data-default]')
+      const target = panel.current?.querySelector<HTMLElement>('[data-autofocus], input')
       ;(target ?? panel.current)?.focus({ preventScroll: true })
     }, 30)
     return () => {

@@ -14,6 +14,7 @@ import {
   type LocalPick,
 } from './curated'
 import { catalogProvider } from './providers/catalog'
+import { PROVIDER_REASONING_LEVELS } from './providers/types'
 import type {
   DiscoveredModel,
   ProviderDraft,
@@ -27,7 +28,8 @@ import type {
 /** Reasoning levels each service documents for its featured models. */
 export const ACCOUNT_REASONING: Partial<Record<FeaturedAccountId, ProviderReasoningLevel[]>> = {
   deepseek: ['low', 'high', 'max'],
-  anthropic: ['low', 'medium', 'high', 'max'],
+  // Claude's effort levels skip "xhigh" (platform.claude.com/docs, effort).
+  anthropic: PROVIDER_REASONING_LEVELS.filter(level => level !== 'off' && level !== 'xhigh'),
   openai: ['low', 'medium', 'high', 'xhigh', 'max'],
   google: ['low', 'medium', 'high'],
 }

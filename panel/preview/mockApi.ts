@@ -12,6 +12,7 @@
 
 import { PROVIDER_CATALOG } from '../src/shared/providers/catalog'
 import type { ChatModelBinding, ProviderDraft, ProviderView } from '../src/shared/providers/types'
+import type { KeyCheckRequest, KeyCheckResult } from '../src/shared/providers/keyCheck'
 import type { UpdateState } from '../src/shared/appUpdate'
 import type { NativeNavigationAction } from '../src/shared/nativeNavigation'
 import { APP_VERSION, HARDWARE, HF_CACHE, MODELS_DIR, type Fixtures, type FixtureMessage } from './fixtures'
@@ -377,6 +378,10 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       getPowerMode: async () => ({ mode: 'automatic' as const, source: 'ac' as const }),
       getVersion: async () => APP_VERSION,
       getTotalMemoryGB: async () => HARDWARE.totalMemoryGB,
+      getHardware: async () => {
+        await wait(250)
+        return { chip: HARDWARE.chip, modelName: HARDWARE.modelName, memoryGB: HARDWARE.totalMemoryGB, freeDiskGB: HARDWARE.freeDiskGB }
+      },
       getUpdateState: async () => ({ ...updateState }),
       onUpdateState: on('app:updateState'),
       installUpdate: async () => undefined,
@@ -440,6 +445,28 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
         await wait(300)
         return { ok: true as const, models }
       },
+      /**
+       * Live key check, simulated: a key containing "bad" is rejected, "nocredit"
+       * has no credit, "offline" cannot reach the service; anything else works.
+       * The listing is the provider's featured ids plus a few others.
+       */
+      checkKey: async (request: KeyCheckRequest): Promise<KeyCheckResult> => {
+        await wait(700)
+        const key = request.apiKey ?? ''
+        if (request.providerId && !key.trim()) return { ok: false, reason: 'format', message: 'Paste a key' }
+        if (/bad/i.test(key)) return { ok: false, reason: 'rejected', message: 'The key was not accepted' }
+        if (/nocredit/i.test(key)) return { ok: false, reason: 'no-credit', message: 'The account has no credit left' }
+        if (/offline/i.test(key)) return { ok: false, reason: 'network', message: 'Could not reach the service' }
+        const listed: Record<string, string[]> = {
+          deepseek: ['deepseek-v4-pro', 'deepseek-flash', 'deepseek-chat', 'deepseek-reasoner'],
+          anthropic: ['claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-5', 'claude-opus-4-1'],
+          openai: ['gpt-6-astra', 'gpt-6-mini', 'gpt-5.2', 'gpt-5-mini', 'o5', 'gpt-image-2', 'text-embedding-3-large'],
+          google: ['gemini-4-argon', 'gemini-4-flash', 'gemini-3-pro', 'gemini-embedding-001'],
+          wavespeed: ['anthropic/claude-opus-5.5', 'deepseek/deepseek-v4-pro-0813', 'deepseek/deepseek-v4.1-flash-1017', 'openai/gpt-6-astra', 'google/gemini-4-argon', 'qwen/qwen3.8-max', 'moonshotai/kimi-k3', 'z-ai/glm-5.1', 'x-ai/grok-5', 'meta-llama/llama-5-405b', 'mistralai/mistral-large-3', 'minimax/minimax-m3'],
+        }
+        const ids = request.providerId ? listed[request.providerId] ?? [] : ['qwen3-coder-next', 'qwen3.8-27b', 'gpt-oss-120b']
+        return { ok: true, models: ids.length, discovered: ids.map(id => ({ id })) }
+      },
       getChatModel: async (chatId: string) => fx.chatBindings.find(b => b.chatId === chatId) ?? null,
       setChatModel: async (binding: ChatModelBinding) => {
         fx.chatBindings = [...fx.chatBindings.filter(b => b.chatId !== binding.chatId), binding]
@@ -452,6 +479,10 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       remoteSessionCandidates: async () => [],
       importRemoteSession: async () => ({ ok: false as const, error: 'No remote session to import in the preview' }),
       onChanged: (cb: () => void) => events.on('providers:changed', () => cb()),
+    },
+
+    clipboard: {
+      readText: async () => 'sk-preview-0123456789abcdef',
     },
 
     settings: {

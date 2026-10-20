@@ -2791,7 +2791,7 @@
       "rejectedCustom": "El servidor rechazó esta clave.",
       "noCredit": "La clave funciona, pero la cuenta no tiene saldo. Añade saldo en {site}.",
       "noCreditCustom": "La clave funciona, pero la cuenta no tiene saldo.",
-      "network": "No se pudo conectar con {service}. Revisa tu conexión.",
+      "network": "No se pudo conectar con {service}.",
       "retry": "Reintentar",
       "format": "Eso no parece una clave. Pega solo la clave."
     },

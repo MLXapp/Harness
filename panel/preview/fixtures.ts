@@ -16,9 +16,11 @@ export type ScenarioName = 'default' | 'fresh' | 'connected'
 
 export const SCENARIOS: readonly ScenarioName[] = ['default', 'fresh', 'connected']
 
-/** Hardware the preview pretends to run on. No IPC exposes the chip yet; read it from `window.__PREVIEW__.hardware`. */
+/** Hardware the preview pretends to run on (window.api.app.getHardware and `window.__PREVIEW__.hardware`). */
 export const HARDWARE = {
   chip: 'Apple M3 Pro',
+  modelName: 'MacBook Pro',
+  freeDiskGB: 412,
   totalMemoryGB: 36,
   cpuCores: 12,
   gpuCores: 18,

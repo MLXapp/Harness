@@ -2791,7 +2791,7 @@
       "rejectedCustom": "The server rejected this key.",
       "noCredit": "This key works, but the account has no credit. Add credit on {site}.",
       "noCreditCustom": "This key works, but the account has no credit.",
-      "network": "Couldn't reach {service}. Check your connection.",
+      "network": "Couldn't reach {service}.",
       "retry": "Retry",
       "format": "That doesn't look like a key. Paste only the key itself."
     },
