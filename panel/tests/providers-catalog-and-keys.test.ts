@@ -7,7 +7,7 @@ describe('provider catalog', () => {
   it('lists the main cloud providers once each, with valid ids, protocols and https endpoints', () => {
     const ids = PROVIDER_CATALOG.map(p => p.id)
     expect(new Set(ids).size).toBe(ids.length)
-    for (const id of ['anthropic', 'openai', 'deepseek', 'google', 'openrouter', 'groq', 'mistral', 'xai', 'together', 'fireworks', 'moonshot', 'zai', 'qwen', 'huggingface']) {
+    for (const id of ['anthropic', 'openai', 'deepseek', 'google', 'wavespeed', 'openrouter', 'groq', 'mistral', 'xai', 'together', 'fireworks', 'moonshot', 'zai', 'qwen', 'huggingface']) {
       expect(ids).toContain(id)
     }
     for (const entry of PROVIDER_CATALOG) {
@@ -31,6 +31,7 @@ describe('provider catalog', () => {
       openai: 'openai-responses https://api.openai.com/v1',
       deepseek: 'openai-completions https://api.deepseek.com',
       google: 'openai-completions https://generativelanguage.googleapis.com/v1beta/openai',
+      wavespeed: 'openai-completions https://llm.wavespeed.ai/v1',
       openrouter: 'openai-completions https://openrouter.ai/api/v1',
       groq: 'openai-completions https://api.groq.com/openai/v1',
       mistral: 'openai-completions https://api.mistral.ai/v1',
