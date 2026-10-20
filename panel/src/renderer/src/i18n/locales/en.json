@@ -301,7 +301,7 @@
       "emptyHint": "Start a new chat to begin",
       "clearAllAria": "Clear all chats",
       "clearAllTitle": "Delete every chat across every model (with confirm)",
-      "clearAll": "Clear All",
+      "clearAll": "Clear all chats",
       "clearAllConfirm": "Delete ALL {n} chat(s) across every model?\n\nThis wipes the chat rows and their messages. Cannot be undone.",
       "chatCountHint": "{n} chat(s) • shift-click × to skip confirm",
       "groupToday": "Today",

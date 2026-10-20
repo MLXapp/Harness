@@ -164,24 +164,6 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
 
   return (
     <div className="flex-1 overflow-y-auto">
-      {/* vmlx#70: bulk-delete header — shown when there's at least one chat */}
-      {chats.length > 0 && !searchQuery && (
-        <div className="px-3 pt-2 pb-1 flex items-center justify-between gap-2 border-b border-border/40">
-          <span className="min-w-0 truncate text-[11px] text-muted-foreground/70" title={t('layout.chatHistory.chatCountHint', { n: chats.length })}>
-            {t('layout.chatHistory.chatCountHint', { n: chats.length })}
-          </span>
-          <button
-            type="button"
-            onClick={handleClearAll}
-            className="flex-shrink-0 whitespace-nowrap text-[11px] text-destructive hover:text-destructive/80 hover:underline flex items-center gap-1"
-            aria-label={t('layout.chatHistory.clearAllAria')}
-            title={t('layout.chatHistory.clearAllTitle')}
-          >
-            <Trash className="h-3 w-3" />
-            {t('layout.chatHistory.clearAll')}
-          </button>
-        </div>
-      )}
       {groups.map(group => (
         <div key={group.label}>
           <div className="px-4 pt-3 pb-1 text-[11px] font-semibold text-muted-foreground">
@@ -243,6 +225,22 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
           ))}
         </div>
       ))}
+      {/* vmlx#70: delete every chat — a quiet row at the end of the list
+          (shift-click skips the confirmation). */}
+      {chats.length > 1 && !searchQuery && (
+        <div className="px-1.5 pb-3 pt-4">
+          <button
+            type="button"
+            onClick={handleClearAll}
+            className="flex min-h-[32px] w-full items-center gap-2 rounded-lg px-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            aria-label={t('layout.chatHistory.clearAllAria')}
+            title={t('layout.chatHistory.chatCountHint', { n: chats.length })}
+          >
+            <Trash className="h-3.5 w-3.5" />
+            {t('layout.chatHistory.clearAll')}…
+          </button>
+        </div>
+      )}
     </div>
   )
 }
