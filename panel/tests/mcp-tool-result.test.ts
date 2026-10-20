@@ -94,7 +94,10 @@ describe("MCP model-facing tool result", () => {
     const mcp = source.slice(source.indexOf("const result = await execRes.json();"),
       source.indexOf("// Inject media from read_image/read_video tool results"));
     expect(mcp).toContain("resultText = formatMcpToolResult(");
-    expect(mcp).toContain("overrides?.toolResultMaxChars || 50000");
+    // Display and transcript share one raw memory-safety bound; the model
+    // then receives the head/tail-pruned form (full text spilled to a file).
+    expect(mcp).toContain("MAX_RAW_TOOL_RESULT_CHARS");
+    expect(mcp).toContain("resultText = prepareToolResultForModel(tc.function.name, resultText);");
     expect(mcp).toContain('"error",\n                      tc.function.name,\n                      resultText,');
     expect(mcp).toContain("call_id: tc.id,\n                    output: resultText");
     expect(mcp).toContain('role: "tool", tool_call_id: tc.id, content: resultText');
@@ -118,8 +121,8 @@ describe("MCP model-facing tool result", () => {
     expect(flushStart).toBeGreaterThan(catchStart);
     const http = mcp.slice(httpStart, successStart);
     const caught = mcp.slice(catchStart, flushStart);
-    expect(http).toMatch(/resultText = boundToolResultText\(\s*`Error \(\$\{execRes.status\}\): \$\{errText\}`,\s*overrides\?\.toolResultMaxChars \|\| 50000,?\s*\)/);
-    expect(caught).toMatch(/resultText = boundToolResultText\(\s*`Tool execution error: \$\{err.message\}`,\s*overrides\?\.toolResultMaxChars \|\| 50000,?\s*\)/);
+    expect(http).toMatch(/resultText = boundToolResultText\(\s*`Error \(\$\{execRes.status\}\): \$\{errText\}`,\s*MAX_RAW_TOOL_RESULT_CHARS,?\s*\)/);
+    expect(caught).toMatch(/resultText = boundToolResultText\(\s*`Tool execution error: \$\{err.message\}`,\s*MAX_RAW_TOOL_RESULT_CHARS,?\s*\)/);
     const boundedDisplay = /emitToolStatus\(\s*"error",\s*tc.function.name,\s*resultText,\s*toolIteration,\s*tc.id,?\s*\)/;
     expect(http).toMatch(boundedDisplay);
     expect(caught).toMatch(boundedDisplay);
