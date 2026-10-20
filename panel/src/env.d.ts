@@ -1,6 +1,20 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 
 declare global {
+  /** An approval card from the coding agent (src/main/agent/approvals.ts). */
+  interface ChatApprovalCard {
+    id: string;
+    chatId: string;
+    toolCallId?: string;
+    toolName: string;
+    kind: "shell" | "escalation" | "write" | "applescript" | "git" | "mcp" | "tool";
+    subject: string;
+    reason?: string;
+    why: string;
+    allowAlways: boolean;
+    expiresAt: number;
+  }
+
   interface Window {
     electron: ElectronAPI;
     api: {
@@ -240,6 +254,16 @@ declare global {
           chatId: string,
         ) => Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" }>>;
         onTodos: (callback: (data: any) => void) => () => void;
+        onApprovalRequest: (callback: (data: ChatApprovalCard) => void) => () => void;
+        onApprovalSettled: (
+          callback: (data: { id: string; chatId: string; outcome: string }) => void,
+        ) => () => void;
+        answerApproval: (
+          id: string,
+          answer: "allow-once" | "allow-always" | "deny",
+        ) => Promise<{ accepted: boolean }>;
+        getPendingApprovals: (chatId: string) => Promise<ChatApprovalCard[]>;
+        sandboxStatus: () => Promise<{ available: boolean; network: boolean }>;
         compact: (
           chatId: string,
           endpoint?: { host: string; port: number },

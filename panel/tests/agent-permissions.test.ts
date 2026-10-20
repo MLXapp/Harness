@@ -51,7 +51,8 @@ describe('permission preset resolution', () => {
     expect(decide({ toolName: 'spawn_process', args: { command: 'npm run dev' } })).toEqual({ action: 'allow', sandbox: true })
     expect(decide({ toolName: 'write_file', args: { path: 'src/a.ts' } })).toEqual({ action: 'allow', sandbox: false })
     expect(decide({ toolName: 'run_applescript', args: { script: 'beep' } })).toMatchObject({ action: 'ask', kind: 'applescript' })
-    expect(decide({ toolName: 'git', args: { command: 'commit -m "x"' } })).toEqual({ action: 'allow', sandbox: true })
+    expect(decide({ toolName: 'git', args: { command: 'commit -m "x"' } })).toEqual({ action: 'allow', sandbox: false })
+    expect(decide({ toolName: 'git', args: { command: 'config core.hooksPath h' } })).toMatchObject({ action: 'ask', why: 'outside' })
     expect(decide({ toolName: 'git', args: { command: 'push origin main' } })).toMatchObject({ action: 'ask', why: 'network' })
     expect(decide({ toolName: 'git', args: { command: '-C /etc status' } })).toMatchObject({ action: 'ask', why: 'outside' })
     expect(decide({ toolName: 'mcp_tool', isBuiltin: false }).action).toBe('allow')
@@ -131,7 +132,7 @@ describe('git command classes', () => {
     ['stash', 'local'], ['push', 'network'], ['pull --rebase', 'network'], ['fetch origin', 'network'],
     ['remote -v', 'read'], ['remote update', 'network'], ['--no-pager log', 'read'], ['-c core.pager=x log', 'outside'],
     ['-C ../other status', 'outside'], ['--git-dir=/x status', 'outside'], ['config --get user.name', 'read'],
-    ['config user.name x', 'local'], ['archive --remote=x HEAD', 'network'],
+    ['config user.name x', 'outside'], ['archive --remote=x HEAD', 'network'],
   ])('git %s → %s', (cmd, cls) => {
     expect(classifyGitCommand(cmd)).toBe(cls)
   })

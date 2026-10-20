@@ -5,7 +5,7 @@
  * src/main/ipc/chat.ts and src/main/agent/* runs for real.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -20,6 +20,7 @@ const h = vi.hoisted(() => {
     messages: [] as any[],
     agentState: new Map<string, { compactionJson: string | null; todosJson: string | null }>(),
     events: [] as Array<[string, any]>,
+    windowGone: false,
   }
   return { handlers, state }
 })
@@ -182,6 +183,12 @@ const SUMMARY = '## Primary Request and Intent\n- keep going\n## Key Technical C
 let server: Server
 let workDir: string
 
+// One stable window: approval answers are accepted only from its webContents.
+const fakeWindow = {
+  isDestroyed: () => false,
+  webContents: { send: (channel: string, data: any) => h.state.events.push([channel, data]) },
+}
+
 function seedHistory(pairs: number, chars = 4000) {
   h.state.messages = []
   let t = 1000
@@ -202,10 +209,7 @@ beforeAll(async () => {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()))
   h.state.port = (server.address() as any).port
   const { registerChatHandlers } = await import('../src/main/ipc/chat')
-  registerChatHandlers(() => ({
-    isDestroyed: () => false,
-    webContents: { send: (channel: string, data: any) => h.state.events.push([channel, data]) },
-  }) as any)
+  registerChatHandlers(() => (h.state.windowGone ? null : fakeWindow) as any)
   send = (content: string) =>
     h.handlers.get('chat:sendMessage')!({}, 'chat-1', content, { host: '127.0.0.1', port: h.state.port })
 })
@@ -218,8 +222,10 @@ beforeEach(() => {
   h.state.events = []
   h.state.agentState.clear()
   workDir = mkdtempSync(join(tmpdir(), 'mlx-agent-work-'))
-  h.state.overrides = { wireApi: 'completions', builtinToolsEnabled: true, workingDirectory: workDir }
+  // Full access: these suites test the loop, not permissions (see below).
+  h.state.overrides = { wireApi: 'completions', builtinToolsEnabled: true, workingDirectory: workDir, permissionPreset: 'full' }
   h.state.maxPromptTokens = 4096
+  h.state.windowGone = false
 })
 
 describe('automatic compaction in the chat loop', () => {
@@ -438,5 +444,205 @@ describe('tool loop guards', () => {
     expect(requests[0].messages[0].role).toBe('system')
     expect(requests[0].messages[0].content).toContain('# Project instructions')
     expect(requests[0].messages[0].content).toContain('Always run the tests with npm test.')
+  })
+})
+
+// ── Permission presets, approval cards and the sandbox escalation ─────────
+
+async function waitFor<T>(probe: () => T | undefined, ms = 5000): Promise<T> {
+  const until = Date.now() + ms
+  for (;;) {
+    const value = probe()
+    if (value !== undefined && value !== null) return value
+    if (Date.now() > until) throw new Error('waitFor timed out')
+    await new Promise(r => setTimeout(r, 10))
+  }
+}
+const cards = () => h.state.events.filter(([ch]) => ch === 'chat:approvalRequest').map(([, d]) => d)
+const settled = () => h.state.events.filter(([ch]) => ch === 'chat:approvalSettled').map(([, d]) => d)
+const answer = (id: string, value: string, sender: unknown = fakeWindow.webContents) =>
+  h.handlers.get('chat:answerApproval')!({ sender }, id, value)
+const toolResultsOf = (body: any) =>
+  Object.fromEntries(body.messages.filter((m: any) => m.role === 'tool').map((m: any) => [m.tool_call_id, m.content]))
+
+describe('permission presets in the chat loop', () => {
+  beforeEach(() => {
+    h.state.maxPromptTokens = 0
+    h.state.messages = []
+  })
+
+  it('Read only: shows a card, refuses a foreign sender, runs once allowed', async () => {
+    h.state.overrides = { ...h.state.overrides, permissionPreset: 'read-only' }
+    replies = [
+      () => ({ kind: 'tool', calls: [{ id: 'c1', name: 'run_command', args: { command: 'echo hi > out.txt' } }] }),
+      () => ({ kind: 'text', text: 'done' }),
+    ]
+    const pending = send('go')
+    const card = await waitFor(() => cards()[0])
+    expect(card).toMatchObject({
+      chatId: 'chat-1', toolCallId: 'c1', toolName: 'run_command', kind: 'shell',
+      subject: 'echo hi > out.txt', why: 'read-only', allowAlways: true,
+    })
+    expect(await h.handlers.get('chat:pendingApprovals')!({}, 'chat-1')).toHaveLength(1)
+    expect(existsSync(join(workDir, 'out.txt'))).toBe(false) // nothing runs before the grant
+    expect(await answer(card.id, 'allow-once', {})).toEqual({ accepted: false })
+    expect(await answer(card.id, 'allow-once')).toEqual({ accepted: true })
+    expect(await answer(card.id, 'deny')).toEqual({ accepted: false }) // one-shot
+    const result = await pending
+    expect(result.content).toBe('done')
+    expect(readFileSync(join(workDir, 'out.txt'), 'utf8')).toBe('hi\n')
+    expect(settled()).toEqual([{ id: card.id, chatId: 'chat-1', outcome: 'allow-once' }])
+    expect(await h.handlers.get('chat:pendingApprovals')!({}, 'chat-1')).toHaveLength(0)
+  })
+
+  it('Read only: a denied write is not performed and the model is told so', async () => {
+    h.state.overrides = { ...h.state.overrides, permissionPreset: 'read-only' }
+    replies = [
+      () => ({ kind: 'tool', calls: [{ id: 'w1', name: 'write_file', args: { path: 'new.txt', content: 'x' } }] }),
+      () => ({ kind: 'text', text: 'ok' }),
+    ]
+    const pending = send('write it')
+    const card = await waitFor(() => cards()[0])
+    expect(card).toMatchObject({ kind: 'write', subject: 'new.txt', allowAlways: false })
+    expect(await answer(card.id, 'allow-always')).toEqual({ accepted: false }) // not offered
+    await answer(card.id, 'deny')
+    await pending
+    expect(existsSync(join(workDir, 'new.txt'))).toBe(false)
+    expect(toolResultsOf(requests.at(-1)).w1).toMatch(/^Permission denied: .*not run\. Do not retry/)
+  })
+
+  it('"Always allow this command in this chat" skips the card next time for the exact command', async () => {
+    h.state.overrides = { ...h.state.overrides, permissionPreset: 'read-only' }
+    replies = [
+      () => ({ kind: 'tool', calls: [{ id: 'a1', name: 'run_command', args: { command: 'echo always' } }] }),
+      () => ({ kind: 'tool', calls: [{ id: 'a2', name: 'run_command', args: { command: 'echo always' } }] }),
+      () => ({ kind: 'tool', calls: [{ id: 'a3', name: 'run_command', args: { command: 'echo other' } }] }),
+      () => ({ kind: 'text', text: 'ok' }),
+    ]
+    const pending = send('go')
+    const first = await waitFor(() => cards()[0])
+    await answer(first.id, 'allow-always')
+    const second = await waitFor(() => cards()[1])
+    expect(second.subject).toBe('echo other') // a2 ran without a card
+    await answer(second.id, 'deny')
+    await pending
+    const results = toolResultsOf(requests.at(-1))
+    expect(results.a1).toContain('always')
+    expect(results.a2).toContain('always')
+    expect(results.a3).toMatch(/Permission denied/)
+  })
+
+  it('fails closed when there is no window to ask in', async () => {
+    h.state.overrides = { ...h.state.overrides, permissionPreset: 'read-only' }
+    h.state.windowGone = true
+    replies = [
+      () => ({ kind: 'tool', calls: [{ id: 'g1', name: 'run_command', args: { command: 'echo nope > gone.txt' } }] }),
+      () => ({ kind: 'text', text: 'ok' }),
+    ]
+    await send('go')
+    expect(existsSync(join(workDir, 'gone.txt'))).toBe(false)
+    expect(toolResultsOf(requests.at(-1)).g1).toMatch(/could not be shown .* not run/)
+  })
+
+  it('Stop while a card is open settles it as aborted and runs nothing', async () => {
+    h.state.overrides = { ...h.state.overrides, permissionPreset: 'read-only' }
+    replies = [() => ({ kind: 'tool', calls: [{ id: 's1', name: 'run_command', args: { command: 'echo x > stopped.txt' } }] })]
+    const pending = send('go')
+    const card = await waitFor(() => cards()[0])
+    await h.handlers.get('chat:abort')!({}, 'chat-1')
+    await pending.catch(() => undefined)
+    expect(settled()).toEqual([{ id: card.id, chatId: 'chat-1', outcome: 'aborted' }])
+    expect(existsSync(join(workDir, 'stopped.txt'))).toBe(false)
+  })
+
+  it('Workspace without a usable sandbox asks before every command', async () => {
+    const { resetSeatbeltProbeForTests } = await import('../src/main/agent/seatbelt')
+    resetSeatbeltProbeForTests({ available: false, network: false })
+    try {
+      h.state.overrides = { ...h.state.overrides, permissionPreset: 'workspace' }
+      replies = [
+        () => ({ kind: 'tool', calls: [{ id: 'n1', name: 'run_command', args: { command: 'echo hi' } }] }),
+        () => ({ kind: 'text', text: 'ok' }),
+      ]
+      const pending = send('go')
+      const card = await waitFor(() => cards()[0])
+      expect(card).toMatchObject({ kind: 'shell', why: 'no-sandbox' })
+      await answer(card.id, 'allow-once')
+      await pending
+      expect(toolResultsOf(requests.at(-1)).n1).toContain('Exit code: 0')
+    } finally {
+      resetSeatbeltProbeForTests(undefined)
+    }
+  })
+
+  it('Workspace: sandboxed failure gets the escalation marker; the retry asks once, a refusal sticks', async () => {
+    const seatbelt = await import('../src/main/agent/seatbelt')
+    const bin = mkdtempSync(join(tmpdir(), 'mlx-fake-sbx-'))
+    const log = join(bin, 'calls.log')
+    const fake = join(bin, 'sandbox-exec')
+    // Stand-in for /usr/bin/sandbox-exec: record the call, drop "-p <profile>", run the rest.
+    writeFileSync(fake, `#!/bin/sh\necho "$1 $3 $4" >> ${JSON.stringify(log)}\nshift 2\nexec "$@"\n`)
+    chmodSync(fake, 0o755)
+    seatbelt.resetSeatbeltProbeForTests({ available: true, network: true })
+    seatbelt.setSandboxExecForTests(fake)
+    try {
+      h.state.overrides = { ...h.state.overrides, permissionPreset: 'workspace' }
+      const blocked = 'echo "touch: /etc/mlx-probe: Operation not permitted" >&2; exit 1'
+      const escalate = { command: blocked, sandbox_permissions: 'full_access', justification: 'It must write /etc/mlx-probe.' }
+      replies = [
+        () => ({ kind: 'tool', calls: [{ id: 'x1', name: 'run_command', args: { command: blocked } }] }),
+        () => ({ kind: 'tool', calls: [{ id: 'x2', name: 'run_command', args: escalate }] }),
+        () => ({ kind: 'tool', calls: [{ id: 'x3', name: 'run_command', args: escalate }] }),
+        () => ({ kind: 'text', text: 'I could not write it.' }),
+      ]
+      const pending = send('write /etc/mlx-probe')
+      const card = await waitFor(() => cards()[0])
+      expect(card).toMatchObject({ kind: 'escalation', why: 'escalation', reason: 'It must write /etc/mlx-probe.', subject: blocked, allowAlways: false })
+      await answer(card.id, 'deny')
+      const result = await pending
+      expect(result.content).toBe('I could not write it.')
+      expect(cards()).toHaveLength(1) // x3 was refused without a second card
+
+      // The shell tools advertise the escalation fields in Workspace.
+      const run = requests[0].tools.find((t: any) => t.function.name === 'run_command')
+      expect(run.function.parameters.properties.sandbox_permissions.enum).toEqual(['full_access'])
+
+      const results = toolResultsOf(requests.at(-1))
+      expect(results.x1).toContain('Operation not permitted')
+      expect(results.x1).toContain('[sandbox: if the failure above is the sandbox, you may retry this exact command ONCE')
+      expect(results.x2).toMatch(/Permission denied/)
+      expect(results.x3).toMatch(/already refused/)
+      // Only the first, sandboxed run went through sandbox-exec, as "-p <profile> /bin/bash -c".
+      const calls = readFileSync(log, 'utf8').trim().split('\n')
+      expect(calls).toEqual(['-p /bin/bash -c'])
+    } finally {
+      seatbelt.resetSeatbeltProbeForTests(undefined)
+      seatbelt.setSandboxExecForTests(undefined)
+    }
+  })
+
+  it('Workspace: an approved escalation runs outside the sandbox', async () => {
+    const seatbelt = await import('../src/main/agent/seatbelt')
+    const bin = mkdtempSync(join(tmpdir(), 'mlx-fake-sbx-'))
+    const fake = join(bin, 'sandbox-exec')
+    writeFileSync(fake, '#!/bin/sh\necho "should not run" >&2\nexit 99\n')
+    chmodSync(fake, 0o755)
+    seatbelt.resetSeatbeltProbeForTests({ available: true, network: true })
+    seatbelt.setSandboxExecForTests(fake)
+    try {
+      h.state.overrides = { ...h.state.overrides, permissionPreset: 'workspace' }
+      replies = [
+        () => ({ kind: 'tool', calls: [{ id: 'y1', name: 'run_command', args: { command: 'echo free > free.txt', sandbox_permissions: 'full_access', justification: 'Needs the network.' } }] }),
+        () => ({ kind: 'text', text: 'ok' }),
+      ]
+      const pending = send('go')
+      const card = await waitFor(() => cards()[0])
+      await answer(card.id, 'allow-once')
+      await pending
+      expect(readFileSync(join(workDir, 'free.txt'), 'utf8')).toBe('free\n')
+    } finally {
+      seatbelt.resetSeatbeltProbeForTests(undefined)
+      seatbelt.setSandboxExecForTests(undefined)
+    }
   })
 })
