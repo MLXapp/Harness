@@ -10,7 +10,14 @@ import {
   staleSessionCountSql,
   staleSessionResetSql,
 } from "../shared/sessionStatusReconcile";
-import { decryptValue, encryptValue } from "./secretStorage";
+import { decryptSecret, decryptValue, encryptValue } from "./secretStorage";
+import { ensureProviderSchema, ProviderStore, type SecretBox } from "./providers/store";
+
+/** Provider credentials: Keychain-backed safeStorage, refusing plaintext both ways. */
+const keychainSecretBox: SecretBox = {
+  encrypt: (plain) => encryptValue(plain),
+  decrypt: (cipher) => decryptSecret(cipher),
+};
 import { GATEWAY_SINGLE_MODEL_MODE_KEY } from "../shared/gatewaySettingsKeys";
 
 export interface Chat {
@@ -1314,7 +1321,23 @@ class DatabaseManager {
     `);
     }); // end runMigrations transaction
     runMigrations();
+    // Model providers, their Keychain-encrypted credentials and per-chat
+    // model bindings (new tables only; existing rows are untouched).
+    ensureProviderSchema(this.db);
     this.reconcileStaleSessionStatuses();
+  }
+
+  private providerStore?: ProviderStore;
+  private providerStoreDb?: Database.Database;
+
+  /** Model providers, credentials (write-only to the renderer) and chat bindings. */
+  get providers(): ProviderStore {
+    this.ensureOpen();
+    if (!this.providerStore || this.providerStoreDb !== this.db) {
+      this.providerStore = new ProviderStore(this.db, keychainSecretBox);
+      this.providerStoreDb = this.db;
+    }
+    return this.providerStore;
   }
 
   /**

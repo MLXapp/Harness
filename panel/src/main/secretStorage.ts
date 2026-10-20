@@ -25,6 +25,11 @@ function keychainReady(operation: string): boolean {
   return false;
 }
 
+/** Whether Keychain-backed encryption can be used right now. */
+export function secretStorageAvailable(): boolean {
+  return app.isReady() && safeStorage.isEncryptionAvailable();
+}
+
 export function encryptValue(value: string): string {
   if (!value) return value;
   // Never fall through to storing a secret as plaintext — a caller that lands
@@ -32,8 +37,24 @@ export function encryptValue(value: string): string {
   if (!keychainReady("encrypt")) {
     throw new Error("Cannot encrypt before app ready");
   }
-  if (!safeStorage.isEncryptionAvailable()) return value;
+  // No Keychain-backed encryption, no secret: refuse rather than write the key
+  // in plaintext. (Rows written as plaintext by older builds still read back
+  // through decryptValue's legacy path.)
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error(
+      "Secure storage (Keychain) is unavailable, so the API key was not saved",
+    );
+  }
   return "enc:" + safeStorage.encryptString(value).toString("base64");
+}
+
+/**
+ * Credential-store variant of decryptValue: only Keychain ciphertext is a
+ * credential. A plaintext value (never written by this store) reads as absent.
+ */
+export function decryptSecret(value: string): string {
+  if (!value || !value.startsWith("enc:")) return "";
+  return decryptValue(value);
 }
 
 export function decryptValue(value: string): string {
