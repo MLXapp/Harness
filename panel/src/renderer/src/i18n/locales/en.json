@@ -573,7 +573,7 @@
     "input": {
       "dropOverlay": "Drop image, video, audio, or text file to attach",
       "placeholderWaiting": "Waiting for response...",
-      "placeholderDefault": "Message...",
+      "placeholderDefault": "Ask anything…",
       "attachTitle": "Attach image, video, audio, or text file",
       "stopTitle": "Stop generating (Esc)",
       "sendTitle": "Send message (Enter)",
@@ -657,7 +657,8 @@
       "sttMissing": "STT not available — mlx-audio not installed on server",
       "micDenied": "Microphone access denied",
       "startFailed": "Failed to start recording",
-      "transcribeFailed": "Transcription failed"
+      "transcribeFailed": "Transcription failed",
+      "dictateTitle": "Dictate (Apple)"
     },
     "tts": {
       "stopTitle": "Stop playback",
@@ -725,6 +726,47 @@
       "deny": "Deny",
       "alwaysAllow": "Always allow this command in this chat",
       "autoDeny": "Denied automatically in {time}"
+    },
+    "switcher": {
+      "title": "Switch model (⌘⇧M)",
+      "chooseModel": "Choose a model",
+      "chooseFirst": "Choose a model first",
+      "searchPlaceholder": "Search models",
+      "topModels": "Top models",
+      "onThisMac": "On this Mac",
+      "moreFrom": "More from {{account}}",
+      "otherConnections": "Other connections",
+      "connectAccount": "Connect an account…",
+      "connectHint": "DeepSeek, Claude, OpenAI, Gemini or WaveSpeed AI",
+      "manageModels": "Manage models…",
+      "addLocal": "Add a model on this Mac…",
+      "reasoning": "Reasoning",
+      "defaultLevel": "Default",
+      "loaded": "Loaded",
+      "starting": "Starting…",
+      "noMatches": "No models match “{{query}}”",
+      "from": "from {{price}}",
+      "priceTitle": "Per 1M tokens: {{input}} in · {{output}} out",
+      "viaWavespeed": "via WaveSpeed AI",
+      "badge": {
+        "best": "Best",
+        "bestValue": "Best value",
+        "fast": "Fast"
+      },
+      "levels": {
+        "off": "Off",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra",
+        "max": "Max"
+      }
+    },
+    "voiceInput": {
+      "title": "Voice input",
+      "apple": "Apple Dictation",
+      "whisper": "Whisper",
+      "hint": "Apple Dictation uses macOS system dictation. Whisper records and transcribes with a model on this Mac."
     }
   },
   "sessions": {

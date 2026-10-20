@@ -6,7 +6,7 @@
  *
  * `account`: a featured account id ('deepseek' | 'anthropic' | 'openai' |
  * 'google' | 'wavespeed'), 'custom' for the Custom endpoint sheet, or 'list'
- * for the sheet that lists all five.
+ * (or no `account` at all) for the sheet that lists all five.
  */
 import type { FeaturedAccountId } from '../../../../shared/curated'
 

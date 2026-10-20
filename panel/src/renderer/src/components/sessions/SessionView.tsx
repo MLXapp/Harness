@@ -269,7 +269,7 @@ export function SessionView({ sessionId, onBack }: SessionViewProps) {
             {shortName}
           </span>
           {isImage && (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
+            <span className={`text-[11px] px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
               isImageEdit ? 'bg-violet-500/15 text-violet-400' : 'bg-blue-500/15 text-blue-400'
             }`}>
               {isImageEdit ? t('sessions.view.imageEditBadge') : t('sessions.view.imageGenBadge')}
@@ -277,7 +277,7 @@ export function SessionView({ sessionId, onBack }: SessionViewProps) {
           )}
           {jangLabel && (
             <span
-              className="min-w-0 max-w-64 truncate text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 font-medium"
+              className="min-w-0 max-w-64 truncate text-[11px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 font-medium"
               title={jangLabel}
             >
               {jangLabel}
@@ -658,7 +658,7 @@ function SessionViewLoadBar({ sessionId, sessionStatus }: { sessionId: string; s
           style={{ width: progress?.indeterminate === false ? `${progress.progress}%` : '100%' }}
         />
       </div>
-      <p className="text-[10px] text-muted-foreground mt-1">
+      <p className="text-[11px] text-muted-foreground mt-1">
         {progress
           ? (progress.labelKey
               ? t(progress.labelKey, { defaultValue: progress.label, ...(progress.labelParams || {}) })
@@ -666,12 +666,12 @@ function SessionViewLoadBar({ sessionId, sessionStatus }: { sessionId: string; s
           : t('sessions.view.loadProgressFallback')} {progress && progress.indeterminate === false ? `(${progress.progress}%)` : ''}
       </p>
       {formatModelBytes(progress?.modelBytes) && (
-        <p className="text-[10px] text-muted-foreground/80 mt-0.5">
+        <p className="text-[11px] text-muted-foreground/80 mt-0.5">
           {t('sessions.card.modelFiles')} {formatModelBytes(progress?.modelBytes)}
         </p>
       )}
       {residentLoad && (
-        <p className="text-[10px] text-muted-foreground/80 mt-0.5">
+        <p className="text-[11px] text-muted-foreground/80 mt-0.5">
           {t('sessions.card.residentRam')} {residentLoad}
         </p>
       )}

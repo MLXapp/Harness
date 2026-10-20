@@ -103,13 +103,13 @@ export function ImageTopBar({
           </select>
         )}
         {model && !onModeChange && mode === 'edit' && (
-          <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/15 text-violet-400 rounded-full font-medium">{t('image.topBar.imageEdit')}</span>
+          <span className="text-[11px] px-1.5 py-0.5 bg-violet-500/15 text-violet-400 rounded-full font-medium">{t('image.topBar.imageEdit')}</span>
         )}
         {model && !onModeChange && mode === 'generate' && (
-          <span className="text-[10px] px-1.5 py-0.5 bg-blue-500/15 text-blue-400 rounded-full font-medium">{t('image.topBar.imageGen')}</span>
+          <span className="text-[11px] px-1.5 py-0.5 bg-blue-500/15 text-blue-400 rounded-full font-medium">{t('image.topBar.imageGen')}</span>
         )}
         {model && (
-          <span className="text-[10px] px-1.5 py-0.5 bg-muted rounded-full text-muted-foreground">
+          <span className="text-[11px] px-1.5 py-0.5 bg-muted rounded-full text-muted-foreground">
             {quantizeLabel}
           </span>
         )}

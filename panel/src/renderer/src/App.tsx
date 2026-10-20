@@ -25,6 +25,7 @@ import { AccountSheetsHost } from './components/accounts/AccountSheetsHost'
 import { ONBOARDING_EVENT } from './components/accounts/events'
 import { Onboarding } from './components/setup/Onboarding'
 import { ONBOARDING_DONE_KEY, shouldShowOnboarding, type StartChoice } from '../../shared/accountSetup'
+import { ChatModelContext, type ChatModelContextValue } from './components/chat/ChatModelContext'
 import { groupPickerEntries } from '../../shared/providers/pickerGroups'
 import type { ChatModelBinding, ProviderReasoningLevel } from '../../shared/providers/types'
 import { ToolsDashboard } from './components/tools/ToolsDashboard'
@@ -470,7 +471,7 @@ function ChatModeContent({ activeChatId, sessionEndpoint, sessionStatus, activeS
   activeSessionId: string | null
   ssdSession?: SsdPoolSession
   onNewChat: () => void
-  onSessionChange: (sessionId: string) => void
+  onSessionChange: (sessionId: string) => void | Promise<void>
 }) {
   const [overridesVersion, setOverridesVersion] = useState(0)
   // The chat's provider model (Preferences → Models), when it uses one. Sends
@@ -495,19 +496,30 @@ function ChatModeContent({ activeChatId, sessionEndpoint, sessionStatus, activeS
     setProviderBinding(next)
   }, [activeChatId])
 
+  // The composer's model switcher reads and changes the chat's model here.
+  const { sessions: chatSessions } = useSessionsContext()
+  const hasSession = !!activeSessionId && chatSessions.some(s => s.id === activeSessionId)
+  const chatModel = useMemo<ChatModelContextValue | null>(() => activeChatId ? {
+    chatId: activeChatId,
+    activeSessionId,
+    binding: providerBinding,
+    setBinding: changeProviderBinding,
+    selectSession: async (sessionId: string) => { await onSessionChange(sessionId) },
+    hasModel: !!providerBinding || hasSession,
+  } : null, [activeChatId, activeSessionId, providerBinding, changeProviderBinding, onSessionChange, hasSession])
+
   if (!activeChatId) {
     return <ChatEmptyState onNewChat={onNewChat} />
   }
 
   return (
+    <ChatModelContext.Provider value={chatModel}>
     <div className="flex flex-col h-full relative">
       <ChatModeToolbar
         activeChatId={activeChatId}
         activeSessionId={activeSessionId}
-        onSessionChange={onSessionChange}
         onOverridesChanged={() => setOverridesVersion(v => v + 1)}
         providerBinding={providerBinding}
-        onProviderBindingChange={changeProviderBinding}
       />
       <SessionSsdPoolNotice session={ssdSession} />
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
@@ -521,6 +533,7 @@ function ChatModeContent({ activeChatId, sessionEndpoint, sessionStatus, activeS
         />
       </div>
     </div>
+    </ChatModelContext.Provider>
   )
 }
 

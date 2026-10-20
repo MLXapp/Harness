@@ -197,17 +197,17 @@ export function DistributedNodeList({ sessionId, enabled }: DistributedNodeListP
                     {node.hostname}
                   </span>
                   {node.is_coordinator && (
-                    <span className="text-[10px] px-1 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">
+                    <span className="text-[11px] px-1 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">
                       {t('sessions.distributed.coordinator')}
                     </span>
                   )}
                   {node.link_type && (
-                    <span className="text-[10px] px-1 py-0.5 rounded bg-muted text-muted-foreground">
+                    <span className="text-[11px] px-1 py-0.5 rounded bg-muted text-muted-foreground">
                       {LINK_LABELS[node.link_type] || node.link_type}
                     </span>
                   )}
                 </div>
-                <div className="text-[10px] text-muted-foreground flex gap-3 mt-0.5">
+                <div className="text-[11px] text-muted-foreground flex gap-3 mt-0.5">
                   <span>{node.chip}</span>
                   <span>{node.ram_gb}GB RAM</span>
                   {node.assigned_layers && (
@@ -226,7 +226,7 @@ export function DistributedNodeList({ sessionId, enabled }: DistributedNodeListP
               {!node.is_coordinator && (
                 <button
                   onClick={() => handleRemove(node.node_id)}
-                  className="text-[10px] text-muted-foreground hover:text-red-400 transition-colors px-1"
+                  className="text-[11px] text-muted-foreground hover:text-red-400 transition-colors px-1"
                   title={t('sessions.distributed.removeFromCluster')}
                 >
                   x

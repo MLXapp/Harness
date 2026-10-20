@@ -416,6 +416,12 @@ const api = {
     readText: (): Promise<string> => ipcRenderer.invoke('clipboard:readText'),
   },
 
+  // Apple Dictation for the chat composer (macOS only; see main/dictation.ts).
+  dictation: {
+    supported: (): boolean => process.platform === 'darwin',
+    start: (): Promise<{ ok: boolean; reason?: 'unsupported' }> => ipcRenderer.invoke('dictation:start'),
+  },
+
   // App-level settings (API keys, preferences)
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),

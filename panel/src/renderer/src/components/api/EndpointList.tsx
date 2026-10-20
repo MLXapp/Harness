@@ -408,7 +408,7 @@ export function EndpointList({ format = "openai" }: EndpointListProps) {
         >
           <div className="px-3 py-2 bg-muted/50 border-b border-border">
             <h4 className="text-xs font-medium">{catKey ? t(catKey) : group.category}</h4>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               {descKey ? t(descKey) : group.description}
             </p>
           </div>
@@ -418,7 +418,7 @@ export function EndpointList({ format = "openai" }: EndpointListProps) {
               return (
               <div key={ep.path} className="px-3 py-2 flex items-center gap-2">
                 <span
-                  className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${METHOD_COLORS[ep.method] || "bg-muted text-foreground"}`}
+                  className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${METHOD_COLORS[ep.method] || "bg-muted text-foreground"}`}
                 >
                   {ep.method}
                 </span>
@@ -426,11 +426,11 @@ export function EndpointList({ format = "openai" }: EndpointListProps) {
                   {ep.path}
                 </code>
                 {ep.stream && (
-                  <span className="text-[9px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-400">
+                  <span className="text-[11px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-400">
                     {t('common.stream')}
                   </span>
                 )}
-                <span className="text-[10px] text-muted-foreground hidden sm:inline">
+                <span className="text-[11px] text-muted-foreground hidden sm:inline">
                   {epKey ? t(epKey) : ep.description}
                 </span>
               </div>

@@ -37,7 +37,8 @@ export function AccountSheetsHost() {
   useEffect(() => {
     const onEvent = (event: Event) => {
       const target = (event as CustomEvent<{ account?: ConnectAccountTarget }>).detail?.account
-      if (target === 'list') setListOpen(true)
+      // No account named (the composer's "Connect an account…") = the list of all five.
+      if (!target || target === 'list') setListOpen(true)
       else if (target === 'custom') setCustomOpen(true)
       else if (target && featuredAccount(target)) openRef.current(featuredAccount(target)!.id)
     }

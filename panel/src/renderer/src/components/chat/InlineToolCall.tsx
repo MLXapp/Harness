@@ -95,7 +95,7 @@ export function InlineToolCall({ group, isStreaming }: InlineToolCallProps) {
 
         {/* Iteration badge */}
         {iteration != null && iteration > 1 && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] bg-accent text-muted-foreground flex-shrink-0">
+          <span className="px-1.5 py-0.5 rounded text-[11px] bg-accent text-muted-foreground flex-shrink-0">
             #{iteration}
           </span>
         )}
@@ -113,7 +113,7 @@ export function InlineToolCall({ group, isStreaming }: InlineToolCallProps) {
 
         {/* Measured duration of a completed call */}
         {isDone && durationMs != null && (
-          <span className="text-muted-foreground/70 text-[10px] flex-shrink-0" title={t('chat.inlineTool.durationMeasuredTitle')}>
+          <span className="text-muted-foreground/70 text-[11px] flex-shrink-0" title={t('chat.inlineTool.durationMeasuredTitle')}>
             {formatDurationMs(durationMs)}
           </span>
         )}
@@ -155,7 +155,7 @@ export function ToolCallBody({ toolName, args, callingDetail, resultDetail, isEr
   if (preview && toolName === 'edit_file' && typeof args.search_text === 'string' && typeof args.replacement_text === 'string') {
     return (
       <div className="px-2.5 py-2">
-        {args.path && <div className="text-[10px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}</div>}
+        {args.path && <div className="text-[11px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}</div>}
         <DiffView oldText={args.search_text} newText={args.replacement_text} />
         {resultDetail && (
           <div className="mt-1.5 text-[11px] text-muted-foreground/70">{resultDetail}</div>
@@ -168,7 +168,7 @@ export function ToolCallBody({ toolName, args, callingDetail, resultDetail, isEr
   if (preview && toolName === 'insert_text' && typeof args.text === 'string' && Number.isInteger(args.line)) {
     return (
       <div className="px-2.5 py-2">
-        {args.path && <div className="text-[10px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}:{args.line}</div>}
+        {args.path && <div className="text-[11px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}:{args.line}</div>}
         <DiffView oldText="" newText={args.text} />
         {resultDetail && <div className="mt-1.5 text-[11px] text-muted-foreground/70">{resultDetail}</div>}
       </div>
@@ -179,7 +179,7 @@ export function ToolCallBody({ toolName, args, callingDetail, resultDetail, isEr
   if (preview && toolName === 'replace_lines' && typeof args.text === 'string' && Number.isInteger(args.start_line) && Number.isInteger(args.end_line)) {
     return (
       <div className="px-2.5 py-2">
-        {args.path && <div className="text-[10px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}:{args.start_line}-{args.end_line}</div>}
+        {args.path && <div className="text-[11px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}:{args.start_line}-{args.end_line}</div>}
         <DiffView oldText="" newText={args.text} />
         {resultDetail && <div className="mt-1.5 text-[11px] text-muted-foreground/70">{resultDetail}</div>}
       </div>
@@ -192,7 +192,7 @@ export function ToolCallBody({ toolName, args, callingDetail, resultDetail, isEr
     typeof edit.search_text === 'string' && typeof edit.replacement_text === 'string')) {
     return (
       <div className="px-2.5 py-2 space-y-2">
-        {args.path && <div className="text-[10px] text-muted-foreground/70 font-mono">{args.path}</div>}
+        {args.path && <div className="text-[11px] text-muted-foreground/70 font-mono">{args.path}</div>}
         {args.edits.map((edit: any, i: number) => (
           <DiffView key={i} oldText={edit.search_text} newText={edit.replacement_text} />
         ))}
@@ -221,7 +221,7 @@ export function ToolCallBody({ toolName, args, callingDetail, resultDetail, isEr
   if (preview && toolName === 'write_file' && typeof args.content === 'string') {
     return (
       <div className="px-2.5 py-2">
-        {args.path && <div className="text-[10px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}</div>}
+        {args.path && <div className="text-[11px] text-muted-foreground/70 mb-1.5 font-mono">{args.path}</div>}
         <DiffView oldText="" newText={args.content} />
         {resultDetail && <div className="mt-1.5 text-[11px] text-muted-foreground/70">{resultDetail}</div>}
       </div>
@@ -244,7 +244,7 @@ export function ToolCallBody({ toolName, args, callingDetail, resultDetail, isEr
     <div className="px-2.5 pb-1.5 text-xs">
       {callingDetail && (
         <div className="mt-1">
-          <span className="text-muted-foreground text-[10px] uppercase">args</span>
+          <span className="text-muted-foreground text-[11px] uppercase">args</span>
           <pre className="text-[11px] text-muted-foreground bg-background/50 rounded px-2 py-1 overflow-x-auto max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words">
             {formatJson(callingDetail)}
           </pre>
@@ -252,7 +252,7 @@ export function ToolCallBody({ toolName, args, callingDetail, resultDetail, isEr
       )}
       {resultDetail && (
         <div className="mt-1">
-          <span className={`text-[10px] uppercase ${isError ? 'text-destructive' : 'text-muted-foreground'}`}>
+          <span className={`text-[11px] uppercase ${isError ? 'text-destructive' : 'text-muted-foreground'}`}>
             {isError ? 'error' : 'result'}
           </span>
           <pre className="text-[11px] text-muted-foreground bg-background/50 rounded px-2 py-1 overflow-x-auto max-h-[400px] overflow-y-auto whitespace-pre-wrap break-words">
@@ -277,7 +277,7 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }) {
         {/* Old (removed) — left side */}
         {hasOld && (
           <div className={`${hasNew ? 'w-1/2 border-r border-border/30' : 'w-full'} overflow-x-auto`}>
-            <div className="px-1.5 py-0.5 bg-destructive/10 text-destructive/60 text-[10px] border-b border-border/30">removed</div>
+            <div className="px-1.5 py-0.5 bg-destructive/10 text-destructive/60 text-[11px] border-b border-border/30">removed</div>
             <div className="max-h-[400px] overflow-y-auto">
               {oldLines.map((line, i) => (
                 <div key={i} className="px-2 py-px bg-destructive/5 text-destructive/80 whitespace-pre-wrap break-all">
@@ -290,7 +290,7 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }) {
         {/* New (added) — right side */}
         {hasNew && (
           <div className={`${hasOld ? 'w-1/2' : 'w-full'} overflow-x-auto`}>
-            <div className="px-1.5 py-0.5 bg-primary/10 text-primary/60 text-[10px] border-b border-border/30">added</div>
+            <div className="px-1.5 py-0.5 bg-primary/10 text-primary/60 text-[11px] border-b border-border/30">added</div>
             <div className="max-h-[400px] overflow-y-auto">
               {newLines.map((line, i) => (
                 <div key={i} className="px-2 py-px bg-primary/5 text-primary/80 whitespace-pre-wrap break-all">

@@ -485,6 +485,12 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       readText: async () => 'sk-preview-0123456789abcdef',
     },
 
+    // The preview pretends to be a Mac: the mic offers Apple Dictation (a no-op here).
+    dictation: {
+      supported: () => true,
+      start: async () => ({ ok: true as const }),
+    },
+
     settings: {
       get: async (key: string) => settings.get(key) ?? null,
       has: async (key: string) => settings.has(key),

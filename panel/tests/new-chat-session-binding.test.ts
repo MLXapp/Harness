@@ -39,18 +39,22 @@ describe('new remote session binding', () => {
   })
 
   it('keeps a local chat bound to its saved model when persistence fails, with a session-switch error', async () => {
-    const dispatch = vi.fn(), showToast = vi.fn(), setShowModelPicker = vi.fn()
+    const dispatch = vi.fn(), showToast = vi.fn(), startSession = vi.fn()
     const select = selectionCallback(vi.fn().mockResolvedValue({ modelPath: '/models/local-new' }),
       vi.fn().mockRejectedValue(new Error('database is read-only')), dispatch)
-    const src = readFileSync(join(__dirname, '..', 'src', 'renderer', 'src', 'components', 'layout', 'ChatModeToolbar.tsx'), 'utf8')
-    const body = src.split('const handleSelectSession = async (session: SessionSummary) => {')[1].split('\n  const handleConnectRemote')[0]
-    const js = ts.transpile(`const choose = async (session: any) => {${body}`, { target: ts.ScriptTarget.ES2020 })
-    const choose = new Function('onSessionChange', 'setShowModelPicker', 'showToast', 't', `${js}; return choose`)(
-      select, setShowModelPicker, showToast, (key: string) => key,
+    // The composer's model switcher (components/chat/ModelSwitcher.tsx) runs this when a session row is picked.
+    const src = readFileSync(join(__dirname, '..', 'src', 'renderer', 'src', 'components', 'chat', 'ModelSwitcher.tsx'), 'utf8')
+    const body = src.split('const chooseSession = (row: SwitcherSessionRow<SessionSummary>) => run(async () => {')[1].split('\n  })\n')[0]
+    const js = ts.transpile(`const choose = async () => {${body}}`, { target: ts.ScriptTarget.ES2020 })
+    const chat = { setBinding: vi.fn(), selectSession: select }
+    const choose = new Function('row', 'binding', 'chat', 'showToast', 't', 'startSession', `${js}; return choose`)(
+      { session: { id: 'local-new', type: 'local', status: 'stopped' } }, null, chat, showToast, (key: string) => key, startSession,
     )
-    await choose({ id: 'local-new', type: 'local' })
+    // false: the failure is reported and the popover stays open.
+    expect(await choose()).toBe(false)
     expect(dispatch).not.toHaveBeenCalled()
-    expect(setShowModelPicker).not.toHaveBeenCalled()
+    expect(chat.setBinding).not.toHaveBeenCalled()
+    expect(startSession).not.toHaveBeenCalled()
     expect(showToast).toHaveBeenCalledWith('error', 'layout.chatToolbar.sessionSwitchFailed', 'database is read-only')
   })
 
