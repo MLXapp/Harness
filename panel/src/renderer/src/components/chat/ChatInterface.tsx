@@ -784,20 +784,6 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex justify-end px-4 py-1 border-b border-border/40">
-        <button
-          type="button"
-          className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded"
-          onClick={async () => {
-            try {
-              const result = await window.api.chat.export(chatId, 'markdown')
-              if (result.success) showToast('success', t('chat.sessionExport.success'), result.path)
-            } catch (error) {
-              showToast('error', t('chat.sessionExport.failed'), (error as Error).message)
-            }
-          }}
-        >{t('chat.sessionExport.button')}</button>
-      </div>
       <MessageList
         messages={messages}
         streamingMessageId={streamingMessageId}

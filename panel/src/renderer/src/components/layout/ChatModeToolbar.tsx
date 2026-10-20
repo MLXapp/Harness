@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Settings, Server, Play, Square, Loader2, X, RotateCw } from 'lucide-react'
+import { Settings, Server, Play, Square, Loader2, X, RotateCw, Share } from 'lucide-react'
 import { ChatSettings } from '../chat/ChatSettings'
 import { ServerSettingsDrawer } from '../sessions/ServerSettingsDrawer'
 import { useSessionsContext } from '../../contexts/SessionsContext'
@@ -242,6 +242,25 @@ export function ChatModeToolbar({ activeChatId, activeSessionId, onOverridesChan
 
         {/* Settings drawers */}
         <div className="flex flex-shrink-0 items-center gap-1">
+          {activeChatId && (
+            <button
+              type="button"
+              data-vmlx-control="chat-export"
+              onClick={async () => {
+                try {
+                  const result = await window.api.chat.export(activeChatId, 'markdown')
+                  if (result.success) showToast('success', t('chat.sessionExport.success'), result.path)
+                } catch (error) {
+                  showToast('error', t('chat.sessionExport.failed'), (error as Error).message)
+                }
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+              title={t('chat.sessionExport.button')}
+              aria-label={t('chat.sessionExport.button')}
+            >
+              <Share className="h-4 w-4" />
+            </button>
+          )}
           <button
             data-vmlx-control="chat-settings"
             onClick={() => { setShowChatSettings(!showChatSettings); setShowServerSettings(false) }}
