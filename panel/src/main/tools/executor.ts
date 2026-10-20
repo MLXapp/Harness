@@ -71,9 +71,47 @@ function resolvePath(workingDir: string, userPath: string): string {
   return realResolved
 }
 
+// ─── Read-only roots ─────────────────────────────────────────────────────────
+
+/**
+ * Folders outside the working directory that the READ tools (read_file,
+ * search_files) may open: the agent's spill folder, where oversized tool
+ * results are saved in full. Writes stay confined to the working directory.
+ */
+const readOnlyRoots = new Set<string>()
+
+export function registerReadOnlyRoot(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  readOnlyRoots.add(realpathSync(dir))
+}
+
+function underReadOnlyRoot(realPath: string): boolean {
+  for (const root of readOnlyRoots) {
+    if (realPath === root || realPath.startsWith(root + sep)) return true
+  }
+  return false
+}
+
+/** resolvePath, but also accepting an absolute path inside a registered read-only root. */
+function resolveReadPath(workingDir: string, userPath: string): string {
+  try {
+    return resolvePath(workingDir, userPath)
+  } catch (err) {
+    if (isAbsolute(userPath)) {
+      try {
+        const real = realpathSync(resolve(userPath))
+        if (underReadOnlyRoot(real)) return real
+      } catch {}
+    }
+    throw err
+  }
+}
+
 // ─── Tool Result Limits ──────────────────────────────────────────────────────
 
-const DEFAULT_MAX_TOOL_RESULT_CHARS = 50000 // ~50KB — prevents context overflow on large files/outputs
+// Memory-safety cap only. What the MODEL sees is pruned later (head + tail,
+// full text spilled to a file) by agent/toolResultPruning.ts in chat.ts.
+const DEFAULT_MAX_TOOL_RESULT_CHARS = 2_000_000
 
 function truncateResult(content: string, maxChars?: number): string {
   const limit = maxChars && maxChars > 0 ? maxChars : DEFAULT_MAX_TOOL_RESULT_CHARS
@@ -248,7 +286,7 @@ function fileDisplayLines(content: string): string[] {
 
 function readFile(path: string, workingDir: string, offset?: number, limit?: number): ToolResult {
   if (!path) return { content: 'Missing required parameter: path', is_error: true }
-  const fullPath = resolvePath(workingDir, path)
+  const fullPath = resolveReadPath(workingDir, path)
   if (!existsSync(fullPath)) {
     return { content: `File not found: ${path}`, is_error: true }
   }
@@ -419,7 +457,7 @@ function searchFiles(
   workingDir: string
 ): ToolResult {
   if (!pattern) return { content: 'Missing required parameter: pattern', is_error: true }
-  const searchDir = resolvePath(workingDir, path)
+  const searchDir = resolveReadPath(workingDir, path)
 
   // Build ripgrep args (use execFileSync to prevent shell injection)
   const rgArgs = ['--color=never', '--line-number', '--no-heading', '-m', '100']
@@ -463,7 +501,7 @@ function searchFiles(
 
 function findFiles(pattern: string, path: string, workingDir: string): ToolResult {
   if (!pattern) return { content: 'Missing required parameter: pattern', is_error: true }
-  const searchDir = resolvePath(workingDir, path)
+  const searchDir = resolveReadPath(workingDir, path)
 
   // Use fd if available, fallback to find
   try {

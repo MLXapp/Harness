@@ -1,10 +1,10 @@
 // vMLX panel chat IPC — authored by Jinho Jang
-import { ipcMain, BrowserWindow, net } from "electron";
+import { app, ipcMain, BrowserWindow, net } from "electron";
 import { v4 as uuidv4 } from "uuid";
 import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
 import type { ClientRequest } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { db, Chat, Message, Folder } from "../database";
 import { captureGenerationPass, type GenerationRecord } from "../session-export";
@@ -25,8 +25,16 @@ import {
 } from "../tools/registry";
 import {
   executeBuiltinTool,
+  registerReadOnlyRoot,
   WORKING_DIR_INDEPENDENT_TOOLS,
 } from "../tools/executor";
+import {
+  MAX_RAW_TOOL_RESULT_CHARS,
+  pruneOldSpillFiles,
+  pruneToolResult,
+  resolvePruneBudget,
+  writeSpillFile,
+} from "../agent/toolResultPruning";
 import { detectModelConfigFromDir } from "../model-config-registry";
 import { localEngineReadyFromHealthBody } from "../engineReadiness";
 import { getAuthHeaders } from "./utils";
@@ -611,6 +619,26 @@ function isLoopbackUrl(url: string): boolean {
 const DIRECT_MEDIA_ATTACHMENT_TOOL_RULE =
   "\n\nIMPORTANT: When a user message includes media attachments as chat content, inspect those images, video, or audio directly through the model's multimodal input. Do not call read_image, read_video, or list_directory to find attached media unless the user explicitly gives a local filesystem path.";
 
+/** Live tool-card detail bound (the persisted copy is already cut to 4 KB). */
+const LIVE_TOOL_DETAIL_MAX_CHARS = 50_000;
+
+/**
+ * Oversized tool results are saved in full under <userData>/agent-spill/<chatId>
+ * so the model can page through them with read_file instead of re-running the
+ * tool. The folder is registered as read-only for the read tools.
+ */
+function agentSpillRoot(): string {
+  return join(app.getPath("userData"), "agent-spill");
+}
+
+/** Forget a deleted chat's agent session state and spilled tool results. */
+function clearChatAgentRuntime(chatId: string): void {
+  if (typeof chatId !== "string" || !/^[A-Za-z0-9_-]+$/.test(chatId)) return;
+  try {
+    rmSync(join(agentSpillRoot(), chatId), { recursive: true, force: true });
+  } catch (_) {}
+}
+
 // Tool category definitions for per-category filtering
 const FILE_TOOLS = new Set([
   "read_file",
@@ -798,6 +826,12 @@ async function resolveServerEndpoint(
 export function registerChatHandlers(
   getWindow: () => BrowserWindow | null,
 ): void {
+  try {
+    registerReadOnlyRoot(agentSpillRoot());
+    pruneOldSpillFiles(agentSpillRoot());
+  } catch (err) {
+    console.warn("[CHAT] Could not prepare the tool-result spill folder", err);
+  }
   const pushChatSessionLog = (sessionId: string | undefined, line: string) => {
     if (!sessionId) return;
     const data = line.endsWith("\n") ? line : `${line}\n`;
@@ -951,6 +985,7 @@ export function registerChatHandlers(
 
   ipcMain.handle("chat:delete", async (_, id: string) => {
     db.deleteChat(id);
+    clearChatAgentRuntime(id);
     return { success: true };
   });
 
@@ -2776,7 +2811,12 @@ export function registerChatHandlers(
                 phase,
                 toolName,
                 toolCallId,
-                detail,
+                // The live card shows the raw tool output; bound it so a
+                // multi-megabyte result cannot stall the renderer.
+                detail:
+                  detail && detail.length > LIVE_TOOL_DETAIL_MAX_CHARS
+                    ? detail.slice(0, LIVE_TOOL_DETAIL_MAX_CHARS) + "\n…"
+                    : detail,
                 iteration,
                 contentOffset,
                 displayTimeline: displayTimeline.snapshot(),
@@ -3895,6 +3935,23 @@ export function registerChatHandlers(
           return true;
         };
 
+        // ─── Helper: prune a tool result for the model (spill the full text) ─
+        const toolPruneBudget = resolvePruneBudget(overrides?.toolResultMaxChars);
+        const prepareToolResultForModel = (toolName: string, text: string): string => {
+          const pruned = pruneToolResult(text, {
+            toolName,
+            budget: toolPruneBudget,
+            spill: (full) =>
+              writeSpillFile(join(agentSpillRoot(), chatId), toolName, full),
+          });
+          if (pruned.pruned) {
+            console.log(
+              `[CHAT] Pruned ${toolName} result for the model: ${pruned.omittedChars} chars cut${pruned.spillPath ? `, full text at ${pruned.spillPath}` : ""}`,
+            );
+          }
+          return pruned.text;
+        };
+
         // ─── Helper: execute tool calls and push results to messages ───────
         const executeToolCalls = async () => {
           const toolReasoning = currentReasoningSegment();
@@ -4200,7 +4257,6 @@ export function registerChatHandlers(
                     tc.function.name,
                     toolArgs,
                     workDir,
-                    overrides?.toolResultMaxChars,
                   );
                   resultText = result.content;
                   if (replaySafeKey && !result.is_error) {
@@ -4261,7 +4317,7 @@ export function registerChatHandlers(
                   const errText = await execRes.text();
                   resultText = boundToolResultText(
                     `Error (${execRes.status}): ${errText}`,
-                    overrides?.toolResultMaxChars || 50000,
+                    MAX_RAW_TOOL_RESULT_CHARS,
                   );
                   emitToolStatus(
                     "error",
@@ -4274,7 +4330,7 @@ export function registerChatHandlers(
                   const result = await execRes.json();
                   resultText = formatMcpToolResult(
                     result,
-                    overrides?.toolResultMaxChars || 50000,
+                    MAX_RAW_TOOL_RESULT_CHARS,
                   );
                   if (result.is_error) {
                     emitToolStatus(
@@ -4299,7 +4355,7 @@ export function registerChatHandlers(
               if (err?.name === "AbortError") throw err;
               resultText = boundToolResultText(
                 `Tool execution error: ${err.message}`,
-                overrides?.toolResultMaxChars || 50000,
+                MAX_RAW_TOOL_RESULT_CHARS,
               );
               emitToolStatus(
                 "error",
@@ -4311,6 +4367,10 @@ export function registerChatHandlers(
             }
             await flushToolStatusToRenderer();
 
+            // What the MODEL sees: head + tail of a large result, with the
+            // full text spilled to a file it can read (the card above keeps
+            // the raw output).
+            resultText = prepareToolResultForModel(tc.function.name, resultText);
             requestMessages.push(
               useResponsesApi
                 ? {

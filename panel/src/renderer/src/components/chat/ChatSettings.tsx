@@ -1100,7 +1100,7 @@ function statusToneClass(status: string): string {
                         className="flex-1 accent-primary"
                       />
                       <span className="text-xs font-mono w-16 text-right tabular-nums text-muted-foreground">
-                        {overrides.toolResultMaxChars ? `${(overrides.toolResultMaxChars / 1000).toFixed(1)}k` : '50k'}
+                        {overrides.toolResultMaxChars ? `${(overrides.toolResultMaxChars / 1000).toFixed(1)}k` : t('chat.settings.toolResultLimitAuto')}
                       </span>
                     </div>
                   </div>
