@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from '../../i18n'
+import type { VoiceInputMode } from './voiceInput'
 
 interface VoiceChatProps {
   onTranscription: (text: string) => void
@@ -7,6 +8,9 @@ interface VoiceChatProps {
   sessionId?: string
   sttModel?: string
   disabled?: boolean
+  /** 'apple' (default on macOS): the button starts Apple Dictation via `onDictate`. */
+  mode?: VoiceInputMode
+  onDictate?: () => void
 }
 
 type RecordingState = 'idle' | 'recording' | 'transcribing'
@@ -55,7 +59,7 @@ function useAudioSettings() {
  *
  * STT model resolution: explicit prop > settings('sttModel') > 'whisper-large-v3'
  */
-export function VoiceChat({ onTranscription, endpoint, sessionId, sttModel, disabled }: VoiceChatProps) {
+export function VoiceChat({ onTranscription, endpoint, sessionId, sttModel, disabled, mode = 'whisper', onDictate }: VoiceChatProps) {
   const { t } = useTranslation()
   const [state, setState] = useState<RecordingState>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -156,7 +160,14 @@ export function VoiceChat({ onTranscription, endpoint, sessionId, sttModel, disa
     }
   }, [])
 
+  const apple = mode === 'apple' && !!onDictate
+
   const handleClick = () => {
+    if (apple) {
+      setError(null)
+      onDictate?.()
+      return
+    }
     if (state === 'recording') {
       stopRecording()
     } else if (state === 'idle') {
@@ -164,7 +175,9 @@ export function VoiceChat({ onTranscription, endpoint, sessionId, sttModel, disa
     }
   }
 
-  const buttonLabel = state === 'recording'
+  const buttonLabel = apple
+    ? t('chat.voice.dictateTitle')
+    : state === 'recording'
     ? t('chat.voice.stopRecordingTitle')
     : state === 'transcribing'
       ? t('chat.voice.transcribingTitle')
@@ -175,13 +188,16 @@ export function VoiceChat({ onTranscription, endpoint, sessionId, sttModel, disa
       <button
         onClick={handleClick}
         disabled={disabled || state === 'transcribing'}
-        className={`px-3 py-3 rounded-lg border transition-colors ${
+        type="button"
+        data-vmlx-control="chat-mic"
+        data-voice-mode={apple ? 'apple' : 'whisper'}
+        className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full transition-colors duration-150 ${
           state === 'recording'
-            ? 'bg-destructive/20 border-destructive text-destructive animate-pulse'
+            ? 'bg-destructive/15 text-destructive animate-pulse'
             : state === 'transcribing'
-              ? 'bg-primary/10 border-primary/30 text-primary'
-              : 'bg-background border-input text-muted-foreground hover:text-foreground hover:bg-accent'
-        } disabled:opacity-50 disabled:cursor-not-allowed`}
+              ? 'bg-primary/10 text-primary'
+              : 'text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06]'
+        } disabled:opacity-40 disabled:cursor-not-allowed`}
         title={buttonLabel}
         aria-label={buttonLabel}
       >
@@ -200,7 +216,7 @@ export function VoiceChat({ onTranscription, endpoint, sessionId, sttModel, disa
         )}
       </button>
       {error && (
-        <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 whitespace-nowrap bg-destructive text-destructive-foreground text-xs px-2 py-1 rounded">
+        <div className="absolute bottom-full right-0 mb-2 whitespace-nowrap bg-destructive text-destructive-foreground text-[12px] px-2 py-1 rounded-md mlx-view-in">
           {error}
         </div>
       )}

@@ -1,6 +1,9 @@
 import { useState, useRef, useCallback, useEffect, KeyboardEvent, DragEvent, ClipboardEvent } from 'react'
-import { Paperclip, Send, Square, ImagePlus, X, Film, Music, FileText } from 'lucide-react'
+import { Paperclip, ArrowUp, Square, ImagePlus, X, Film, Music, FileText } from 'lucide-react'
 import { VoiceChat } from './VoiceChat'
+import { ModelSwitcher } from './ModelSwitcher'
+import { useChatModel } from './ChatModelContext'
+import { useVoiceInput } from './voiceInput'
 import { useTranslation } from '../../i18n'
 import { apiCapabilityModalities } from '../../../../shared/apiModelCapabilities'
 
@@ -90,8 +93,27 @@ export function attachmentAllowed(kind: AttachmentKind, modalities: string[] | n
   return names.includes(kind)
 }
 
+/** Below this composer width the model pill shows only its glyph. */
+export const COMPACT_COMPOSER_PX = 420
+
 export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, sessionId }: InputBoxProps) {
   const { t } = useTranslation()
+  const chatModel = useChatModel()
+  // No model at all (no session, no provider model): Send waits for a choice.
+  const noModel = !!chatModel && !chatModel.hasModel
+  const voice = useVoiceInput()
+  const composerRef = useRef<HTMLDivElement>(null)
+  const [compact, setCompact] = useState(false)
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(entries => {
+      const width = entries[0]?.contentRect.width ?? el.clientWidth
+      setCompact(width < COMPACT_COMPOSER_PX)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<MediaAttachment[]>([])
   const [runtimeModalities, setRuntimeModalities] = useState<string[] | null>(null)
@@ -146,7 +168,7 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
   }, [loading, disabled])
 
   const handleSend = () => {
-    if ((message.trim() || attachments.length > 0) && !disabled) {
+    if ((message.trim() || attachments.length > 0) && !disabled && !noModel) {
       onSend(message, attachments.length > 0 ? attachments : undefined)
       setMessage('')
       setAttachments([])
@@ -256,9 +278,27 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
     setMessage(prev => prev ? prev + ' ' + text : text)
   }, [])
 
+  // Apple Dictation: the composer takes focus, then macOS shows its Dictation
+  // UI at the caret and types into the textarea (main/dictation.ts).
+  const handleDictate = useCallback(async () => {
+    const el = textareaRef.current
+    if (!el) return
+    el.focus()
+    const end = el.value.length
+    el.setSelectionRange(end, end)
+    try {
+      await window.api.dictation?.start()
+    } catch (error) {
+      console.error('Dictation failed to start:', error)
+    }
+  }, [])
+
+  const canSend = !disabled && !noModel && (!!message.trim() || attachments.length > 0)
+  const sendTitle = noModel ? t('chat.switcher.chooseFirst') : t('chat.input.sendTitle')
+
   return (
     <div
-      className={`relative border-t border-border p-4 transition-colors ${isDragOver ? 'bg-primary/5' : ''}`}
+      className={`relative px-4 pb-4 pt-2 transition-colors ${isDragOver ? 'bg-primary/5' : ''}`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -330,7 +370,11 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
         </div>
       )}
 
-      <div className="flex items-end gap-2">
+      <div
+        ref={composerRef}
+        data-vmlx-surface="chat-composer"
+        className="rounded-[22px] border border-border/80 bg-card shadow-[0_1px_2px_var(--lg-depth),0_10px_30px_-18px_var(--shadow)] transition-[border-color,box-shadow] duration-200 focus-within:border-ring/50 focus-within:shadow-[0_0_0_3px_rgb(var(--ring)/0.12),0_10px_30px_-18px_var(--shadow)]"
+      >
         <input
           ref={fileInputRef}
           type="file"
@@ -339,23 +383,6 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
           className="hidden"
           onChange={(e) => { if (e.target.files) addFiles(e.target.files) }}
         />
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            data-vmlx-control="chat-attach"
-            disabled={disabled && !loading}
-            className="p-2 rounded-lg hover:bg-accent disabled:opacity-40 text-muted-foreground hover:text-foreground transition-colors"
-            title={t('chat.input.attachTitle')}
-          >
-            <Paperclip className="h-4 w-4" />
-          </button>
-          <VoiceChat
-            onTranscription={handleTranscription}
-            endpoint={sessionEndpoint}
-            sessionId={sessionId}
-            disabled={disabled && !loading}
-          />
-        </div>
         <textarea
           data-vmlx-control="chat-composer"
           ref={textareaRef}
@@ -365,29 +392,56 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
           onPaste={handlePaste}
           placeholder={loading ? t('chat.input.placeholderWaiting') : t('chat.input.placeholderDefault')}
           disabled={disabled && !loading}
-          className="flex-1 resize-none px-4 py-2.5 bg-background border border-input rounded-xl focus:outline-none focus:ring-2 focus:ring-ring/50 min-h-[42px] max-h-[200px] text-sm leading-relaxed"
+          className="block w-full resize-none bg-transparent px-4 pb-1 pt-3 min-h-[44px] max-h-[200px] text-[14px] leading-[1.5] text-foreground placeholder:text-muted-foreground focus:outline-none"
           rows={1}
         />
-        {loading ? (
+        <div className="flex items-center gap-1 px-2 pb-2 pt-1">
           <button
-            onClick={onAbort}
-            data-vmlx-control="chat-stop"
-            className="p-2.5 bg-destructive text-destructive-foreground rounded-xl hover:bg-destructive/90 transition-colors flex-shrink-0"
-            title={t('chat.input.stopTitle')}
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            data-vmlx-control="chat-attach"
+            disabled={disabled && !loading}
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-40"
+            title={t('chat.input.attachTitle')}
+            aria-label={t('chat.input.attachTitle')}
           >
-            <Square className="h-4 w-4" />
+            <Paperclip className="h-[18px] w-[18px]" />
           </button>
-        ) : (
-          <button
-            onClick={handleSend}
-            data-vmlx-control="chat-send"
-            disabled={disabled || (!message.trim() && attachments.length === 0)}
-            className="p-2.5 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 disabled:opacity-30 transition-colors flex-shrink-0"
-            title={t('chat.input.sendTitle')}
-          >
-            <Send className="h-4 w-4" />
-          </button>
-        )}
+          <ModelSwitcher compact={compact} />
+          <div className="min-w-0 flex-1" />
+          <VoiceChat
+            onTranscription={handleTranscription}
+            endpoint={sessionEndpoint}
+            sessionId={sessionId}
+            disabled={disabled && !loading}
+            mode={voice.mode}
+            onDictate={handleDictate}
+          />
+          {loading ? (
+            <button
+              type="button"
+              onClick={onAbort}
+              data-vmlx-control="chat-stop"
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-[opacity,transform] duration-150 hover:opacity-85 active:scale-95"
+              title={t('chat.input.stopTitle')}
+              aria-label={t('chat.input.stopTitle')}
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSend}
+              data-vmlx-control="chat-send"
+              disabled={!canSend}
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[color:var(--acc)] text-white shadow-[0_4px_14px_-6px_var(--acc-glow)] transition-[background-color,opacity,transform,box-shadow] duration-150 hover:bg-[color:var(--acc-hi)] active:scale-95 disabled:opacity-35 disabled:shadow-none disabled:active:scale-100"
+              title={sendTitle}
+              aria-label={sendTitle}
+            >
+              <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.5} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )
