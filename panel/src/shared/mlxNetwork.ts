@@ -59,7 +59,7 @@ export interface MlxAppStatus {
   running: boolean
   path?: string
   version?: string
-  /** This MLX Studio build carries a copy it can install. */
+  /** This MLX Harness build carries a copy it can install. */
   bundled?: boolean
   bundledVersion?: string
 }

@@ -1,7 +1,7 @@
 /**
  * Model providers: cloud APIs, OpenAI/Anthropic-compatible endpoints and local
  * model servers (Ollama, LM Studio) that a chat can use instead of a model
- * running inside MLX Studio.
+ * running inside MLX Harness.
  *
  * These types are shared by the main process (store, discovery, transport)
  * and the renderer (Settings → Models, chat model picker). Nothing here ever

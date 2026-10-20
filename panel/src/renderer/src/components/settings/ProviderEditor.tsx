@@ -4,7 +4,7 @@
  * CustomProviderCard.tsx).
  *
  * Add or edit one model provider. Adding opens on a two-mode switch:
- * Catalog (a cloud provider MLX Studio knows) or Custom endpoint (id,
+ * Catalog (a cloud provider MLX Harness knows) or Custom endpoint (id,
  * endpoint, protocol). The API key is write-only; models come from the
  * endpoint's listing or are typed by id.
  */

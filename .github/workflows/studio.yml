@@ -1,4 +1,4 @@
-name: MLX Studio
+name: MLX Harness
 
 on:
   push:
@@ -98,7 +98,7 @@ jobs:
         working-directory: studio/panel
         run: /opt/homebrew/bin/npm ci
 
-      # MLX Studio carries MLX Node (app.mlx.mac) and installs it on first run.
+      # MLX Harness carries MLX Node (app.mlx.mac) and installs it on first run.
       # Download the public notarized build, check it (bundle id, team, strict
       # signature, Gatekeeper) and stage it in panel/resources/bundled-node.
       # Release (tag) builds fail without it; manual builds warn and go on.
@@ -160,7 +160,7 @@ jobs:
         working-directory: studio/panel/release
         run: |
           team="${APPLE_TEAM_ID:-CCKXS9W488}"
-          for dmg in MLX-Studio-*.dmg; do
+          for dmg in MLX-Harness-*.dmg; do
             xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$team" --wait
             xcrun stapler staple "$dmg"
             shasum -a 256 "$dmg" > "$dmg.sha256"
@@ -172,12 +172,12 @@ jobs:
         working-directory: studio/panel/release
         run: |
           REQ='anchor apple generic and certificate leaf[subject.OU] = "CCKXS9W488" and identifier "app.mlx.mac"'
-          for dmg in MLX-Studio-*.dmg; do
+          for dmg in MLX-Harness-*.dmg; do
             mnt="$(mktemp -d)"; out="$(mktemp -d)"
             hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$mnt" "$dmg" > /dev/null
-            zip="$mnt/MLX Studio.app/Contents/Resources/bundled-node/MLX Node.zip"
+            zip="$mnt/MLX Harness.app/Contents/Resources/bundled-node/MLX Node.zip"
             test -f "$zip" || { echo "::error::$dmg doesn't carry MLX Node"; hdiutil detach "$mnt" -force; exit 1; }
-            if [[ -n "$MAC_CERT_P12" ]]; then codesign --verify --deep --strict "$mnt/MLX Studio.app"; fi
+            if [[ -n "$MAC_CERT_P12" ]]; then codesign --verify --deep --strict "$mnt/MLX Harness.app"; fi
             ditto -x -k "$zip" "$out"
             codesign --verify --deep --strict -R "=$REQ" "$out/MLX Node.app"
             echo "$dmg carries MLX Node $(plutil -extract CFBundleShortVersionString raw -o - "$out/MLX Node.app/Contents/Info.plist")"
@@ -193,10 +193,10 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MLX-Studio-${{ github.ref_name }}-${{ env.MLX_STUDIO_FLAVOR }}
+          name: MLX-Harness-${{ github.ref_name }}-${{ env.MLX_STUDIO_FLAVOR }}
           path: |
-            studio/panel/release/MLX-Studio-*.dmg
-            studio/panel/release/MLX-Studio-*.dmg.sha256
+            studio/panel/release/MLX-Harness-*.dmg
+            studio/panel/release/MLX-Harness-*.dmg.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -221,7 +221,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: MLX-Studio-${{ github.ref_name }}-sequoia
+          name: MLX-Harness-${{ github.ref_name }}-sequoia
           path: dist
 
       - name: Create the GitHub release
@@ -230,9 +230,9 @@ jobs:
         run: |
           VERSION="${TAG#v}"
           ls -la dist
-          gh release create "$TAG" dist/MLX-Studio-*.dmg dist/MLX-Studio-*.dmg.sha256 --target "$GITHUB_SHA" \
-            --title "MLX Studio $VERSION" \
-            --notes "MLX Studio $VERSION for Apple silicon Macs (macOS 14.5 or later). Signed with Developer ID and notarized by Apple. Carries MLX Node inside and offers to install it on first run. Built on vMLX by JANGQ AI (Apache License 2.0)."
+          gh release create "$TAG" dist/MLX-Harness-*.dmg dist/MLX-Harness-*.dmg.sha256 --target "$GITHUB_SHA" \
+            --title "MLX Harness $VERSION" \
+            --notes "MLX Harness $VERSION for Apple silicon Macs (macOS 14.5 or later). Signed with Developer ID and notarized by Apple. Carries MLX Node inside and offers to install it on first run. Built on vMLX by JANGQ AI (Apache License 2.0)."
 
       - name: Point the update feed at it
         env:
@@ -240,7 +240,7 @@ jobs:
           NOTES: ${{ inputs.notes }}
         run: |
           VERSION="${TAG#v}"
-          DMG="$(cd dist && ls MLX-Studio-*.dmg | head -1)"
+          DMG="$(cd dist && ls MLX-Harness-*.dmg | head -1)"
           SHA="$(cut -d' ' -f1 "dist/$DMG.sha256")"
           URL="https://github.com/$REPO/releases/download/$TAG/$DMG"
           node -e '
@@ -248,12 +248,12 @@ jobs:
             const [v, url, sha, size] = process.argv.slice(1);
             const m = { version: v, url, sha256: sha, size: Number(size), date: new Date().toISOString().slice(0, 10),
               downloads: { sequoia: { url, sha256: sha } },
-              notes: process.env.NOTES || `MLX Studio ${v}. Signed and notarized. Carries MLX Node inside.` };
+              notes: process.env.NOTES || `MLX Harness ${v}. Signed and notarized. Carries MLX Node inside.` };
             fs.writeFileSync("latest.json", JSON.stringify(m, null, 2) + "\n");
           ' "$VERSION" "$URL" "$SHA" "$(stat -c %s "dist/$DMG")"
           cat latest.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add latest.json
-          git commit -m "latest.json: MLX Studio $VERSION"
+          git commit -m "latest.json: MLX Harness $VERSION"
           git push origin HEAD:main

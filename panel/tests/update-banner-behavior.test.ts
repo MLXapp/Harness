@@ -23,7 +23,7 @@ const visibleActions = (html: string) => /data-hidden="false"/.test(html)
 describe('update banner', () => {
   it('offers the update with notes, Update and Later', () => {
     const html = render(base)
-    expect(text(html)).toContain('MLX Studio 0.2.0 is available')
+    expect(text(html)).toContain('MLX Harness 0.2.0 is available')
     expect(text(html)).toContain('Faster model loading.')
     expect(html).toContain('data-vmlx-section="release-update"')
     expect(html).toContain('data-vmlx-update-phase="available"')
@@ -42,7 +42,7 @@ describe('update banner', () => {
 
   it('shows download progress with a moving bar, and the buttons slide away', () => {
     const html = render({ ...base, phase: 'downloading', received: 247_000_000, total: 588_000_000 })
-    expect(text(html)).toContain('Downloading MLX Studio 0.2.0…')
+    expect(text(html)).toContain('Downloading MLX Harness 0.2.0…')
     expect(text(html)).toContain('42%')
     expect(text(html)).toContain('247 MB of 588 MB')
     expect(html).toContain('aria-valuenow="42"')
@@ -52,7 +52,7 @@ describe('update banner', () => {
 
   it('shows verifying with a full bar', () => {
     const html = render({ ...base, phase: 'verifying', received: 588_000_000, total: 588_000_000 })
-    expect(text(html)).toContain('Verifying MLX Studio 0.2.0…')
+    expect(text(html)).toContain('Verifying MLX Harness 0.2.0…')
     expect(text(html)).toContain('Checking the download and its signature')
     expect(html).toContain('transform:scaleX(1)')
     expect(html).toContain('mlx-update-fill-busy')
@@ -61,20 +61,20 @@ describe('update banner', () => {
   it('offers Restart to update when ready', () => {
     const a = actions()
     const html = render({ ...base, phase: 'ready' }, a)
-    expect(text(html)).toContain('MLX Studio 0.2.0 is ready to install')
+    expect(text(html)).toContain('MLX Harness 0.2.0 is ready to install')
     expect(html).toContain('data-vmlx-control="release-update-restart"')
     expect(text(html)).toContain('Restart to update')
   })
 
   it('explains a failure and offers the manual download, with Try again only where it can help', () => {
     const net = render({ ...base, phase: 'error', error: 'network' })
-    expect(text(net)).toContain("MLX Studio 0.2.0 couldn't be installed")
+    expect(text(net)).toContain("MLX Harness 0.2.0 couldn't be installed")
     expect(text(net)).toContain("The download didn't finish.")
     expect(net).toContain('data-vmlx-control="release-update-manual"')
     expect(text(net)).toContain('Download manually')
     expect(net).toContain('data-vmlx-control="release-update-retry"')
     const sig = render({ ...base, phase: 'error', error: 'signature' })
-    expect(text(sig)).toContain("isn't signed by MLX Studio's developer")
+    expect(text(sig)).toContain("isn't signed by MLX Harness's developer")
     expect(sig).not.toContain('release-update-retry')
   })
 

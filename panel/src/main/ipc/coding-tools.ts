@@ -1,4 +1,4 @@
-// MLX Studio — Coding Tool Integration IPC
+// MLX Harness — Coding Tool Integration IPC
 // Non-destructive config management for Claude Code, Codex CLI, OpenCode,
 // OpenClaw, and Hermes Agent
 import { ipcMain } from 'electron'
@@ -8,7 +8,12 @@ import { join } from 'path'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dump as dumpYAML, load as loadYAML } from 'js-yaml'
 
-const MLXSTUDIO_TAG = '_mlxstudio'  // Tag to identify our entries
+// Tag to identify our entries. Machine identifiers written into other tools'
+// configs ('_mlxstudio', the 'mlxstudio' provider keys and API-key
+// placeholder, 'MLXSTUDIO_*' Codex providers) keep their 0.1.x spelling so
+// entries saved before the MLX Harness rename are still found and removed;
+// only names people read say MLX Harness.
+const MLXSTUDIO_TAG = '_mlxstudio'
 
 interface ToolConfig {
   detect: () => boolean
@@ -287,8 +292,11 @@ const claudeCode: ToolConfig = {
 // ═══ Codex CLI ═══
 // Config: ~/.codex/config.toml — TOML format with [model_providers.NAME] sections
 const CODEX_TOML = join(homedir(), '.codex', 'config.toml')
-const CODEX_DEFAULTS_BEGIN = '# >>> MLX Studio managed Codex defaults'
-const CODEX_DEFAULTS_END = '# <<< MLX Studio managed Codex defaults'
+const CODEX_DEFAULTS_BEGIN = '# >>> MLX Harness managed Codex defaults'
+const CODEX_DEFAULTS_END = '# <<< MLX Harness managed Codex defaults'
+/** The same block as written by 0.1.x (MLX Studio): still recognised, replaced on the next write. */
+const CODEX_LEGACY_DEFAULTS_BEGIN = '# >>> MLX Studio managed Codex defaults'
+const CODEX_LEGACY_DEFAULTS_END = '# <<< MLX Studio managed Codex defaults'
 const CODEX_PREVIOUS_DEFAULTS = '# previous-defaults-base64: '
 
 function codexProviderKey(modelName: string): string {
@@ -306,11 +314,13 @@ function removeCodexManagedDefaults(toml: string): {
   previousDefaults: string
   activeProvider: string | null
 } {
-  const start = toml.indexOf(CODEX_DEFAULTS_BEGIN)
-  if (start < 0) return { toml, previousDefaults: '', activeProvider: null }
-  const endMarker = toml.indexOf(CODEX_DEFAULTS_END, start)
+  const markers = [[CODEX_DEFAULTS_BEGIN, CODEX_DEFAULTS_END], [CODEX_LEGACY_DEFAULTS_BEGIN, CODEX_LEGACY_DEFAULTS_END]]
+  const found = markers.map(([b, e]) => ({ b, e, start: toml.indexOf(b) })).find(m => m.start >= 0)
+  if (!found) return { toml, previousDefaults: '', activeProvider: null }
+  const start = found.start
+  const endMarker = toml.indexOf(found.e, start)
   if (endMarker < 0) return { toml, previousDefaults: '', activeProvider: null }
-  const end = endMarker + CODEX_DEFAULTS_END.length
+  const end = endMarker + found.e.length
   const block = toml.slice(start, end)
   const previousMatch = block.match(/^# previous-defaults-base64: ([A-Za-z0-9+/=]*)$/m)
   const providerMatch = block.match(/^model_provider\s*=\s*"([^"]+)"\s*$/m)
@@ -364,7 +374,7 @@ function codexManagedDefaults(
 function codexProviderSection(baseUrl: string, modelName: string, providerKey: string): string {
   return [
     `[model_providers.${providerKey}]`,
-    `name = ${tomlString(`MLX Studio (${modelName})`)}`,
+    `name = ${tomlString(`MLX Harness (${modelName})`)}`,
     `base_url = ${tomlString(`${baseUrl}/v1`)}`,
     'wire_api = "responses"',
   ].join('\n')
@@ -453,7 +463,7 @@ const openCode: ToolConfig = {
     const key = `mlxstudio-${modelName.replace(/[^a-zA-Z0-9-]/g, '-')}`
     cfg.provider[key] = {
       npm: '@ai-sdk/openai-compatible',
-      name: `MLX Studio (${modelName})`,
+      name: `MLX Harness (${modelName})`,
       options: { baseURL: `${baseUrl}/v1` },
       models: {
         [modelName]: {
@@ -760,7 +770,7 @@ export function registerCodingToolHandlers(): void {
           provider: {
             [`mlxstudio-${modelName.replace(/[^a-zA-Z0-9-]/g, '-')}`]: {
               npm: '@ai-sdk/openai-compatible',
-              name: `MLX Studio (${modelName})`,
+              name: `MLX Harness (${modelName})`,
               options: { baseURL: `${baseUrl}/v1` },
               models: {
                 [modelName]: {

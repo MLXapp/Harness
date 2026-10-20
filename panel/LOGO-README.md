@@ -1,4 +1,4 @@
-# MLX Studio icon and logo
+# MLX Harness icon and logo
 
 - `resources/logo.svg` — master icon (1024 px canvas, macOS grid: 824 px rounded
   square). The MLX emblem — Material Design Icons "alpha-x" box (Pictogrammers,
@@ -20,5 +20,5 @@ npm run icons
 node -e "const s=require('sharp');s('build/dmg-background.svg',{density:72}).resize(760,460).png().toFile('build/dmg-background.png');s('build/dmg-background.svg',{density:144}).resize(1520,920).png().toFile('build/dmg-background@2x.png')"
 ```
 
-The "vMLX" logo and name are not used as MLX Studio branding; vMLX is credited in
+The "vMLX" logo and name are not used as MLX Harness branding; vMLX is credited in
 About, Preferences and the README.

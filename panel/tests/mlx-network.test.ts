@@ -90,7 +90,7 @@ describe('MLX Network tie-in', () => {
     }
     const en = JSON.parse(readFileSync('src/renderer/src/i18n/locales/en.json', 'utf8'))
     expect(en.main.dialog.mlxNodeOfferTitle).toBe('Also install MLX Node?')
-    expect(en.main.dialog.mlxNodeOfferDetail).toBe("MLX Node is the menu bar app that lends your Mac's idle time to MLX Network and earns MLX Tokens. It's separate from MLX Studio, updates itself, and you can quit or remove it any time.")
+    expect(en.main.dialog.mlxNodeOfferDetail).toBe("MLX Node is the menu bar app that lends your Mac's idle time to MLX Network and earns MLX Tokens. It's separate from MLX Harness, updates itself, and you can quit or remove it any time.")
     expect([en.main.dialog.mlxNodeInstall, en.main.dialog.mlxNodeNotNow]).toEqual(['Install MLX Node', 'Not now'])
   })
 })

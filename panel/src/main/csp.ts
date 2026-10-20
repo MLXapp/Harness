@@ -6,7 +6,7 @@ export function buildContentSecurityPolicy(options: { devRenderer?: boolean } = 
   return (
     "default-src 'self';" +
     scriptSrc +
-    // MLX Studio uses the system fonts (SF Pro / SF Mono): no web fonts.
+    // MLX Harness uses the system fonts (SF Pro / SF Mono): no web fonts.
     " style-src 'self' 'unsafe-inline';" +
     " font-src 'self' data:;" +
     // ms#75: allow hf-mirror.com and modelscope.cn so users in mainland

@@ -15,13 +15,13 @@ SCRIPT = ROOT / ".github/scripts/release_metadata.py"
 SITE_SCRIPT = ROOT / ".github/scripts/deploy_website_release.py"
 
 
-# MLX Studio does not ship upstream vMLX's release/publish workflows (they
+# MLX Harness does not ship upstream vMLX's release/publish workflows (they
 # target jjang-ai repositories and self-hosted runners). Their contract tests
 # run only when those workflows are present, e.g. on an upstream checkout.
 UPSTREAM_RELEASE_WORKFLOWS = ROOT / ".github/workflows/publish-release.yml"
 requires_upstream_release_workflows = pytest.mark.skipif(
     not UPSTREAM_RELEASE_WORKFLOWS.exists(),
-    reason="upstream vMLX release workflows are not part of MLX Studio",
+    reason="upstream vMLX release workflows are not part of MLX Harness",
 )
 
 

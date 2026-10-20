@@ -1,4 +1,4 @@
-// MLX Studio — Coding Tool Integration
+// MLX Harness — Coding Tool Integration
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from '../../i18n'
 import { Download, Check, Plus, Trash2, RefreshCw, ExternalLink, ChevronDown, ChevronRight, Copy, CheckCheck, Terminal } from 'lucide-react'

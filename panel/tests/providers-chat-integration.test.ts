@@ -277,7 +277,7 @@ describe('OpenAI-compatible provider', () => {
   it('rewrites the pipeline URL onto a non-/v1 base, adds the bearer key and pins the model', async () => {
     h.state.providers.set('google', {
       id: 'google', kind: 'catalog', displayName: 'Google Gemini', api: 'openai-completions',
-      baseURL: `http://127.0.0.1:${h.state.port}/v1beta/openai`, headers: { 'X-Title': 'MLX Studio' }, createdAt: 0,
+      baseURL: `http://127.0.0.1:${h.state.port}/v1beta/openai`, headers: { 'X-Title': 'MLX Harness' }, createdAt: 0,
       models: [{ id: 'gemini-test', input: ['text'] }],
     })
     h.state.keys.set('google', 'AIza-integration')
@@ -287,7 +287,7 @@ describe('OpenAI-compatible provider', () => {
     expect(result.content).toBe('Hello from Gemini.')
     expect(requests[0].url).toBe('/v1beta/openai/chat/completions')
     expect(requests[0].headers.authorization).toBe('Bearer AIza-integration')
-    expect(requests[0].headers['x-title']).toBe('MLX Studio')
+    expect(requests[0].headers['x-title']).toBe('MLX Harness')
     expect(requests[0].body.model).toBe('gemini-test')
     expect(requests[0].body.messages.at(-1)).toEqual({ role: 'user', content: 'hi' })
   })

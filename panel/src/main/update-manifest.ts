@@ -4,7 +4,7 @@ export interface ReleaseAsset {
   size?: number
 }
 
-/** Where MLX Studio releases are published (the updater feed lives in that repo). */
+/** Where MLX Harness releases are published (the updater feed lives in that repo). */
 export const RELEASES_PAGE = 'https://github.com/MLXapp/studio/releases'
 export const LATEST_MANIFEST_URL = 'https://raw.githubusercontent.com/MLXapp/studio/main/latest.json'
 

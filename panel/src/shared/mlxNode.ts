@@ -1,6 +1,6 @@
 /**
  * MLX Node (bundle id app.mlx.mac, team CCKXS9W488): the separate menu bar
- * app that lends a Mac's idle time to MLX Network. MLX Studio carries a
+ * app that lends a Mac's idle time to MLX Network. MLX Harness carries a
  * signed, notarized copy as a zip in Contents/Resources/bundled-node/ and
  * offers to install it on first run. Pure helpers here (shared with the
  * renderer and the tests); file system and processes live in
@@ -8,9 +8,9 @@
  *
  * Why a zip and not "MLX Node.app" in Resources: macOS registers apps it finds
  * inside other bundles with Launch Services and Spotlight. A live copy inside
- * MLX Studio could then answer mlx:// links or `open -b app.mlx.mac`, run from
+ * MLX Harness could then answer mlx:// links or `open -b app.mlx.mac`, run from
  * inside our bundle and let its self-updater rewrite files there, breaking
- * MLX Studio's signature. A zip is never launched; ditto unpacks it with the
+ * MLX Harness's signature. A zip is never launched; ditto unpacks it with the
  * signature, entitlements and provisioning profile untouched.
  */
 
@@ -99,7 +99,7 @@ export function shouldMarkMlxNodeOffered(f: { platform: string; installed: boole
 
 /**
  * A found app counts as installed MLX Node only when it is a top-level app:
- * not nested in another bundle (MLX Studio's own Resources, Xcode archives),
+ * not nested in another bundle (MLX Harness's own Resources, Xcode archives),
  * not a translocated or mounted-DMG copy.
  */
 export function isInstalledLocation(path: string): boolean {

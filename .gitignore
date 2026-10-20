@@ -310,6 +310,7 @@ docs/*.md
 !docs/ARCHITECTURE.md
 !docs/index.md
 !docs/mlxstudio-releases-readme.md
+!docs/MLX-HARNESS.md
 docs/audit-*
 docs/AUDIT-*
 docs/final-*

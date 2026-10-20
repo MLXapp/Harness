@@ -1,12 +1,12 @@
 {
   "name": "mlx-studio",
-  "productName": "MLX Studio",
-  "version": "0.1.1",
-  "description": "MLX Studio: run, chat with and serve AI models locally on Apple Silicon. Built on vMLX by JANGQ AI.",
+  "productName": "MLX Harness",
+  "version": "0.2.0",
+  "description": "MLX Harness: run, chat with and serve AI models locally on Apple Silicon. Built on vMLX by JANGQ AI.",
   "main": "dist/main/index.mjs",
   "author": "Flex UK Limited (MLX Network) <info@mlx.app>",
   "license": "Apache-2.0",
-  "homepage": "https://studio.mlx.app",
+  "homepage": "https://harness.mlx.app",
   "repository": {
     "type": "git",
     "url": "https://github.com/MLXapp/studio.git"
@@ -90,7 +90,7 @@
   },
   "build": {
     "appId": "app.mlx.studio",
-    "productName": "MLX Studio",
+    "productName": "MLX Harness",
     "copyright": "Copyright 2026 Flex UK Limited (MLX Network). Built on vMLX, Copyright 2026 JANGQ AI.",
     "beforePack": "scripts/electron-builder-before-pack.cjs",
     "afterPack": "scripts/electron-builder-after-pack.cjs",
@@ -129,7 +129,7 @@
         {
           "x": 160,
           "y": 220,
-          "name": "MLX Studio.app"
+          "name": "MLX Harness.app"
         },
         {
           "x": 600,
@@ -138,7 +138,7 @@
           "path": "/Applications"
         }
       ],
-      "title": "MLX Studio ${version}"
+      "title": "MLX Harness ${version}"
     },
     "extraResources": [
       {
@@ -183,6 +183,6 @@
       "buildResources": "resources",
       "output": "release"
     },
-    "artifactName": "MLX-Studio-${version}-${arch}.${ext}"
+    "artifactName": "MLX-Harness-${version}-${arch}.${ext}"
   }
 }

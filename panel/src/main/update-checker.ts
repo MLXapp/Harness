@@ -1,7 +1,7 @@
 import type { BrowserWindow } from 'electron'
 import { startAppUpdater } from './app-updater'
 
-// MLX Studio's update feed: latest.json at the root of MLXapp/studio (main),
+// MLX Harness's update feed: latest.json at the root of MLXapp/studio (main),
 // read by the in-app updater (./app-updater.ts) 5 s after launch, every 6 hours
 // and from "Check for Updates…". Releases are published at
 // https://github.com/MLXapp/studio/releases. Upstream vMLX's feeds are

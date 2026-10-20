@@ -286,7 +286,7 @@ export function approvalRefusalMessage(outcome: Exclude<ApprovalOutcome, 'allow-
     case 'timeout':
       return `Permission not granted: the user did not answer the approval request within ${timeoutMinutes} minutes, so this ${toolName} call was not run. Do not retry it; tell the user what you need approved and why.`
     case 'unavailable':
-      return `Permission not granted: the approval request could not be shown (the MLX Studio window is closed), so this ${toolName} call was not run. Do not retry it; tell the user what you need approved and why.`
+      return `Permission not granted: the approval request could not be shown (the MLX Harness window is closed), so this ${toolName} call was not run. Do not retry it; tell the user what you need approved and why.`
     case 'aborted':
       return '(Generation was stopped)'
   }

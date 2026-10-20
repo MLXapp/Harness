@@ -27,7 +27,7 @@ interface ImageGalleryProps {
   onDelete?: (gen: ImageGenerationInfo) => void;
 }
 
-// MLX Studio Image Gallery (from vMLX by JANGQ AI)
+// MLX Harness Image Gallery (from vMLX by JANGQ AI)
 export function ImageGallery({
   generations,
   generating,

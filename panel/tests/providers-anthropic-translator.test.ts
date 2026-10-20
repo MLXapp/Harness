@@ -89,7 +89,7 @@ describe('Anthropic request translation', () => {
     const request = toAnthropicRequest({
       model: 'ignored',
       messages: [
-        { role: 'system', content: 'You are MLX Studio.' },
+        { role: 'system', content: 'You are MLX Harness.' },
         { role: 'system', content: 'Be brief.' },
         { role: 'user', content: [{ type: 'text', text: 'What is in this?' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } }] },
         { role: 'assistant', content: '', tool_calls: [
@@ -110,7 +110,7 @@ describe('Anthropic request translation', () => {
     }, { model: 'claude-sonnet-4-5', thinkingCache: new ThinkingCache() })
 
     expect(request.model).toBe('claude-sonnet-4-5')
-    expect(request.system).toBe('You are MLX Studio.\n\nBe brief.')
+    expect(request.system).toBe('You are MLX Harness.\n\nBe brief.')
     expect(request.stream).toBe(true)
     expect(request.max_tokens).toBe(2048)
     expect(request.temperature).toBe(0.4)

@@ -1,5 +1,5 @@
 /* ============================================================================
-   MLX Studio — design tokens (MLX look: aluminum, glass and lit silicon)
+   MLX Harness — design tokens (MLX look: aluminum, glass and lit silicon)
    Source of truth for colour values: mlx.app (app/globals.css, app/v2.css).
    ----------------------------------------------------------------------------
    Light is the default; dark follows the system (prefers-color-scheme) unless

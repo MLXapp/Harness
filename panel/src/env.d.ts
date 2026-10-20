@@ -466,7 +466,7 @@ declare global {
         ) => () => void;
         /** Update: download, verify and stage (or open the download when this copy can't update itself). */
         installUpdate: () => Promise<void>;
-        /** Quit; the staged update is swapped in and MLX Studio relaunches. */
+        /** Quit; the staged update is swapped in and MLX Harness relaunches. */
         restartToUpdate: () => Promise<void>;
         /** Later: hide the banner until the next version or the next launch. */
         dismissUpdate: () => Promise<void>;

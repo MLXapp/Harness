@@ -586,7 +586,7 @@ function ServerModeContent() {
               <p className="text-xs text-muted-foreground/70">{t('app.about.creator')}</p>
               <AppVersion />
               <div className="flex flex-wrap gap-4 text-xs">
-                <a href="https://studio.mlx.app" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">studio.mlx.app</a>
+                <a href="https://harness.mlx.app" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">harness.mlx.app</a>
                 <a href="https://github.com/MLXapp/studio" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">GitHub</a>
                 <a href="https://github.com/jjang-ai/vmlx" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">vMLX</a>
                 <a href="https://github.com/MLXapp/studio/blob/main/NOTICE" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">{t('app.about.license')}</a>

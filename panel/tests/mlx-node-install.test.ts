@@ -79,8 +79,8 @@ describe('MLX Node detection', () => {
     expect(isInstalledLocation('/Applications/MLX.app')).toBe(true)
     expect(isInstalledLocation('/Users/alex/Applications/MLX Node.app')).toBe(true)
     expect(isInstalledLocation('/Volumes/Data/Applications/MLX Node.app')).toBe(true)
-    // nested in MLX Studio (or any bundle), translocated, on a mounted DMG, in the Trash
-    expect(isInstalledLocation('/Applications/MLX Studio.app/Contents/Resources/bundled-node/MLX Node.app')).toBe(false)
+    // nested in MLX Harness (or any bundle), translocated, on a mounted DMG, in the Trash
+    expect(isInstalledLocation('/Applications/MLX Harness.app/Contents/Resources/bundled-node/MLX Node.app')).toBe(false)
     expect(isInstalledLocation('/private/var/folders/x/AppTranslocation/ABC/d/MLX Node.app')).toBe(false)
     expect(isInstalledLocation('/Volumes/MLX Node 0.9.0/MLX Node.app')).toBe(false)
     expect(isInstalledLocation('/Users/alex/.Trash/MLX.app')).toBe(false)
@@ -107,11 +107,11 @@ describe('MLX Node packaging', () => {
   it('never re-signs it, and signs everything else as before', () => {
     const ignore = (pkg.build.mac.signIgnore as string[]).map((s) => new RegExp(s))
     const skipped = (p: string) => ignore.some((re) => re.test(p))
-    const res = '/tmp/release/mac-arm64/MLX Studio.app/Contents/Resources'
+    const res = '/tmp/release/mac-arm64/MLX Harness.app/Contents/Resources'
     expect(skipped(`${res}/bundled-node/MLX Node.zip`)).toBe(true)
     expect(skipped(`${res}/bundled-node/MLX Node.json`)).toBe(true)
     expect(skipped(`${res}/bundled-python/python/bin/python3`)).toBe(false)
-    expect(skipped('/tmp/release/mac-arm64/MLX Studio.app/Contents/MacOS/MLX Studio')).toBe(false)
+    expect(skipped('/tmp/release/mac-arm64/MLX Harness.app/Contents/MacOS/MLX Harness')).toBe(false)
   })
 
   it('keeps the staged copy out of git and fetches it in CI', () => {
