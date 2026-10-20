@@ -38,6 +38,7 @@ import {
 import { FileReadTracker } from "../agent/readGuard";
 import { RepeatCallTracker, appendReminder } from "../agent/repeatCallReminder";
 import { parseStoredTodos, parseTodoWriteArgs, renderTodoList } from "../agent/todos";
+import { loadProjectInstructions } from "../agent/projectInstructions";
 import { detectModelConfigFromDir } from "../model-config-registry";
 import { localEngineReadyFromHealthBody } from "../engineReadiness";
 import { getAuthHeaders } from "./utils";
@@ -1855,6 +1856,28 @@ export function registerChatHandlers(
           role: "system",
           content: directMediaAttachmentRule.trim(),
         });
+      }
+      // Project instructions (AGENTS.md / CLAUDE.md and *.local.md from the
+      // working directory up to the workspace root, 64 KB budget). They follow
+      // the persistent built-in-tools setting, never this turn's wording, so
+      // the system prompt — the start of the cached prefix — stays identical
+      // from turn to turn while the files are unchanged.
+      const projectInstructions =
+        overrides?.builtinToolsEnabled === true && !chatUsesZayaAppleScriptToolBundle
+          ? loadProjectInstructions(overrides.workingDirectory)
+          : null;
+      if (projectInstructions) {
+        const head = requestMessages[0];
+        if (head?.role === "system" && typeof head.content === "string") {
+          head.content = `${head.content}\n\n${projectInstructions.text}`;
+        } else {
+          requestMessages.unshift({ role: "system", content: projectInstructions.text });
+        }
+        console.log(
+          `[CHAT] Project instructions: ${projectInstructions.included.join(", ")} (${projectInstructions.bytes} bytes)` +
+            (projectInstructions.omitted.length ? `; omitted ${projectInstructions.omitted.join(", ")}` : "") +
+            (projectInstructions.truncated.length ? `; truncated ${projectInstructions.truncated.join(", ")}` : ""),
+        );
       }
       if (toolCapabilityEpoch) {
         requestMessages.push({
