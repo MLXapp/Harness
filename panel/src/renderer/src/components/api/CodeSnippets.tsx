@@ -425,7 +425,7 @@ export function CodeSnippets({ baseUrl, apiKey, modelId, isImage = false, isEdit
             <button
               key={l.key}
               onClick={() => setLang(l.key)}
-              className={`px-2 py-1 text-[10px] rounded transition-colors ${
+              className={`px-2 py-1 text-[11px] rounded transition-colors ${
                 lang === l.key
                   ? 'bg-primary/15 text-primary font-medium'
                   : 'text-muted-foreground hover:bg-accent'

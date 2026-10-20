@@ -320,11 +320,23 @@ describe('i18n locale consistency', () => {
       'sessions.view.server',
       'sessions.toolbar.startModel',
       'sessions.toolbar.stopModel',
-      'layout.chatToolbar.addLocalModel',
-      'layout.chatToolbar.connectRemoteEndpoint',
-      'layout.chatToolbar.apiUrlPlaceholder',
     ]) {
       expect(chatToolbarSrc).toContain(`t('${key}')`)
+    }
+    // Choosing, adding and connecting models moved to the composer's switcher.
+    const switcherSrc = readFileSync(
+      resolve(__dirname, '..', 'src', 'renderer', 'src', 'components', 'chat', 'ModelSwitcher.tsx'),
+      'utf-8',
+    )
+    for (const key of [
+      'chat.switcher.addLocal',
+      'chat.switcher.connectAccount',
+      'chat.switcher.manageModels',
+      'layout.chatToolbar.sessionSwitchFailed',
+      'sessions.toolbar.startModel',
+      'sessions.toolbar.stopModel',
+    ]) {
+      expect(switcherSrc).toContain(`t('${key}')`)
     }
   })
 

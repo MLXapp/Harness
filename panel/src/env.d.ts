@@ -443,6 +443,11 @@ declare global {
         importRemoteSession: (sessionId: string) => Promise<ProviderResult<{ provider: import('./shared/providers/types').ProviderView }>>;
         onChanged: (callback: () => void) => () => void;
       };
+      /** Apple Dictation (macOS): `start` opens the system Dictation UI at the focused field. */
+      dictation?: {
+        supported: () => boolean;
+        start: () => Promise<{ ok: boolean; reason?: 'unsupported' }>;
+      };
       settings: {
         get: (key: string) => Promise<string | null>;
         has: (key: string) => Promise<boolean>;

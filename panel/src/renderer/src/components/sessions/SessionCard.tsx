@@ -169,7 +169,7 @@ export function SessionCard({
             </h3>
             {jangLabel && (
               <span
-                className="min-w-0 max-w-[9rem] shrink truncate text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 font-medium"
+                className="min-w-0 max-w-[9rem] shrink truncate text-[11px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 font-medium"
                 title={jangLabel}
                 aria-label={`Quantization: ${jangLabel}`}
               >
@@ -177,7 +177,7 @@ export function SessionCard({
               </span>
             )}
             {session.modelPathMissing && (
-              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium flex-shrink-0">
+              <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium flex-shrink-0">
                 <AlertTriangle className="h-3 w-3" />
                 {t('sessions.card.modelPathMissing')}
               </span>
@@ -236,7 +236,7 @@ export function SessionCard({
           </div>
           {progress && (
             <div className="mt-1 space-y-0.5">
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-[11px] text-muted-foreground">
                 {/* The main process has no locale catalog, so it ships an i18n key
                     beside the English text; resolve the key and fall back to the
                     literal so a locale missing the entry still reads correctly. */}
@@ -249,12 +249,12 @@ export function SessionCard({
                 {progress.indeterminate === false ? `(${progress.progress}%)` : ''}
               </p>
               {formatModelBytes(progress.modelBytes) && (
-                <p className="text-[10px] text-muted-foreground/80">
+                <p className="text-[11px] text-muted-foreground/80">
                   {t('sessions.card.modelFiles')} {formatModelBytes(progress.modelBytes)}
                 </p>
               )}
               {residentLoad && (
-                <p className="text-[10px] text-muted-foreground/80">
+                <p className="text-[11px] text-muted-foreground/80">
                   {t('sessions.card.residentRam')} {residentLoad}
                 </p>
               )}

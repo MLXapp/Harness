@@ -189,22 +189,22 @@ export function ImageModelPicker({ onSelect, currentModel, onKeepCurrent }: Imag
               <label className="text-xs text-muted-foreground block mb-1.5">{t('image.picker.serverSettings')}</label>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[10px] text-muted-foreground">{t('sessions.create.host')}</label>
+                  <label className="text-[11px] text-muted-foreground">{t('sessions.create.host')}</label>
                   <input type="text" value={serverHost} onChange={e => setServerHost(e.target.value)}
                     className="w-full px-2 py-1 bg-muted border border-input rounded text-xs" />
                 </div>
                 <div>
-                  <label className="text-[10px] text-muted-foreground">{t('image.picker.portAuto')}</label>
+                  <label className="text-[11px] text-muted-foreground">{t('image.picker.portAuto')}</label>
                   <input type="number" value={serverPort} onChange={e => setServerPort(parseInt(e.target.value) || 0)}
                     className="w-full px-2 py-1 bg-muted border border-input rounded text-xs" min={0} max={65535} />
                 </div>
                 <div>
-                  <label className="text-[10px] text-muted-foreground">{t('image.picker.apiKey')}</label>
+                  <label className="text-[11px] text-muted-foreground">{t('image.picker.apiKey')}</label>
                   <input type="password" value={serverApiKey} onChange={e => setServerApiKey(e.target.value)}
                     placeholder={t('image.picker.apiKeyPlaceholder')} className="w-full px-2 py-1 bg-muted border border-input rounded text-xs" />
                 </div>
                 <div>
-                  <label className="text-[10px] text-muted-foreground">{t('image.picker.logLevel')}</label>
+                  <label className="text-[11px] text-muted-foreground">{t('image.picker.logLevel')}</label>
                   <select value={serverLogLevel} onChange={e => setServerLogLevel(e.target.value)}
                     className="w-full px-2 py-1 bg-muted border border-input rounded text-xs">
                     <option value="DEBUG">DEBUG</option>

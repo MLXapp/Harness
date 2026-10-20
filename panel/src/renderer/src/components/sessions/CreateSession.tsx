@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { isChatModelRepo } from '../../../../shared/curated'
 import { ArrowLeft } from 'lucide-react'
 import {
   SessionConfigForm,
@@ -191,11 +192,16 @@ export function CreateSession({ initialModelPath, onBack, onCreated, filterType:
     }
   }, [])
 
+  // Starting a chat lists chat models only: voice, image and embedding repos
+  // in the Hugging Face cache stay in the Models library.
+  const forChat = <M extends { path: string; name?: string }>(scanned: M[]): M[] =>
+    filterTypeProp === 'text' ? scanned.filter(m => isChatModelRepo(m.path) && isChatModelRepo(m.name ?? '')) : scanned
+
   const scanModels = async () => {
     setScanLoading(true)
     try {
       const scanned = await window.api.models.scan(filterTypeProp)
-      setModels(scanned)
+      setModels(forChat(scanned))
     } catch (err) {
       console.error('Failed to scan models:', err)
     } finally {
@@ -681,7 +687,7 @@ export function CreateSession({ initialModelPath, onBack, onCreated, filterType:
                     <div className="p-2 bg-muted rounded font-mono text-[11px] text-foreground select-all">
                       huggingface-cli download mlx-community/Llama-3.2-3B-Instruct-4bit --local-dir ~/.cache/huggingface/hub/mlx-community/Llama-3.2-3B-Instruct-4bit
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-2">
+                    <p className="text-[11px] text-muted-foreground mt-2">
                       {t('sessions.create.browseModels')}{' '}
                       <span className="text-primary select-all">huggingface.co/mlx-community</span>
                     </p>
@@ -827,7 +833,7 @@ export function CreateSession({ initialModelPath, onBack, onCreated, filterType:
                           // Rescan so the row disappears
                           try {
                             const scanned = await window.api.models.scan(filterTypeProp)
-                            setModels(scanned)
+                            setModels(forChat(scanned))
                           } catch (_) { /* non-fatal */ }
                         } catch (err) {
                           alert(t('sessions.create.deleteFailed', { error: (err as Error).message }))

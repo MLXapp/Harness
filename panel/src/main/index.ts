@@ -9,6 +9,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerSessionHandlers } from './ipc/sessions'
 import { registerChatHandlers, activeAgentChatIds, abortAllChatRequests } from './ipc/chat'
 import { registerProviderHandlers } from './ipc/providers'
+import { registerDictationIpc } from './dictation'
 import { runningSpawnedProcessCount, killSpawnedProcesses } from './tools/executor'
 import { QuitConfirmation } from './agent/quitConfirmation'
 import { registerModelHandlers, killActiveDownload } from './ipc/models'
@@ -218,6 +219,7 @@ function createWindow(): void {
     registerSessionHandlers(() => mainWindow)
     registerChatHandlers(() => mainWindow)
     registerProviderHandlers(() => mainWindow)
+    registerDictationIpc()
     registerModelHandlers()
     registerEngineHandlers(() => mainWindow)
     registerAudioHandlers()

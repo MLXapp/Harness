@@ -219,7 +219,7 @@ function ImageCard({
               </div>
             )}
             <span
-              className={`absolute top-1.5 right-1.5 text-[9px] px-1.5 py-0.5 text-white rounded font-medium ${isVariation ? "bg-emerald-600/80" : "bg-violet-600/80"}`}
+              className={`absolute top-1.5 right-1.5 text-[11px] px-1.5 py-0.5 text-white rounded font-medium ${isVariation ? "bg-emerald-600/80" : "bg-violet-600/80"}`}
             >
               {isVariation ? t('image.gallery.variationBadge') : t('image.gallery.editedAlt')}
             </span>
@@ -232,7 +232,7 @@ function ImageCard({
                   alt={t('image.gallery.sourceAlt')}
                   className="w-full h-full object-contain"
                 />
-                <span className="absolute bottom-0 left-0 right-0 text-[8px] text-center bg-black/60 text-white py-px">
+                <span className="absolute bottom-0 left-0 right-0 text-[11px] leading-tight truncate px-0.5 text-center bg-black/60 text-white py-px">
                   {isVariation ? t('image.gallery.sourceAlt') : t('image.gallery.originalLabel')}
                 </span>
               </div>
@@ -278,12 +278,12 @@ function ImageCard({
       <div className="p-3">
         <div className="flex items-center gap-1 mb-1">
           {isVariation && (
-            <span className="text-[9px] px-1 py-0 rounded bg-emerald-500/15 text-emerald-500 flex-shrink-0">
+            <span className="text-[11px] px-1 py-0 rounded bg-emerald-500/15 text-emerald-500 flex-shrink-0">
               {t('image.gallery.varBadge')}
             </span>
           )}
           {isEdit && (
-            <span className="text-[9px] px-1 py-0 rounded bg-violet-500/15 text-violet-400 flex-shrink-0">
+            <span className="text-[11px] px-1 py-0 rounded bg-violet-500/15 text-violet-400 flex-shrink-0">
               {t(generation.upscaleResolution != null ? 'image.prompt.upscale' : 'image.history.editBadge')}
             </span>
           )}
@@ -294,7 +294,7 @@ function ImageCard({
             {generation.prompt}
           </p>
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
           <span>
             {generation.width}x{generation.height}
           </span>

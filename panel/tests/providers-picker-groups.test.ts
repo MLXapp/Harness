@@ -44,19 +44,23 @@ describe('model picker grouping', () => {
 })
 
 describe('model picker wiring', () => {
-  it('renders the groups local first and binds provider chats without a session endpoint', async () => {
+  it('renders the switcher groups top models first, then this Mac, then accounts, and binds provider chats without a session endpoint', async () => {
     const { readFileSync } = await import('node:fs')
-    const toolbar = readFileSync('src/renderer/src/components/layout/ChatModeToolbar.tsx', 'utf8')
-    const order = ['groups.onThisMac.map(renderSessionRow)', 'groups.localServers.map(group', 'groups.cloud.map(group', 'groups.remoteSessions.map(renderSessionRow)']
-      .map(marker => toolbar.indexOf(marker))
+    const switcher = readFileSync('src/renderer/src/components/chat/ModelSwitcher.tsx', 'utf8')
+    const order = ['groups.featured.map(renderRow)', 'groups.onThisMac.map(renderRow)', 'groups.more.map(group', 'groups.remoteSessions.map(renderRow)']
+      .map(marker => switcher.indexOf(marker))
     expect(order.every(i => i > 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
     // Picking a session clears the provider binding first; picking a provider model stores it.
-    expect(toolbar).toContain('await onProviderBindingChange(null)')
-    expect(toolbar).toContain('providerId: provider.id, modelId: model.id')
+    expect(switcher).toContain('if (binding) await chat.setBinding(null)')
+    expect(switcher).toContain('providerId: row.provider.id, modelId: row.model.id')
+    // The top toolbar no longer lists models.
+    const toolbar = readFileSync('src/renderer/src/components/layout/ChatModeToolbar.tsx', 'utf8')
+    expect(toolbar).not.toContain('groupPickerEntries')
 
     const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
     expect(app).toContain('sessionEndpoint={providerBinding ? undefined : sessionEndpoint}')
     expect(app).toContain('window.api.providers.setChatModel(next)')
+    expect(app).toContain('<ChatModelContext.Provider value={chatModel}>')
   })
 })

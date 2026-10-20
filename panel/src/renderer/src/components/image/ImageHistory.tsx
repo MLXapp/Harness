@@ -76,13 +76,13 @@ export function ImageHistory({ sessions, currentId, onSelect, onNew, onDelete, o
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1">
                     {session.sessionType === 'edit' ? (
-                      <span className="text-[9px] px-1 py-0 rounded bg-violet-500/15 text-violet-400 flex-shrink-0">{t('image.history.editBadge')}</span>
+                      <span className="text-[11px] px-1 py-0 rounded bg-violet-500/15 text-violet-400 flex-shrink-0">{t('image.history.editBadge')}</span>
                     ) : (
-                      <span className="text-[9px] px-1 py-0 rounded bg-blue-500/15 text-blue-400 flex-shrink-0">{t('image.history.genBadge')}</span>
+                      <span className="text-[11px] px-1 py-0 rounded bg-blue-500/15 text-blue-400 flex-shrink-0">{t('image.history.genBadge')}</span>
                     )}
                     <p className="text-xs font-medium truncate">{session.modelName}</p>
                   </div>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
                     {formatDate(session.updatedAt, t, locale)}
                   </p>
                 </div>
@@ -90,7 +90,7 @@ export function ImageHistory({ sessions, currentId, onSelect, onNew, onDelete, o
                   onClick={(e) => handleDelete(e, session.id)}
                   className={`rounded flex-shrink-0 ml-1 transition-all ${
                     confirmDeleteId === session.id
-                      ? 'text-destructive opacity-100 text-[9px] px-1 py-0.5 border border-destructive/40 bg-destructive/10'
+                      ? 'text-destructive opacity-100 text-[11px] px-1 py-0.5 border border-destructive/40 bg-destructive/10'
                       : 'p-0.5 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100'
                   }`}
                   title={confirmDeleteId === session.id ? t('image.history.confirmDeleteTitle') : t('image.history.deleteTitle')}

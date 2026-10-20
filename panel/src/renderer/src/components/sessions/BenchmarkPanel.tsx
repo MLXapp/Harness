@@ -117,7 +117,7 @@ function HeadlineCards({ results }: { results: PromptResult[] }) {
   return (
     <div className="grid grid-cols-2 gap-2">
       <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
-        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           {t('sessions.benchmark.peakDecode')}
         </div>
         <div className="mt-1 font-mono text-2xl font-semibold text-primary">
@@ -127,14 +127,14 @@ function HeadlineCards({ results }: { results: PromptResult[] }) {
           </span>
         </div>
         {decode.length > 1 && (
-          <div className="mt-1 text-[10px] text-muted-foreground">
+          <div className="mt-1 text-[11px] text-muted-foreground">
             {t('sessions.benchmark.median')}: {medianValue(decode).toFixed(1)}{' '}
             t/s
           </div>
         )}
       </div>
       <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
-        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           {t('sessions.benchmark.peakPrefill')}
         </div>
         <div className="mt-1 font-mono text-2xl font-semibold text-primary">
@@ -144,7 +144,7 @@ function HeadlineCards({ results }: { results: PromptResult[] }) {
           </span>
         </div>
         {prefill.length > 1 && (
-          <div className="mt-1 text-[10px] text-muted-foreground">
+          <div className="mt-1 text-[11px] text-muted-foreground">
             {t('sessions.benchmark.median')}: {medianValue(prefill).toFixed(0)}{' '}
             pp/s
           </div>
@@ -328,7 +328,7 @@ export function BenchmarkPanel({
           <HeadlineCards results={currentResults} />
           <ResultsTable results={currentResults} />
           {currentDisclosure && (
-            <div className="text-[10px] leading-relaxed text-muted-foreground">
+            <div className="text-[11px] leading-relaxed text-muted-foreground">
               {currentDisclosure}
             </div>
           )}
@@ -369,7 +369,7 @@ export function BenchmarkPanel({
                         <div className="text-xs">
                           {run.profileLabel || 'Legacy'}
                         </div>
-                        <div className="text-[10px] text-muted-foreground">
+                        <div className="text-[11px] text-muted-foreground">
                           {run.familyLabel} ·{' '}
                           {new Date(run.createdAt).toLocaleString()}
                         </div>

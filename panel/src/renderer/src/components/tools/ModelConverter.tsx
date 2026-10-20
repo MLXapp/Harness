@@ -324,7 +324,7 @@ export function ModelConverter({ initialModelPath, onBack, onServe, models = [] 
                   if (tierKeys.length === 0) return null
                   return (
                     <div key={tier} className="col-span-2">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">{t('convert.tier', { tier })}</p>
+                      <p className="text-[11px] text-muted-foreground uppercase tracking-wider mb-1">{t('convert.tier', { tier })}</p>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         {tierKeys.map(([key, p]) => (
                           <button
@@ -339,9 +339,9 @@ export function ModelConverter({ initialModelPath, onBack, onServe, models = [] 
                           >
                             <div className="flex items-center gap-1">
                               <p className="text-xs font-medium">{p.label}</p>
-                              <span className="text-[9px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-400">{p.avgBits}</span>
+                              <span className="text-[11px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-400">{p.avgBits}</span>
                             </div>
-                            <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{p.desc}</p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">{p.desc}</p>
                           </button>
                         ))}
                       </div>
@@ -350,7 +350,7 @@ export function ModelConverter({ initialModelPath, onBack, onServe, models = [] 
                 })}
                 {/* Custom mix option */}
                 <div className="col-span-2">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">{t('tools.converter.customMix')}</p>
+                  <p className="text-[11px] text-muted-foreground uppercase tracking-wider mb-1">{t('tools.converter.customMix')}</p>
                   <button
                     onClick={() => setPreset('jang_custom')}
                     disabled={running}
@@ -361,24 +361,24 @@ export function ModelConverter({ initialModelPath, onBack, onServe, models = [] 
                     }`}
                   >
                     <p className="text-xs font-medium">{t('tools.converter.customChooseBits')}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{t('tools.converter.customHint')}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{t('tools.converter.customHint')}</p>
                   </button>
                   {preset === 'jang_custom' && (
                     <div className="grid grid-cols-3 gap-2 mt-2">
                       <div>
-                        <label className="text-[10px] text-muted-foreground">{t('tools.converter.criticalAttention')}</label>
+                        <label className="text-[11px] text-muted-foreground">{t('tools.converter.criticalAttention')}</label>
                         <select value={customCritical} onChange={e => setCustomCritical(Number(e.target.value))} disabled={running} className="w-full px-2 py-1 bg-background border border-input rounded text-xs">
                           {[2,3,4,5,6,8].map(b => <option key={b} value={b}>{b}-bit</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="text-[10px] text-muted-foreground">{t('tools.converter.importantEmbeddings')}</label>
+                        <label className="text-[11px] text-muted-foreground">{t('tools.converter.importantEmbeddings')}</label>
                         <select value={customImportant} onChange={e => setCustomImportant(Number(e.target.value))} disabled={running} className="w-full px-2 py-1 bg-background border border-input rounded text-xs">
                           {[2,3,4,5,6,8].map(b => <option key={b} value={b}>{b}-bit</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="text-[10px] text-muted-foreground">{t('tools.converter.compressMlpFfn')}</label>
+                        <label className="text-[11px] text-muted-foreground">{t('tools.converter.compressMlpFfn')}</label>
                         <select value={customCompress} onChange={e => setCustomCompress(Number(e.target.value))} disabled={running} className="w-full px-2 py-1 bg-background border border-input rounded text-xs">
                           {[2,3,4,5,6,8].map(b => <option key={b} value={b}>{b}-bit</option>)}
                         </select>
