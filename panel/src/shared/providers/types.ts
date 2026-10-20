@@ -36,6 +36,12 @@ export interface ProviderModel {
   input: ProviderInputType[]
   /** Absent: the model does not reason (no level is offered). */
   reasoningEfforts?: ProviderReasoningLevel[]
+  /**
+   * Kept but not offered in the chat model picker (Preferences → Accounts →
+   * Choose models…). Absent = shown, so rows saved before this existed stay
+   * visible.
+   */
+  hidden?: boolean
 }
 
 /** A stored provider row (no credential). */
@@ -145,6 +151,7 @@ export function normalizeProviderModels(value: unknown): ProviderModel[] {
       input,
       // A switch that is on must name at least one level besides Off.
       ...(efforts && efforts.some(level => level !== 'off') ? { reasoningEfforts: efforts } : {}),
+      ...(entry.hidden === true ? { hidden: true } : {}),
     })
   }
   return models

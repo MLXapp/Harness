@@ -30,6 +30,11 @@ export interface PickerGroups<S extends PickerSession> {
 
 const USABLE = new Set(['running', 'loading', 'standby'])
 
+/** Models a provider offers in the picker: hidden ones stay stored but are not listed. */
+export function shownModels(models: readonly ProviderModel[]): ProviderModel[] {
+  return models.filter(m => !m.hidden)
+}
+
 export function groupPickerEntries<S extends PickerSession>(
   sessions: readonly S[],
   localServers: readonly ProviderView[],
@@ -41,11 +46,11 @@ export function groupPickerEntries<S extends PickerSession>(
   return {
     onThisMac,
     localServers: localServers
-      .filter(p => p.reachable !== false && p.models.length > 0)
-      .map(provider => ({ provider, models: provider.models })),
+      .filter(p => p.reachable !== false && shownModels(p.models).length > 0)
+      .map(provider => ({ provider, models: shownModels(provider.models) })),
     cloud: providers
-      .filter(p => p.kind !== 'local-server' && p.models.length > 0 && (!p.needsKey || p.configured))
-      .map(provider => ({ provider, models: provider.models })),
+      .filter(p => p.kind !== 'local-server' && shownModels(p.models).length > 0 && (!p.needsKey || p.configured))
+      .map(provider => ({ provider, models: shownModels(provider.models) })),
     remoteSessions: sessions.filter(s => s.type === 'remote'),
   }
 }

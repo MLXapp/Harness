@@ -30,6 +30,8 @@ export interface ModelDraftRow {
   image: boolean
   reasoning: ProviderReasoningLevel[] | null
   open: boolean
+  /** Not offered in the chat picker (kept as it was; Accounts → Choose models… sets it). */
+  hidden?: boolean
 }
 
 let rowSeq = 0
@@ -47,6 +49,7 @@ export function rowsFromModels(models: ProviderModel[]): ModelDraftRow[] {
     image: m.input.includes('image'),
     reasoning: m.reasoningEfforts ? [...m.reasoningEfforts] : null,
     open: true,
+    ...(m.hidden ? { hidden: true } : {}),
   }))
 }
 
@@ -87,6 +90,7 @@ export function modelsFromRows(rows: ModelDraftRow[]): { models: ProviderModel[]
       ...(maxTokens ? { maxTokens } : {}),
       input: row.image ? ['text', 'image'] : ['text'],
       ...(row.reasoning ? { reasoningEfforts: PROVIDER_REASONING_LEVELS.filter(l => row.reasoning!.includes(l)) } : {}),
+      ...(row.hidden ? { hidden: true } : {}),
     })
   }
   return { models, problems }

@@ -436,12 +436,17 @@ declare global {
         setKey: (id: string, apiKey: string) => Promise<ProviderResult<{ configured: boolean }>>;
         clearKey: (id: string) => Promise<ProviderResult<{ configured: boolean }>>;
         discover: (request: { providerId?: string; baseURL: string; api: import('./shared/providers/types').ProviderApi; apiKey?: string }) => Promise<ProviderResult<{ models: import('./shared/providers/types').DiscoveredModel[] }>>;
+        /** Live key check (one cheap authenticated request; the key is not stored). */
+        checkKey: (request: import('./shared/providers/keyCheck').KeyCheckRequest) => Promise<import('./shared/providers/keyCheck').KeyCheckResult>;
         getChatModel: (chatId: string) => Promise<import('./shared/providers/types').ChatModelBinding | null>;
         setChatModel: (binding: import('./shared/providers/types').ChatModelBinding) => Promise<ProviderResult<object>>;
         clearChatModel: (chatId: string) => Promise<ProviderResult<object>>;
         remoteSessionCandidates: () => Promise<Array<{ sessionId: string; remoteUrl: string; remoteModel: string }>>;
         importRemoteSession: (sessionId: string) => Promise<ProviderResult<{ provider: import('./shared/providers/types').ProviderView }>>;
         onChanged: (callback: () => void) => () => void;
+      };
+      clipboard: {
+        readText: () => Promise<string>;
       };
       settings: {
         get: (key: string) => Promise<string | null>;
@@ -459,6 +464,9 @@ declare global {
       app: {
         getPowerMode: () => Promise<import('./shared/powerMode').PowerModeStatus>;
         getVersion: () => Promise<string>;
+        getTotalMemoryGB: () => Promise<number>;
+        /** Chip, Mac model, memory and free disk (fail-soft). */
+        getHardware: () => Promise<import('./shared/hardware').HardwareInfo>;
         /** In-app updater state (see src/shared/appUpdate.ts). */
         getUpdateState: () => Promise<import('./shared/appUpdate').UpdateState>;
         onUpdateState: (

@@ -19,6 +19,7 @@ import {
 } from '../../../../shared/sessionGenerationDefaults'
 import { usesExactTypedPromptDiskCache, usesGlmNativeSsdPool } from '../../../../shared/detectedFamilyNames'
 import { resolveNativeMtpStartupMode } from '../../../../shared/nativeMtpLaunchArgs'
+import { RemoteAccountsCard } from '../accounts/RemoteAccountsCard'
 
 interface ModelInfo {
   path: string
@@ -80,12 +81,6 @@ export function CreateSession({ initialModelPath, onBack, onCreated, filterType:
   const modelDefaultsRequestRef = useRef(0)
   const nativeMtpModeEditedRef = useRef(false)
 
-  // Remote session fields
-  const [remoteUrl, setRemoteUrl] = useState('')
-  const [remoteApiKey, setRemoteApiKey] = useState('')
-  const [remoteModel, setRemoteModel] = useState('')
-  const [remoteOrganization, setRemoteOrganization] = useState('')
-  const [remoteConnecting, setRemoteConnecting] = useState(false)
 
   const appliedStepRecommendationRef = useRef<number | undefined>(undefined)
 
@@ -446,36 +441,6 @@ export function CreateSession({ initialModelPath, onBack, onCreated, filterType:
     }
   }
 
-  const handleLaunchRemote = async () => {
-    if (!remoteUrl.trim() || !remoteModel.trim()) return
-    setLaunchError(null)
-    setRemoteConnecting(true)
-
-    try {
-      const remoteResult = await window.api.sessions.createRemote({
-        remoteUrl: remoteUrl.trim(),
-        remoteApiKey: remoteApiKey.trim() || undefined,
-        remoteModel: remoteModel.trim(),
-        remoteOrganization: remoteOrganization.trim() || undefined
-      })
-      if (!remoteResult.success) {
-        throw new Error(remoteResult.error || t('layout.chatToolbar.remoteCreateFailed'))
-      }
-      const session = remoteResult.session
-
-      const result = await window.api.sessions.start(session.id)
-      if (result.success) {
-        onCreated(session.id)
-      } else {
-        setLaunchError(result.error || t('sessions.create.connectRemoteFailed'))
-        setRemoteConnecting(false)
-      }
-    } catch (error) {
-      setLaunchError((error as Error).message)
-      setRemoteConnecting(false)
-    }
-  }
-
   const handleBrowseDirectory = async () => {
     setDirError(null)
     const result = await window.api.models.browseDirectory()
@@ -558,72 +523,7 @@ export function CreateSession({ initialModelPath, onBack, onCreated, filterType:
           {sessionType === 'download' ? (
             <DownloadTab onDownloadComplete={() => { setSessionType('local'); scanModels() }} />
           ) : sessionType === 'remote' ? (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                {t('sessions.create.remoteHint')}
-              </p>
-
-              <div>
-                <label className="text-sm font-medium block mb-1">{t('sessions.create.apiBaseUrl')}</label>
-                <input
-                  type="url"
-                  placeholder={t('sessions.create.apiBaseUrlPlaceholder')}
-                  value={remoteUrl}
-                  onChange={(e) => setRemoteUrl(e.target.value)}
-                  className="w-full px-3 py-2 bg-background border border-input rounded text-sm"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  {t('sessions.create.apiBaseUrlHelp')}
-                </p>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium block mb-1">{t('sessions.create.modelName')}</label>
-                <input
-                  type="text"
-                  placeholder={t('sessions.create.modelNamePlaceholder')}
-                  value={remoteModel}
-                  onChange={(e) => setRemoteModel(e.target.value)}
-                  className="w-full px-3 py-2 bg-background border border-input rounded text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium block mb-1">{t('sessions.create.apiKey')}</label>
-                <input
-                  type="password"
-                  placeholder={t('sessions.create.apiKeyPlaceholder')}
-                  value={remoteApiKey}
-                  onChange={(e) => setRemoteApiKey(e.target.value)}
-                  className="w-full px-3 py-2 bg-background border border-input rounded text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium block mb-1">{t('sessions.create.organization')}</label>
-                <input
-                  type="text"
-                  placeholder={t('sessions.create.organizationPlaceholder')}
-                  value={remoteOrganization}
-                  onChange={(e) => setRemoteOrganization(e.target.value)}
-                  className="w-full px-3 py-2 bg-background border border-input rounded text-sm"
-                />
-              </div>
-
-              {launchError && (
-                <div className="p-3 bg-destructive/10 border border-destructive/30 rounded">
-                  <p className="text-sm text-destructive">{launchError}</p>
-                </div>
-              )}
-
-              <button
-                onClick={handleLaunchRemote}
-                disabled={remoteConnecting || !remoteUrl.trim() || !remoteModel.trim()}
-                className="px-6 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {remoteConnecting ? t('common.connecting') : t('common.connect')}
-              </button>
-            </div>
+            <RemoteAccountsCard />
           ) : (
             <>
               <span className="text-sm text-muted-foreground block mb-4">{t('sessions.create.localHint')}</span>

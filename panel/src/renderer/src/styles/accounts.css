@@ -1,0 +1,102 @@
+/*
+ * Accounts, Connect sheets and first-run setup.
+ * Motion: 220ms cubic-bezier(.2,.8,.2,1); nothing appears or moves without a
+ * transition; reduced motion keeps the fades and drops the movement.
+ */
+
+:root {
+  --ease-sheet: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-sheet: 220ms;
+}
+
+/* ── Sheet ─────────────────────────────────────────────────────────────── */
+
+.mlx-sheet-backdrop {
+  opacity: 0;
+  transition: opacity 200ms var(--ease-sheet);
+}
+.mlx-sheet-backdrop[data-state="open"] { opacity: 1; }
+
+.mlx-sheet {
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+  transition: opacity 200ms var(--ease-sheet), transform var(--dur-sheet) var(--ease-sheet);
+  will-change: transform, opacity;
+}
+.mlx-sheet[data-state="open"] { opacity: 1; transform: none; }
+
+/* ── Cross-fade stack: every state occupies the same cell ───────────────── */
+
+.mlx-xfade { display: grid; }
+.mlx-xfade > * {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity var(--dur-sheet) var(--ease-sheet), transform var(--dur-sheet) var(--ease-sheet);
+  pointer-events: none;
+}
+.mlx-xfade > [data-active="true"] { opacity: 1; transform: none; pointer-events: auto; }
+
+/* ── Onboarding steps: cross-fade with a 16px slide ─────────────────────── */
+
+.mlx-stage { position: relative; }
+.mlx-stage > .mlx-step {
+  position: absolute;
+  inset: 0;
+  transition: opacity var(--dur-sheet) var(--ease-sheet), transform var(--dur-sheet) var(--ease-sheet);
+}
+.mlx-step[data-phase="enter-forward"] { opacity: 0; transform: translateX(16px); }
+.mlx-step[data-phase="enter-back"] { opacity: 0; transform: translateX(-16px); }
+.mlx-step[data-phase="shown"] { opacity: 1; transform: none; }
+.mlx-step[data-phase="exit-forward"] { opacity: 0; transform: translateX(-16px); pointer-events: none; }
+.mlx-step[data-phase="exit-back"] { opacity: 0; transform: translateX(16px); pointer-events: none; }
+
+/* Step dots: the current one stretches. */
+.mlx-dot {
+  height: 6px;
+  width: 6px;
+  border-radius: 999px;
+  background: rgb(var(--muted-foreground) / 0.35);
+  transition: width var(--dur-sheet) var(--ease-sheet), background-color var(--dur-sheet) var(--ease-sheet);
+}
+.mlx-dot[data-active="true"] { width: 18px; background: rgb(var(--primary)); }
+
+/* ── Progress ──────────────────────────────────────────────────────────── */
+
+.mlx-progress {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgb(var(--muted-foreground) / 0.18);
+}
+.mlx-progress > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: rgb(var(--primary));
+  transition: width 400ms linear;
+}
+.mlx-progress[data-indeterminate="true"] > span {
+  width: 30% !important;
+  animation: mlx-progress-slide 1.2s var(--ease-sheet) infinite;
+}
+@keyframes mlx-progress-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+/* Width that follows its content (button labels that change). */
+.mlx-fit {
+  display: inline-grid;
+  transition: width var(--dur-sheet) var(--ease-sheet);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mlx-sheet,
+  .mlx-sheet[data-state="open"],
+  .mlx-xfade > *,
+  .mlx-step[data-phase] { transform: none !important; }
+  .mlx-progress > span { transition-duration: 1ms; }
+  .mlx-progress[data-indeterminate="true"] > span { animation: none; width: 100% !important; opacity: 0.4; }
+}
