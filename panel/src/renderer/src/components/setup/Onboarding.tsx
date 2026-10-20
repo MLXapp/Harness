@@ -208,7 +208,13 @@ function StepFrame({ title, subtitle, children }: { title: string; subtitle?: st
         <h2 className="text-[22px] font-bold leading-7">{title}</h2>
         {subtitle && <p className="mt-1 text-[13px] leading-[18px] text-muted-foreground">{subtitle}</p>}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-6">{children}</div>
+      {/* Content that scrolls under the footer fades out instead of being cut. */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto px-8 pb-6"
+        style={{ maskImage: 'linear-gradient(to bottom, black calc(100% - 28px), transparent)', WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 28px), transparent)' }}
+      >
+        {children}
+      </div>
     </div>
   )
 }
