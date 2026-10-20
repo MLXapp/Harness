@@ -15,6 +15,9 @@ declare global {
     expiresAt: number;
   }
 
+  /** Provider IPC replies: success with data, or a readable error. */
+  type ProviderResult<T> = ({ ok: true } & T) | { ok: false; error: string };
+
   interface Window {
     electron: ElectronAPI;
     api: {
@@ -423,6 +426,22 @@ declare global {
           category: string;
         }) => Promise<{ success: boolean }>;
         delete: (id: string) => Promise<{ success: boolean }>;
+      };
+      providers: {
+        catalog: () => Promise<Array<{ id: string; displayName: string; api: import('./shared/providers/types').ProviderApi; baseURL: string; note?: string }>>;
+        list: () => Promise<ProviderResult<{ providers: import('./shared/providers/types').ProviderView[]; localServers: import('./shared/providers/types').ProviderView[] }>>;
+        probeLocal: () => Promise<ProviderResult<{ localServers: import('./shared/providers/types').ProviderView[] }>>;
+        save: (draft: import('./shared/providers/types').ProviderDraft, apiKey?: string) => Promise<ProviderResult<{ provider: import('./shared/providers/types').ProviderView }>>;
+        delete: (id: string) => Promise<ProviderResult<object>>;
+        setKey: (id: string, apiKey: string) => Promise<ProviderResult<{ configured: boolean }>>;
+        clearKey: (id: string) => Promise<ProviderResult<{ configured: boolean }>>;
+        discover: (request: { providerId?: string; baseURL: string; api: import('./shared/providers/types').ProviderApi; apiKey?: string }) => Promise<ProviderResult<{ models: import('./shared/providers/types').DiscoveredModel[] }>>;
+        getChatModel: (chatId: string) => Promise<import('./shared/providers/types').ChatModelBinding | null>;
+        setChatModel: (binding: import('./shared/providers/types').ChatModelBinding) => Promise<ProviderResult<object>>;
+        clearChatModel: (chatId: string) => Promise<ProviderResult<object>>;
+        remoteSessionCandidates: () => Promise<Array<{ sessionId: string; remoteUrl: string; remoteModel: string }>>;
+        importRemoteSession: (sessionId: string) => Promise<ProviderResult<{ provider: import('./shared/providers/types').ProviderView }>>;
+        onChanged: (callback: () => void) => () => void;
       };
       settings: {
         get: (key: string) => Promise<string | null>;
