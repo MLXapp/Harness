@@ -504,6 +504,19 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
       setAskUserInput('')
     }
 
+    // Automatic context compaction finished (or failed) during a turn.
+    const handleCompaction = (data: any) => {
+      if (data.chatId !== chatId || !isCurrentChat()) return
+      if (data.phase === 'done') {
+        showToast('info', t('chat.interface.toast.compactedTitle'), t('chat.interface.toast.compactedBody', {
+          before: Number(data.beforeTokens || 0).toLocaleString(),
+          after: Number(data.afterTokens || 0).toLocaleString(),
+        }))
+      } else if (data.phase === 'failed') {
+        showToast('warning', t('chat.interface.toast.compactFailedTitle'), String(data.error || ''))
+      }
+    }
+
     // Store individual cleanup functions (avoids removeAllListeners race conditions)
     const cleanupTyping = window.api.chat.onTyping(handleTyping)
     const cleanupStream = window.api.chat.onStream(handleStream)
@@ -512,6 +525,8 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
     const cleanupAnswerPass = window.api.chat.onAnswerPass(handleAnswerPass)
     const cleanupToolStatus = window.api.chat.onToolStatus(handleToolStatus)
     const cleanupAskUser = window.api.chat.onAskUser(handleAskUser)
+    // Optional so an older preload (or a test double) without it still mounts.
+    const cleanupCompaction = window.api.chat.onCompaction?.(handleCompaction) ?? (() => {})
 
     return () => {
       disposed = true
@@ -525,6 +540,7 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
       cleanupAnswerPass()
       cleanupToolStatus()
       cleanupAskUser()
+      cleanupCompaction()
       setReasoningMap({})
       setReasoningSegmentMap({})
       setReasoningDoneMap({})
@@ -557,8 +573,41 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
     setAskUserQuestion(null)
   }
 
+  // /compact: summarize the older part of this conversation now (the same
+  // checkpoint the agent writes automatically at 80% of the context window).
+  const handleCompact = async () => {
+    if (!chatId) return
+    if (!sessionEndpoint && sessionId) {
+      showToast('error', t('chat.interface.toast.modelNotRunningTitle'), t('chat.interface.toast.modelNotRunningBody'))
+      return
+    }
+    setLoading(true)
+    showToast('info', t('chat.interface.toast.compactingTitle'))
+    try {
+      const result = await window.api.chat.compact(chatId, sessionEndpoint)
+      if (!result?.success) {
+        showToast('error', t('chat.interface.toast.compactFailedTitle'), result?.error || '')
+      } else if (!result.compacted) {
+        showToast('info', t('chat.interface.toast.compactNothingTitle'), t('chat.interface.toast.compactNothingBody'))
+      } else {
+        showToast('success', t('chat.interface.toast.compactedTitle'), t('chat.interface.toast.compactedBody', {
+          before: Number(result.beforeTokens || 0).toLocaleString(),
+          after: Number(result.afterTokens || 0).toLocaleString(),
+        }))
+      }
+    } catch (error: any) {
+      showToast('error', t('chat.interface.toast.compactFailedTitle'), formatChatSendErrorMessage(error, t))
+    } finally {
+      if (chatIdRef.current === chatId) setLoading(false)
+    }
+  }
+
   const handleSend = async (content: string, attachments?: MediaAttachment[]) => {
     if (!chatId || (!content.trim() && (!attachments || attachments.length === 0))) return
+    if (content.trim() === '/compact' && (!attachments || attachments.length === 0)) {
+      await handleCompact()
+      return
+    }
 
     // Guard: don't send if model isn't running (prevents fallback to wrong endpoint)
     if (!sessionEndpoint && sessionId) {

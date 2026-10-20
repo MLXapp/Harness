@@ -1,0 +1,406 @@
+/**
+ * Drives the real chat:sendMessage / chat:compact IPC handlers against a fake
+ * OpenAI-compatible engine on 127.0.0.1 (no internet). Electron, SQLite and
+ * the session manager are replaced by small in-memory doubles; everything in
+ * src/main/ipc/chat.ts and src/main/agent/* runs for real.
+ */
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const h = vi.hoisted(() => {
+  const handlers = new Map<string, (...args: any[]) => any>()
+  const state = {
+    userData: '',
+    port: 0,
+    maxPromptTokens: 4096,
+    overrides: {} as Record<string, any>,
+    messages: [] as any[],
+    agentState: new Map<string, { compactionJson: string | null; todosJson: string | null }>(),
+    events: [] as Array<[string, any]>,
+  }
+  return { handlers, state }
+})
+
+vi.mock('electron', () => ({
+  ipcMain: {
+    handle: (channel: string, fn: (...args: any[]) => any) => h.handlers.set(channel, fn),
+    on: () => undefined,
+  },
+  BrowserWindow: class {},
+  net: { fetch: (...args: any[]) => (globalThis.fetch as any)(...args) },
+  app: { getPath: () => h.state.userData },
+  clipboard: { readText: () => '', writeText: () => undefined },
+}))
+
+vi.mock('../src/main/database', () => {
+  const chat = { id: 'chat-1', title: 't', modelPath: '/models/test', modelId: 'test-model', createdAt: 0, updatedAt: 0 }
+  const session = () => ({
+    id: 'sess-1', status: 'running', host: '127.0.0.1', port: h.state.port, type: 'local',
+    modelPath: '/models/test', config: JSON.stringify({}),
+  })
+  const agent = (id: string) => h.state.agentState.get(id) ?? { compactionJson: null, todosJson: null }
+  return {
+    db: {
+      getChat: (id: string) => (id === chat.id ? chat : undefined),
+      getMessages: () => [...h.state.messages].sort((a, b) => a.timestamp - b.timestamp).map(m => ({ ...m })),
+      addMessage: (m: any) => {
+        const i = h.state.messages.findIndex(x => x.id === m.id)
+        if (i >= 0) h.state.messages[i] = { ...m }
+        else h.state.messages.push({ ...m })
+      },
+      deleteMessage: (id: string) => { h.state.messages = h.state.messages.filter(m => m.id !== id) },
+      updateMessageContent: () => undefined,
+      updateMessageGenerationRecord: () => undefined,
+      getChatOverrides: () => ({ ...h.state.overrides }),
+      getSetting: () => undefined,
+      getSession: () => session(),
+      getChatAgentState: (id: string) => agent(id),
+      setChatCompactionState: (id: string, json: string | null) => h.state.agentState.set(id, { ...agent(id), compactionJson: json }),
+      setChatTodos: (id: string, json: string | null) => h.state.agentState.set(id, { ...agent(id), todosJson: json }),
+      deleteChat: () => undefined,
+    },
+  }
+})
+
+vi.mock('../src/main/sessions', () => {
+  const session = () => ({
+    id: 'sess-1', status: 'running', host: '127.0.0.1', port: h.state.port, type: 'local',
+    modelPath: '/models/test', config: JSON.stringify({}),
+  })
+  return {
+    sessionManager: {
+      getSessionByModelPath: () => session(),
+      getSessions: () => [session()],
+      detect: async () => [],
+      touchSession: () => undefined,
+      getLastHealthyAt: () => Date.now(),
+      pushLog: () => undefined,
+      emit: () => undefined,
+      wakeSession: async () => ({ success: true }),
+      waitForSessionLifecycleSettled: async () => 'running',
+    },
+    resolveUrl: async (url: string) => url,
+    connectHost: (host: string) => host,
+  }
+})
+
+vi.mock('../src/main/ipc/models', () => ({
+  readDetectedModelConfig: async () => ({ family: 'qwen3', maxContextLength: 131072 }),
+  readGenerationDefaults: async () => ({}),
+}))
+vi.mock('../src/main/ipc/utils', () => ({ getAuthHeaders: () => ({}) }))
+
+// ── Fake engine ─────────────────────────────────────────────────────────────
+
+type Reply =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; calls: Array<{ id: string; name: string; args: Record<string, unknown> }> }
+  | { kind: 'error'; status: number; message: string }
+
+const requests: any[] = []
+let replies: Array<(body: any) => Reply> = []
+
+function sse(res: ServerResponse, chunks: unknown[]) {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+  for (const chunk of chunks) res.write(`data: ${JSON.stringify(chunk)}\n\n`)
+  res.write('data: [DONE]\n\n')
+  res.end()
+}
+
+function handle(req: IncomingMessage, res: ServerResponse) {
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ status: 'healthy', model_loaded: true, model_name: 'test-model', max_prompt_tokens: h.state.maxPromptTokens }))
+    return
+  }
+  let raw = ''
+  req.on('data', c => { raw += c })
+  req.on('end', () => {
+    const body = JSON.parse(raw || '{}')
+    requests.push(body)
+    const next = replies.shift()
+    if (!next) {
+      res.writeHead(500)
+      res.end('no scripted reply')
+      return
+    }
+    const reply = next(body)
+    if (reply.kind === 'error') {
+      res.writeHead(reply.status, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: { message: reply.message } }))
+      return
+    }
+    if (reply.kind === 'text') {
+      sse(res, [
+        { choices: [{ index: 0, delta: { role: 'assistant', content: reply.text } }] },
+        { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+        { choices: [], usage: { prompt_tokens: 100, completion_tokens: 5 } },
+      ])
+      return
+    }
+    sse(res, [
+      {
+        choices: [{
+          index: 0,
+          delta: {
+            role: 'assistant',
+            tool_calls: reply.calls.map((c, index) => ({
+              index, id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) },
+            })),
+          },
+        }],
+      },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+    ])
+  })
+}
+
+const SUMMARY = '## Primary Request and Intent\n- keep going\n## Key Technical Concepts\n- (none)\n## Files and Code\n- (none)\n## Errors and Fixes\n- (none)\n## Pending Jobs\n- (none)\n## Current Work\n- (none)\n## Next Step\n- (none)\n## Critical Context\n- (none)'
+
+let server: Server
+let workDir: string
+
+function seedHistory(pairs: number, chars = 4000) {
+  h.state.messages = []
+  let t = 1000
+  for (let i = 0; i < pairs; i++) {
+    h.state.messages.push({ id: `u${i}`, chatId: 'chat-1', role: 'user', content: `question ${i} ${'q'.repeat(chars)}`, timestamp: t++ })
+    h.state.messages.push({ id: `a${i}`, chatId: 'chat-1', role: 'assistant', content: `answer ${i} ${'a'.repeat(chars)}`, timestamp: t++ })
+  }
+}
+
+const isSummaryRequest = (body: any) =>
+  typeof body.messages?.at(-1)?.content === 'string' && body.messages.at(-1).content.includes('compaction engine')
+
+let send: (content: string) => Promise<any>
+
+beforeAll(async () => {
+  h.state.userData = mkdtempSync(join(tmpdir(), 'mlx-userdata-'))
+  server = createServer(handle)
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()))
+  h.state.port = (server.address() as any).port
+  const { registerChatHandlers } = await import('../src/main/ipc/chat')
+  registerChatHandlers(() => ({
+    isDestroyed: () => false,
+    webContents: { send: (channel: string, data: any) => h.state.events.push([channel, data]) },
+  }) as any)
+  send = (content: string) =>
+    h.handlers.get('chat:sendMessage')!({}, 'chat-1', content, { host: '127.0.0.1', port: h.state.port })
+})
+
+afterAll(() => new Promise<void>(resolve => server.close(() => resolve())))
+
+beforeEach(() => {
+  requests.length = 0
+  replies = []
+  h.state.events = []
+  h.state.agentState.clear()
+  workDir = mkdtempSync(join(tmpdir(), 'mlx-agent-work-'))
+  h.state.overrides = { wireApi: 'completions', builtinToolsEnabled: true, workingDirectory: workDir }
+  h.state.maxPromptTokens = 4096
+})
+
+describe('automatic compaction in the chat loop', () => {
+  it('compacts at 80% before the request, with a cache-aligned summary call, and persists the checkpoint', async () => {
+    seedHistory(4) // ~9k estimated tokens against a 4,096-token window
+    replies = [() => ({ kind: 'text', text: SUMMARY }), () => ({ kind: 'text', text: 'Final answer.' })]
+
+    const result = await send('next question')
+    expect(result.content).toBe('Final answer.')
+    expect(requests).toHaveLength(2)
+
+    const [summary, main] = requests
+    expect(isSummaryRequest(summary)).toBe(true)
+    // Same model, same tools in the same order, same system prompt.
+    expect(summary.model).toBe(main.model)
+    expect(summary.tools.map((t: any) => t.function.name)).toEqual(main.tools.map((t: any) => t.function.name))
+    expect(summary.messages[0]).toEqual(main.messages[0])
+    expect(summary.messages[0].role).toBe('system')
+    // The summary request replays the original history (a prefix of what the
+    // un-compacted request would have been) and appends the instruction last.
+    expect(summary.messages[1].content.startsWith('question 0')).toBe(true)
+    expect(summary.tool_choice).toBeUndefined()
+    expect(summary.max_tokens).toBeGreaterThan(0)
+
+    // Main request: system, checkpoint, recent tail, new user message.
+    expect(main.messages[1].role).toBe('user')
+    expect(main.messages[1].content).toContain('<compacted-summary>')
+    expect(main.messages[1].content).toContain('## Primary Request and Intent')
+    expect(main.messages.at(-1).content).toBe('next question')
+    expect(JSON.stringify(main.messages)).not.toContain('question 0 ')
+
+    const state = JSON.parse(h.state.agentState.get('chat-1')!.compactionJson!)
+    expect(state.summary).toContain('## Next Step')
+    expect(state.throughMessageId).toMatch(/^[ua]\d$/)
+    expect(h.state.events.some(([ch, d]) => ch === 'chat:compaction' && d.phase === 'done')).toBe(true)
+
+    // Next turn replays the checkpoint instead of the covered rows.
+    replies = [() => ({ kind: 'text', text: 'Second answer.' })]
+    requests.length = 0
+    await send('and then?')
+    expect(requests).toHaveLength(1)
+    expect(requests[0].messages[1].content).toContain('<compacted-summary>')
+    expect(JSON.stringify(requests[0].messages)).not.toContain('question 0 ')
+    expect(requests[0].messages.at(-1).content).toBe('and then?')
+  })
+
+  it('compacts once and retries when the engine says the prompt is too long', async () => {
+    h.state.maxPromptTokens = 0 // window from the model config (131k): no threshold trigger
+    seedHistory(3, 2000)
+    replies = [
+      () => ({ kind: 'error', status: 400, message: 'prompt_too_long: 9000 tokens exceeds the limit' }),
+      () => ({ kind: 'text', text: SUMMARY }),
+      () => ({ kind: 'text', text: 'Recovered.' }),
+    ]
+    const result = await send('go')
+    expect(result.content).toBe('Recovered.')
+    expect(requests).toHaveLength(3)
+    expect(isSummaryRequest(requests[1])).toBe(true)
+    expect(requests[2].messages[1].content).toContain('<compacted-summary>')
+  })
+
+  it('keeps the full history when the summary is unusable, and still answers', async () => {
+    seedHistory(4)
+    replies = [() => ({ kind: 'text', text: '' }), () => ({ kind: 'text', text: 'Answer without compaction.' })]
+    const result = await send('hi')
+    expect(result.content).toBe('Answer without compaction.')
+    expect(JSON.stringify(requests[1].messages)).toContain('question 0 ')
+    expect(h.state.agentState.get('chat-1')?.compactionJson ?? null).toBeNull()
+    expect(h.state.events.some(([ch, d]) => ch === 'chat:compaction' && d.phase === 'failed')).toBe(true)
+  })
+})
+
+describe('compaction inside a tool loop', () => {
+  it('compacts between tool rounds and still persists every tool call of the turn', async () => {
+    h.state.maxPromptTokens = 16000
+    h.state.messages = []
+    h.state.overrides = { ...h.state.overrides, toolResultMaxChars: 40000 }
+    writeFileSync(join(workDir, 'big.log'), 'start\n' + 'x'.repeat(60_000) + '\nTHE END\n')
+    replies = [
+      () => ({ kind: 'tool', calls: [{ id: 'c1', name: 'run_command', args: { command: 'cat big.log' } }] }),
+      () => ({ kind: 'tool', calls: [{ id: 'c2', name: 'run_command', args: { command: 'cat big.log | head -c 70000' } }] }),
+      () => ({ kind: 'text', text: SUMMARY }),
+      () => ({ kind: 'text', text: 'Both logs read.' }),
+    ]
+    const result = await send('read the logs')
+    expect(result.content).toBe('Both logs read.')
+    expect(requests).toHaveLength(4)
+    expect(isSummaryRequest(requests[2])).toBe(true)
+    const final = requests[3].messages
+    expect(final[1].content).toContain('<compacted-summary>')
+    // c1 was summarized; c2 and its result stay verbatim and paired.
+    expect(final.some((m: any) => m.tool_call_id === 'c1')).toBe(false)
+    expect(final.some((m: any) => m.tool_call_id === 'c2')).toBe(true)
+    expect(final.some((m: any) => m.tool_calls?.[0]?.id === 'c2')).toBe(true)
+    // The persisted assistant row still records the whole turn.
+    const row = h.state.messages.find(m => m.id === result.id)
+    expect(JSON.parse(row.toolCallsOaiJson).map((c: any) => c.id)).toEqual(['c1', 'c2'])
+    expect(JSON.parse(row.toolResultsOaiJson).map((c: any) => c.tool_call_id)).toEqual(['c1', 'c2'])
+  })
+
+  it('compacts and retries when a follow-up after a tool result is too long', async () => {
+    h.state.maxPromptTokens = 0
+    seedHistory(3, 2000)
+    replies = [
+      () => ({ kind: 'tool', calls: [{ id: 'd1', name: 'get_current_datetime', args: {} }] }),
+      () => ({ kind: 'error', status: 413, message: 'Request too large' }),
+      () => ({ kind: 'text', text: SUMMARY }),
+      () => ({ kind: 'text', text: 'It is late.' }),
+    ]
+    const result = await send('what time is it?')
+    expect(result.content).toBe('It is late.')
+    expect(isSummaryRequest(requests[2])).toBe(true)
+    expect(requests[3].messages.some((m: any) => m.tool_call_id === 'd1')).toBe(true)
+  })
+})
+
+describe('/compact', () => {
+  it('compacts on demand without adding a user turn', async () => {
+    h.state.maxPromptTokens = 0
+    seedHistory(3, 1500)
+    const before = h.state.messages.length
+    replies = [() => ({ kind: 'text', text: SUMMARY })]
+    const result = await h.handlers.get('chat:compact')!({}, 'chat-1', { host: '127.0.0.1', port: h.state.port })
+    expect(result).toMatchObject({ success: true, compacted: true })
+    expect(result.afterTokens).toBeLessThan(result.beforeTokens)
+    expect(h.state.messages).toHaveLength(before)
+    expect(isSummaryRequest(requests[0])).toBe(true)
+    expect(JSON.parse(h.state.agentState.get('chat-1')!.compactionJson!).throughMessageId).toBeTruthy()
+  })
+
+  it('reports nothing to compact on an empty chat', async () => {
+    h.state.messages = []
+    const result = await h.handlers.get('chat:compact')!({}, 'chat-1', { host: '127.0.0.1', port: h.state.port })
+    expect(result).toMatchObject({ success: true, compacted: false })
+    expect(requests).toHaveLength(0)
+  })
+})
+
+describe('tool loop guards', () => {
+  it('refuses an unread edit, prunes + spills a huge result, reminds on repeats, stores todos', async () => {
+    h.state.maxPromptTokens = 0
+    h.state.messages = []
+    writeFileSync(join(workDir, 'a.txt'), 'hello world\n')
+    writeFileSync(join(workDir, 'big.log'), 'start\n' + 'x'.repeat(60_000) + '\nTHE END\n')
+    const listCall = { id: 'l', name: 'list_directory', args: { path: '.' } }
+    replies = [
+      () => ({ kind: 'tool', calls: [{ id: 'e1', name: 'edit_file', args: { path: 'a.txt', search_text: 'hello', replacement_text: 'bye' } }] }),
+      () => ({ kind: 'tool', calls: [{ id: 'r1', name: 'read_file', args: { path: 'a.txt' } }] }),
+      () => ({ kind: 'tool', calls: [{ id: 'e2', name: 'edit_file', args: { path: 'a.txt', search_text: 'hello', replacement_text: 'bye' } }] }),
+      () => ({ kind: 'tool', calls: [{ id: 'c1', name: 'run_command', args: { command: 'cat big.log' } }] }),
+      () => ({ kind: 'tool', calls: [{ ...listCall, id: 'l1' }] }),
+      () => ({ kind: 'tool', calls: [{ ...listCall, id: 'l2' }, { ...listCall, id: 'l3' }] }),
+      () => ({ kind: 'tool', calls: [{ id: 't1', name: 'todo_write', args: { todos: [{ content: 'Edit a.txt', status: 'completed' }, { content: 'Report', status: 'in_progress' }] } }] }),
+      () => ({ kind: 'text', text: 'Done.' }),
+    ]
+    const result = await send('edit a.txt')
+    expect(result.content).toBe('Done.')
+    const toolResults = requests.at(-1).messages.filter((m: any) => m.role === 'tool')
+    const byId = Object.fromEntries(toolResults.map((m: any) => [m.tool_call_id, m.content]))
+
+    expect(byId.e1).toContain('has not been read in this session')
+    expect(readFileSync(join(workDir, 'a.txt'), 'utf8')).toBe('bye world\n')
+    expect(byId.e2).toContain('Edited a.txt')
+
+    expect(byId.c1).toContain('characters cut from the middle')
+    const spill = byId.c1.match(/saved at: (\S+\.txt)/)?.[1]
+    expect(spill).toBeTruthy()
+    expect(spill.startsWith(join(h.state.userData, 'agent-spill', 'chat-1'))).toBe(true)
+    expect(readFileSync(spill, 'utf8')).toContain('THE END')
+    expect(byId.c1.trimEnd().endsWith('THE END')).toBe(true)
+
+    // list_directory x3 with identical args: the 3rd carries the note.
+    expect(byId.l1).not.toContain('[Note:')
+    expect(byId.l3).toContain('[Note: this is call #3 of list_directory')
+
+    expect(byId.t1).toContain('Todo list updated (1/2 completed)')
+    expect(JSON.parse(h.state.agentState.get('chat-1')!.todosJson!)).toHaveLength(2)
+    expect(await h.handlers.get('chat:getTodos')!({}, 'chat-1')).toHaveLength(2)
+  })
+
+  it('offers only the Lean tool set when the preset is Lean', async () => {
+    h.state.maxPromptTokens = 0
+    h.state.messages = []
+    h.state.overrides = { ...h.state.overrides, toolPreset: 'lean' }
+    replies = [() => ({ kind: 'text', text: 'ok' })]
+    await send('hello')
+    expect(requests[0].tools.map((t: any) => t.function.name)).toEqual([
+      'read_file', 'write_file', 'edit_file', 'list_directory', 'search_files', 'run_command', 'ask_user',
+    ])
+    expect(requests[0].messages[0].content).toContain('Tools: read_file, write_file, edit_file')
+  })
+
+  it('appends AGENTS.md from the working directory to the system prompt', async () => {
+    h.state.maxPromptTokens = 0
+    h.state.messages = []
+    writeFileSync(join(workDir, 'AGENTS.md'), 'Always run the tests with npm test.')
+    replies = [() => ({ kind: 'text', text: 'ok' })]
+    await send('hello')
+    expect(requests[0].messages[0].role).toBe('system')
+    expect(requests[0].messages[0].content).toContain('# Project instructions')
+    expect(requests[0].messages[0].content).toContain('Always run the tests with npm test.')
+  })
+})

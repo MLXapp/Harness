@@ -360,7 +360,13 @@
         "failedToStart": "起動に失敗しました",
         "connectionLost": "サーバーとの接続が失われました。モデルサーバーがクラッシュまたは停止した可能性があります。セッションを再起動してみてください。",
         "regenerateFailedTitle": "再生成に失敗しました",
-        "regenerateFailedBody": "前の応答を置き換えられませんでした。"
+        "regenerateFailedBody": "前の応答を置き換えられませんでした。",
+        "compactingTitle": "会話を圧縮しています…",
+        "compactedTitle": "コンテキストを圧縮しました",
+        "compactedBody": "約 {before} → {after} トークン。古いメッセージは要約され、最近のメッセージはそのまま残っています。",
+        "compactNothingTitle": "まだ圧縮するものはありません",
+        "compactNothingBody": "会話はまだ短いため、すべてそのまま保持できます。",
+        "compactFailedTitle": "圧縮に失敗しました"
       }
     },
     "quickStart": {

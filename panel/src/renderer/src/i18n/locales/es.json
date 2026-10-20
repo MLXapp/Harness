@@ -360,7 +360,13 @@
         "failedToStart": "No se pudo iniciar",
         "connectionLost": "Se perdió la conexión con el servidor. El servidor del modelo puede haberse bloqueado o detenido. Intenta reiniciar la sesión.",
         "regenerateFailedTitle": "Error al regenerar",
-        "regenerateFailedBody": "No se pudo reemplazar la respuesta anterior."
+        "regenerateFailedBody": "No se pudo reemplazar la respuesta anterior.",
+        "compactingTitle": "Compactando la conversación…",
+        "compactedTitle": "Contexto compactado",
+        "compactedBody": "Unos {before} → {after} tokens. Los mensajes antiguos se resumieron; los recientes se mantienen tal cual.",
+        "compactNothingTitle": "Todavía no hay nada que compactar",
+        "compactNothingBody": "La conversación aún es lo bastante corta para conservarla completa.",
+        "compactFailedTitle": "No se pudo compactar"
       }
     },
     "quickStart": {

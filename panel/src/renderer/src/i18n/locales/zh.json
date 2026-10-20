@@ -360,7 +360,13 @@
         "failedToStart": "启动失败",
         "connectionLost": "与服务器的连接已断开。模型服务器可能已崩溃或停止。请尝试重启会话。",
         "regenerateFailedTitle": "重新生成失败",
-        "regenerateFailedBody": "无法替换上一个回复。"
+        "regenerateFailedBody": "无法替换上一个回复。",
+        "compactingTitle": "正在压缩对话…",
+        "compactedTitle": "上下文已压缩",
+        "compactedBody": "约 {before} → {after} 个 token。较早的消息已被总结，最近的消息保持原样。",
+        "compactNothingTitle": "暂时无需压缩",
+        "compactNothingBody": "对话仍然足够短，可以完整保留。",
+        "compactFailedTitle": "压缩失败"
       }
     },
     "quickStart": {

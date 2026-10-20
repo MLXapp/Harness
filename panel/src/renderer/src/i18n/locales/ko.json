@@ -360,7 +360,13 @@
         "failedToStart": "시작 실패",
         "connectionLost": "서버 연결이 끊어졌습니다. 모델 서버가 중단되었거나 중지되었을 수 있습니다. 세션을 다시 시작해 보세요.",
         "regenerateFailedTitle": "재생성 실패",
-        "regenerateFailedBody": "이전 응답을 교체할 수 없습니다."
+        "regenerateFailedBody": "이전 응답을 교체할 수 없습니다.",
+        "compactingTitle": "대화를 압축하는 중…",
+        "compactedTitle": "컨텍스트 압축됨",
+        "compactedBody": "약 {before} → {after} 토큰. 이전 메시지는 요약되었고 최근 메시지는 그대로 유지됩니다.",
+        "compactNothingTitle": "아직 압축할 내용이 없습니다",
+        "compactNothingBody": "대화가 아직 짧아 전체를 그대로 유지할 수 있습니다.",
+        "compactFailedTitle": "압축 실패"
       }
     },
     "quickStart": {

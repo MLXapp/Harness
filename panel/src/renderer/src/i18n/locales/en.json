@@ -360,7 +360,13 @@
         "failedToStart": "Failed to start",
         "connectionLost": "Server connection lost. The model server may have crashed or stopped. Try restarting the session.",
         "regenerateFailedTitle": "Regenerate failed",
-        "regenerateFailedBody": "Could not replace the previous response."
+        "regenerateFailedBody": "Could not replace the previous response.",
+        "compactingTitle": "Compacting the conversation…",
+        "compactedTitle": "Context compacted",
+        "compactedBody": "About {before} → {after} tokens. Older messages were summarized; recent ones are kept as they are.",
+        "compactNothingTitle": "Nothing to compact yet",
+        "compactNothingBody": "The conversation is still short enough to keep in full.",
+        "compactFailedTitle": "Compaction failed"
       }
     },
     "quickStart": {
