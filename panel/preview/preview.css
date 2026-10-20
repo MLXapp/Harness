@@ -1,0 +1,22 @@
+/*
+ * Preview-only. The app's type is SF Pro via the system stack (-apple-system),
+ * which only exists on macOS. Off a Mac, map the SF Pro names in that stack to
+ * Inter (closest open match) when Inter is installed locally, so screenshots on
+ * Linux keep SF-like metrics instead of falling to DejaVu Sans. On a Mac
+ * -apple-system matches first and these rules never apply.
+ */
+@font-face { font-family: 'SF Pro Text'; font-weight: 100 299; src: local('Inter Light'), local('Inter-Light'); }
+@font-face { font-family: 'SF Pro Text'; font-weight: 300 449; src: local('Inter'), local('Inter Regular'), local('Inter-Regular'); }
+@font-face { font-family: 'SF Pro Text'; font-weight: 450 549; src: local('Inter Medium'), local('Inter-Medium'); }
+@font-face { font-family: 'SF Pro Text'; font-weight: 550 649; src: local('Inter SemiBold'), local('Inter-SemiBold'); }
+@font-face { font-family: 'SF Pro Text'; font-weight: 650 749; src: local('Inter Bold'), local('Inter-Bold'); }
+@font-face { font-family: 'SF Pro Text'; font-weight: 750 1000; src: local('Inter ExtraBold'), local('Inter-ExtraBold'); }
+@font-face { font-family: 'SF Pro Text'; font-style: italic; font-weight: 300 549; src: local('Inter Italic'), local('Inter-Italic'); }
+@font-face { font-family: 'SF Pro Text'; font-style: italic; font-weight: 550 1000; src: local('Inter SemiBold Italic'), local('Inter-SemiBoldItalic'); }
+
+@font-face { font-family: 'SF Pro Display'; font-weight: 100 449; src: local('Inter Display'), local('InterDisplay-Regular'), local('Inter'); }
+@font-face { font-family: 'SF Pro Display'; font-weight: 450 549; src: local('Inter Display Medium'), local('InterDisplay-Medium'), local('Inter Medium'); }
+@font-face { font-family: 'SF Pro Display'; font-weight: 550 649; src: local('Inter Display SemiBold'), local('InterDisplay-SemiBold'), local('Inter SemiBold'); }
+@font-face { font-family: 'SF Pro Display'; font-weight: 650 1000; src: local('Inter Display Bold'), local('InterDisplay-Bold'), local('Inter Bold'); }
+
+@font-face { font-family: 'SF Mono'; src: local('SF Mono'), local('Menlo'), local('DejaVu Sans Mono'), local('DejaVuSansMono'); }
