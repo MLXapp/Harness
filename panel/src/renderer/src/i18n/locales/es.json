@@ -2292,7 +2292,7 @@
         "failed": "Algo ha fallado y no se ha cambiado nada. Puedes descargar MLX Node en mlx.app."
       },
       "quitAgentTitle": "¿Salir de MLX Studio?",
-      "quitAgentChats": "El agente de código sigue trabajando en: {names}.",
+      "quitAgentChats": "Todavía trabajando en: {names}.",
       "quitAgentProcesses": "Procesos en segundo plano iniciados por el agente: {count}.",
       "quitAgentDetail": "Salir detiene este trabajo. Si cierras solo la ventana, sigue en marcha.",
       "quitAgentQuit": "Salir",

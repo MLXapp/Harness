@@ -5,7 +5,9 @@ import { join } from 'path'
 import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerSessionHandlers } from './ipc/sessions'
-import { registerChatHandlers } from './ipc/chat'
+import { registerChatHandlers, activeAgentChatIds, abortAllChatRequests } from './ipc/chat'
+import { runningSpawnedProcessCount, killSpawnedProcesses } from './tools/executor'
+import { QuitConfirmation } from './agent/quitConfirmation'
 import { registerModelHandlers, killActiveDownload } from './ipc/models'
 import { registerEngineHandlers } from './ipc/engine'
 import { registerAudioHandlers } from './ipc/audio'
@@ -56,6 +58,21 @@ let mainWindow: BrowserWindow | null = null
 let downloadWindow: BrowserWindow | null = null
 let handlersRegistered = false
 let isQuitting = false
+// Set once the user confirmed quitting over running agent work (or nothing
+// was running); a quit that must not ask (SIGTERM) sets it up front.
+let quitConfirmed = false
+const quitConfirmation = new QuitConfirmation({
+  inspect: () => ({
+    chats: activeAgentChatIds().map(id => {
+      try { return db.getChat(id)?.title || '' } catch { return '' }
+    }),
+    processes: runningSpawnedProcessCount(),
+  }),
+  t: tMain,
+  // No owner window: a hidden window stays hidden and the box still shows.
+  show: options => dialog.showMessageBox(options),
+  focus: () => { if (process.platform === 'darwin') app.focus({ steal: true }) },
+})
 const processManager = new ProcessManager()
 const allowSecondaryInstance = shouldAllowSecondaryInstance(process.argv, process.env)
 const proofOwnedEngineLifecycle = shouldUseProofOwnedEngineLifecycle(
@@ -611,6 +628,30 @@ app.whenReady().then(async () => {
 // Stop owned engines on quit; slow persistence offers an explicit force choice.
 app.on('before-quit', async (e) => {
   if (isQuitting) { e.preventDefault(); return }
+  // Closing the window keeps an agent turn running; quitting stops it, so ask
+  // first when something would be interrupted (named in the dialog).
+  if (!quitConfirmed) {
+    e.preventDefault()
+    const proceed = await quitConfirmation.confirm()
+    if (!proceed) {
+      // "Restart to update" stays staged for the next normal quit.
+      cancelUpdateRelaunch()
+      // If the quit came from closing the last window (non-macOS), bring it back.
+      if (!mainWindow || mainWindow.isDestroyed()) createWindow()
+      return
+    }
+    quitConfirmed = true
+    app.quit()
+    return
+  }
+  // Let interrupted turns save what they have, and stop the agent's
+  // background processes, before the database closes.
+  try {
+    abortAllChatRequests()
+    killSpawnedProcesses()
+  } catch (err) {
+    console.error('[QUIT] Error stopping agent work:', err)
+  }
   isQuitting = true
   e.preventDefault()
   // mlxstudio#84 part 2: snapshot zoom factor now so Cmd+/- changes (which
@@ -642,6 +683,7 @@ app.on('before-quit', async (e) => {
   } catch (err) {
     console.error('[QUIT] Error stopping processes:', err)
     isQuitting = false
+    quitConfirmed = false
     cancelUpdateRelaunch()
     sessionManager.startGlobalMonitor()
     // The app stays open, so restore everything the quit already stopped.
@@ -671,6 +713,7 @@ app.on('before-quit', async (e) => {
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, () => {
     console.log(`[QUIT] Received ${signal} — triggering clean shutdown`)
+    quitConfirmed = true  // a signal does not ask
     if (!isQuitting) app.quit()
   })
 }

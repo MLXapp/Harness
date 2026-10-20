@@ -247,6 +247,7 @@ declare global {
         abort: (chatId: string) => Promise<void>;
         isStreaming: (chatId: string) => Promise<boolean>;
         clearAllLocks: () => Promise<{ cleared: number }>;
+        clearStaleLocks: () => Promise<{ cleared: number; running?: number }>;
         getRecent: (limit?: number) => Promise<any[]>;
         onAskUser: (callback: (data: any) => void) => () => void;
         answerUser: (chatId: string, answer: string) => void;

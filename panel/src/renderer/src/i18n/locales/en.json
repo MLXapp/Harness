@@ -2292,7 +2292,7 @@
         "failed": "Something went wrong and nothing was changed. You can download MLX Node from mlx.app."
       },
       "quitAgentTitle": "Quit MLX Studio?",
-      "quitAgentChats": "The coding agent is still working in: {names}.",
+      "quitAgentChats": "Still working in: {names}.",
       "quitAgentProcesses": "Background processes started by the agent: {count}.",
       "quitAgentDetail": "Quitting stops this work. Closing the window instead keeps it running.",
       "quitAgentQuit": "Quit",

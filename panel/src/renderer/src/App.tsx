@@ -56,9 +56,12 @@ function App() {
       .finally(() => setCheckingSetup(false))
   }, [])
 
-  // Clear stale chat locks on mount
+  // Clear stale chat locks on mount. Only locks that can no longer finish:
+  // an agent turn that kept running while the window was closed (or across a
+  // reload) must not be stopped by the window coming back.
   useEffect(() => {
-    window.api.chat.clearAllLocks().catch((err) => console.error('Failed to clear chat locks:', err))
+    const clear = window.api.chat.clearStaleLocks ?? window.api.chat.clearAllLocks
+    clear().catch((err) => console.error('Failed to clear chat locks:', err))
   }, [])
 
   // Listen for navigation events from child components (e.g. toolbar "Add a model")
