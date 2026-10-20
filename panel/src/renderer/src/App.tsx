@@ -21,6 +21,8 @@ import { useAppState } from './contexts/AppStateContext'
 import { useSessionsContext } from './contexts/SessionsContext'
 import { ChatModeToolbar } from './components/layout/ChatModeToolbar'
 import { ModelProvidersPreference } from './components/settings/ModelProvidersPreference'
+import { groupPickerEntries } from '../../shared/providers/pickerGroups'
+import type { ChatModelBinding } from '../../shared/providers/types'
 import { ToolsDashboard } from './components/tools/ToolsDashboard'
 import { ModelInspector } from './components/tools/ModelInspector'
 import { ModelDoctor } from './components/tools/ModelDoctor'
@@ -164,6 +166,39 @@ function App() {
     }
   }, [sessions, openChat, dispatch])
 
+  /** A new chat on a provider model, local servers first; false when none is usable. */
+  const createProviderChat = useCallback(async (): Promise<boolean> => {
+    const api = window.api.providers
+    if (!api) return false
+    try {
+      let listed = await api.list()
+      if (listed.ok && listed.localServers.length === 0) {
+        const probed = await api.probeLocal()
+        if (probed.ok) listed = { ...listed, localServers: probed.localServers }
+      }
+      if (!listed.ok) return false
+      const groups = groupPickerEntries([], listed.localServers, listed.providers)
+      const pick = [...groups.localServers, ...groups.cloud][0]
+      const model = pick?.models[0]
+      if (!pick || !model) return false
+      const modelPath = `provider://${pick.provider.id}/${model.id}`
+      const result = await window.api.chat.create(
+        t('chat.quickStart.chatWithModel', { model: model.name || model.id }),
+        model.id,
+        undefined,
+        modelPath,
+      )
+      if (!result?.id) return false
+      const bound = await api.setChatModel({ chatId: result.id, providerId: pick.provider.id, modelId: model.id })
+      if (!bound.ok) return false
+      setMode('chat')
+      dispatch({ type: 'OPEN_CHAT', chatId: result.id, sessionId: '' })
+      return true
+    } catch {
+      return false
+    }
+  }, [dispatch, setMode, t])
+
   const handleNewChat = useCallback(async () => {
     setCreatingChatSession(false)
     // mlxstudio #60: when the user has explicitly switched to session A in
@@ -186,6 +221,7 @@ function App() {
     const target = (explicitUsable ? explicit : null) || running || explicit || sessions[0]
 
     if (!target) {
+      if (await createProviderChat()) return
       setMode('chat')
       setCreatingChatSession(true)
       return
@@ -201,7 +237,7 @@ function App() {
     if (result?.id) {
       openChat(result.id, target.id)
     }
-  }, [sessions, state.activeSessionId, setMode, dispatch, openChat, t])
+  }, [sessions, state.activeSessionId, setMode, dispatch, openChat, t, createProviderChat])
 
   useEffect(() => {
     // Restoring saved navigation must finish before acknowledging native menu
@@ -367,6 +403,27 @@ function ChatModeContent({ activeChatId, sessionEndpoint, sessionStatus, activeS
   onSessionChange: (sessionId: string) => void
 }) {
   const [overridesVersion, setOverridesVersion] = useState(0)
+  // The chat's provider model (Preferences → Models), when it uses one. Sends
+  // then go to that provider: no MLX session endpoint is involved.
+  const [providerBinding, setProviderBinding] = useState<ChatModelBinding | null>(null)
+  useEffect(() => {
+    let alive = true
+    setProviderBinding(null)
+    if (activeChatId && window.api.providers) {
+      window.api.providers.getChatModel(activeChatId)
+        .then(binding => { if (alive) setProviderBinding(binding) })
+        .catch(() => undefined)
+    }
+    return () => { alive = false }
+  }, [activeChatId])
+  const changeProviderBinding = useCallback(async (next: ChatModelBinding | null) => {
+    if (!activeChatId) return
+    const result = next
+      ? await window.api.providers.setChatModel(next)
+      : await window.api.providers.clearChatModel(activeChatId)
+    if (!result.ok) throw new Error(result.error)
+    setProviderBinding(next)
+  }, [activeChatId])
 
   if (!activeChatId) {
     return <ChatEmptyState onNewChat={onNewChat} />
@@ -379,15 +436,17 @@ function ChatModeContent({ activeChatId, sessionEndpoint, sessionStatus, activeS
         activeSessionId={activeSessionId}
         onSessionChange={onSessionChange}
         onOverridesChanged={() => setOverridesVersion(v => v + 1)}
+        providerBinding={providerBinding}
+        onProviderBindingChange={changeProviderBinding}
       />
       <SessionSsdPoolNotice session={ssdSession} />
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
         <ChatInterface
           chatId={activeChatId}
           onNewChat={onNewChat}
-          sessionEndpoint={sessionEndpoint}
-          sessionId={activeSessionId || undefined}
-          sessionStatus={sessionStatus}
+          sessionEndpoint={providerBinding ? undefined : sessionEndpoint}
+          sessionId={providerBinding ? undefined : activeSessionId || undefined}
+          sessionStatus={providerBinding ? 'running' : sessionStatus}
           overridesVersion={overridesVersion}
         />
       </div>
