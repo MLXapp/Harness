@@ -445,7 +445,7 @@ declare global {
       };
       /** Apple Dictation (macOS): `start` opens the system Dictation UI at the focused field. */
       dictation?: {
-        supported: boolean;
+        supported: () => boolean;
         start: () => Promise<{ ok: boolean; reason?: 'unsupported' }>;
       };
       settings: {

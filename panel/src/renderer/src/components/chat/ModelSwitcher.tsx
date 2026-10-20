@@ -15,6 +15,7 @@ import {
   featuredProviderModel,
   featuredReasoningLevels,
   selectableRows,
+  sessionName,
   type SwitcherFeaturedRow,
   type SwitcherProviderRow,
   type SwitcherRow,
@@ -119,9 +120,17 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
     })
   }, [probe])
 
-  // Start on the selected row; focus the search field once visible.
+  // Start on the selected row (opening its "More from …" group); focus the search field.
   useEffect(() => {
     if (!open) return
+    const holder = binding && groups.more.find(g => g.provider.id === binding.providerId && g.rows.some(r => r.model.id === binding.modelId))
+    if (holder && !expanded.has(holder.provider.id)) {
+      setExpanded(prev => new Set(prev).add(holder.provider.id))
+      const index = selectableRows(groups, new Set(expanded).add(holder.provider.id), false).findIndex(row => isSelected(row))
+      setActive(index >= 0 ? index : 0)
+      requestAnimationFrame(() => searchRef.current?.focus())
+      return
+    }
     const index = rows.findIndex(row => isSelected(row))
     setActive(index >= 0 ? index : 0)
     requestAnimationFrame(() => searchRef.current?.focus())
@@ -153,11 +162,15 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [chat, toggle])
 
-  // Keep the keyboard row in view.
+  // Keep the keyboard row in view (again once a "More from …" group has unfolded).
   useEffect(() => {
     if (!open) return
-    const el = listRef.current?.querySelector<HTMLElement>(`[data-row-index="${active}"]`)
-    el?.scrollIntoView({ block: 'nearest' })
+    const reveal = () => listRef.current
+      ?.querySelector<HTMLElement>(`[data-row-index="${active}"]`)
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    reveal()
+    const timer = window.setTimeout(reveal, 380)
+    return () => window.clearTimeout(timer)
   }, [active, open])
 
   // The pill's label width glides when the name changes or the composer narrows.
@@ -349,24 +362,26 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
           <div className="flex items-center gap-1.5">
             <span className="truncate text-[13px] font-medium text-foreground">{row.model.name}</span>
             {row.model.badge && (
-              <span className="flex-shrink-0 rounded-full bg-primary/12 px-1.5 py-px text-[11px] font-medium text-primary">
+              <span className="flex-shrink-0 rounded-full bg-primary/12 px-1.5 text-[11px] font-medium leading-[18px] text-primary">
                 {t(BADGE_KEYS[row.model.badge])}
               </span>
             )}
           </div>
-          <div className="truncate text-[12px] text-muted-foreground">
-            {row.model.blurb}
-            {row.via === 'wavespeed' ? ` · ${t('chat.switcher.viaWavespeed')}` : ''}
+          <div className="flex items-baseline gap-2 text-[12px] text-muted-foreground">
+            <span className="min-w-0 flex-1 truncate" title={row.model.blurb}>
+              {row.model.blurb}
+              {row.via === 'wavespeed' ? ` · ${t('chat.switcher.viaWavespeed')}` : ''}
+            </span>
+            {price && (
+              <span
+                className="flex-shrink-0 text-[11px] mlx-num"
+                title={t('chat.switcher.priceTitle', { input: `$${row.model.price!.input}`, output: `$${row.model.price!.output}` })}
+              >
+                {t('chat.switcher.from', { price })}
+              </span>
+            )}
           </div>
         </div>
-        {price && (
-          <span
-            className="flex-shrink-0 text-[11px] text-muted-foreground mlx-num"
-            title={t('chat.switcher.priceTitle', { input: `$${row.model.price!.input}`, output: `$${row.model.price!.output}` })}
-          >
-            {t('chat.switcher.from', { price })}
-          </span>
-        )}
         {selectedMark(selected)}
       </div>
     )
@@ -381,7 +396,7 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
   const renderSession = (row: SwitcherSessionRow<SessionSummary>) => {
     const { selected, ...props } = rowProps(row)
     const s = row.session
-    const name = s.modelName || s.modelPath.split('/').pop() || s.modelPath
+    const name = sessionName(s)
     const state = sessionState(s)
     const remote = s.type === 'remote'
     const running = s.status === 'running' || s.status === 'standby' || s.status === 'loading'
@@ -478,7 +493,8 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
           onKeyDown={onPopoverKey}
           role="dialog"
           aria-label={t('chat.switcher.title')}
-          className={`glass-strong absolute bottom-full left-0 z-40 mb-2 flex max-h-[440px] w-[340px] max-w-[calc(100vw-32px)] origin-bottom-left flex-col overflow-hidden rounded-2xl bg-popover/95 text-popover-foreground transition-[opacity,transform] duration-[160ms] ease-mlx ${
+          style={{ transitionDuration: `${POPOVER_MS}ms` }}
+          className={`absolute bottom-full left-0 z-40 mb-2 flex max-h-[440px] w-[340px] max-w-[calc(100vw-32px)] origin-bottom-left flex-col overflow-hidden rounded-2xl border border-border/80 bg-popover text-popover-foreground shadow-[0_2px_6px_var(--lg-depth),0_28px_60px_-24px_var(--shadow-deep)] transition-[opacity,transform] ease-mlx ${
             shown ? 'scale-100 opacity-100' : 'pointer-events-none scale-[0.98] opacity-0'
           }`}
           data-vmlx-surface="chat-model-switcher"
@@ -522,7 +538,7 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-[13px] font-medium text-foreground">{t('chat.switcher.connectAccount')}</span>
-                    <span className="block truncate text-[12px] text-muted-foreground">{t('chat.switcher.connectHint')}</span>
+                    <span className="block text-[12px] leading-snug text-muted-foreground">{t('chat.switcher.connectHint')}</span>
                   </span>
                 </button>
                 <div className="flex flex-wrap gap-1.5 px-2.5 pb-1 pt-1.5">
@@ -593,8 +609,8 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
 
           <Reveal open={!!levels && levels.length > 0}>
             {levels && levels.length > 0 && (
-              <div className="flex items-center gap-3 border-t border-border/70 px-3 py-2.5" data-vmlx-switcher-reasoning>
-                <span className="flex-shrink-0 text-[12px] font-medium text-muted-foreground">{t('chat.switcher.reasoning')}</span>
+              <div className="flex flex-col gap-1.5 border-t border-border/70 px-3 pb-3 pt-2" data-vmlx-switcher-reasoning>
+                <span className="text-[12px] font-medium text-muted-foreground">{t('chat.switcher.reasoning')}</span>
                 <ReasoningControl
                   levels={levels}
                   value={effort}
@@ -617,14 +633,16 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
               <SlidersHorizontal className="h-4 w-4" aria-hidden />
               {t('chat.switcher.manageModels')}
             </button>
-            <button
-              type="button"
-              onClick={() => onConnect()}
-              className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.07] hover:text-foreground"
-            >
-              <Plus className="h-4 w-4" aria-hidden />
-              {t('chat.switcher.connectAccount')}
-            </button>
+            {!groups.showConnect && (
+              <button
+                type="button"
+                onClick={() => onConnect()}
+                className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.07] hover:text-foreground"
+              >
+                <Plus className="h-4 w-4" aria-hidden />
+                {t('chat.switcher.connectAccount')}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -655,7 +673,7 @@ function ReasoningControl({ levels, value, defaultLevel, label, defaultLabel, la
       role="radiogroup"
       aria-label={label}
       onKeyDown={onKey}
-      className="relative grid h-7 min-w-0 flex-1 rounded-[9px] bg-foreground/[0.06] p-[2px]"
+      className="relative grid h-8 w-full min-w-0 rounded-[9px] bg-foreground/[0.06] p-[2px]"
       style={{ gridTemplateColumns: `repeat(${levels.length}, minmax(0, 1fr))` }}
     >
       <div

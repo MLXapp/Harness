@@ -765,7 +765,7 @@
     "voiceInput": {
       "title": "Entrada de voz",
       "apple": "Dictado de Apple",
-      "whisper": "Whisper (en este Mac)",
+      "whisper": "Whisper",
       "hint": "El dictado de Apple usa el dictado del sistema de macOS. Whisper graba y transcribe con un modelo en este Mac."
     }
   },

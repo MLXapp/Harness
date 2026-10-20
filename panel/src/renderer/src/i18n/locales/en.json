@@ -765,7 +765,7 @@
     "voiceInput": {
       "title": "Voice input",
       "apple": "Apple Dictation",
-      "whisper": "Whisper (on this Mac)",
+      "whisper": "Whisper",
       "hint": "Apple Dictation uses macOS system dictation. Whisper records and transcribes with a model on this Mac."
     }
   },

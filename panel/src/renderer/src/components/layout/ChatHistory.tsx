@@ -166,14 +166,14 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
     <div className="flex-1 overflow-y-auto">
       {/* vmlx#70: bulk-delete header — shown when there's at least one chat */}
       {chats.length > 0 && !searchQuery && (
-        <div className="px-3 pt-2 pb-1 flex items-center justify-between border-b border-border/40">
-          <span className="text-[11px] text-muted-foreground/70">
+        <div className="px-3 pt-2 pb-1 flex items-center justify-between gap-2 border-b border-border/40">
+          <span className="min-w-0 truncate text-[11px] text-muted-foreground/70" title={t('layout.chatHistory.chatCountHint', { n: chats.length })}>
             {t('layout.chatHistory.chatCountHint', { n: chats.length })}
           </span>
           <button
             type="button"
             onClick={handleClearAll}
-            className="text-[11px] text-destructive hover:text-destructive/80 hover:underline flex items-center gap-1"
+            className="flex-shrink-0 whitespace-nowrap text-[11px] text-destructive hover:text-destructive/80 hover:underline flex items-center gap-1"
             aria-label={t('layout.chatHistory.clearAllAria')}
             title={t('layout.chatHistory.clearAllTitle')}
           >

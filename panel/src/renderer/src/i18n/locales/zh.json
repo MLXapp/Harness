@@ -765,7 +765,7 @@
     "voiceInput": {
       "title": "语音输入",
       "apple": "Apple 听写",
-      "whisper": "Whisper（这台 Mac）",
+      "whisper": "Whisper",
       "hint": "Apple 听写使用 macOS 的系统听写。Whisper 在这台 Mac 上用模型录音并转写。"
     }
   },
