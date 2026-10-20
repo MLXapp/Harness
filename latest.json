@@ -1,14 +1,14 @@
 {
-  "version": "0.1.1",
-  "url": "https://github.com/MLXapp/studio/releases/download/v0.1.1/MLX-Studio-0.1.1-arm64.dmg",
-  "sha256": "af800c23c4ce65832ce5a57c366009c0ab409c24278cf451d0a715aef897a060",
-  "size": 588037474,
-  "date": "2026-10-19",
+  "version": "0.2.0",
+  "url": "https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg",
+  "sha256": "7c4a1288459b196aa755f84d675575d02f9bf60c6486b4c9b3f00532511a49f5",
+  "size": 588596344,
+  "date": "2026-10-20",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/studio/releases/download/v0.1.1/MLX-Studio-0.1.1-arm64.dmg",
-      "sha256": "af800c23c4ce65832ce5a57c366009c0ab409c24278cf451d0a715aef897a060"
+      "url": "https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg",
+      "sha256": "7c4a1288459b196aa755f84d675575d02f9bf60c6486b4c9b3f00532511a49f5"
     }
   },
-  "notes": "Updates now install themselves: click Update, then Restart."
+  "notes": "MLX Harness 0.2.0: new name and icon, connect DeepSeek, Claude, OpenAI, Gemini or WaveSpeed AI in seconds, models picked for your Mac, a model switcher in the message box (⌘⇧M), Apple Dictation, and a safer agent."
 }
