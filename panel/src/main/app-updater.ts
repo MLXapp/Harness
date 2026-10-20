@@ -1,9 +1,11 @@
-// MLX Studio's in-app updater (Sparkle-style). Checks latest.json at launch
+// MLX Harness's in-app updater (Sparkle-style). Checks latest.json at launch
 // (after 5 s), every 6 hours and from "Check for Updates…"; announces a newer
 // version in the window and, when no window has focus, once per version as a
 // macOS notification; on Update downloads the DMG, verifies it (size, SHA-256,
 // bundle id, Developer ID signature with our team, notarization, newer
 // version), stages the app next to the running one and swaps it in after quit.
+// After quit it also renames a copy still called "MLX Studio.app" (0.1.x) to
+// "MLX Harness.app" (never over an existing one; see planRename).
 // The rules are pure functions in ../shared/appUpdate.ts (tested there).
 import { app, BrowserWindow, dialog, ipcMain, net, Notification, shell, type MessageBoxOptions } from 'electron'
 import { execFile, spawn } from 'child_process'
@@ -19,6 +21,7 @@ import { t } from './i18n'
 import { setUpdateCheckHandler } from './application-menu'
 import { decideUpdate, LATEST_MANIFEST_URL, parseLatestRelease, type LatestRelease } from './update-manifest'
 import {
+  LEGACY_APP_NAMES,
   STUDIO_APP_NAME,
   STUDIO_BUNDLE_ID,
   STUDIO_LATEST_RELEASE_PAGE,
@@ -33,12 +36,15 @@ import {
   hdiutilAttachArgs,
   hdiutilDetachArgs,
   isSha256,
+  leftoverNames,
   notificationBody,
   planInPlaceInstall,
+  planRename,
+  preferredAppPath,
+  renameCommand,
   shouldNotify,
   spctlAccepted,
   spctlArgs,
-  stagingPathFor,
   swapCommand,
   type InstallPlan,
   type UpdateFailure,
@@ -149,12 +155,12 @@ function cleanUpLeftovers(): void {
   if (!appPath || !app.isPackaged) return
   const parent = dirname(appPath)
   if (!writable(parent)) return
-  const staging = stagingPathFor(appPath)
-  const oldPrefix = backupPathFor(appPath, 'x').slice(parent.length + 1).replace(/x\.app$/, '')
+  // Current and 0.1.x names: ".MLX Harness.update.app", ".MLX Studio.update.app", ".MLX … .old-<tag>.app".
+  const { staging, oldPrefixes } = leftoverNames(appPath)
   try {
     for (const n of readdirSync(parent)) {
       const p = join(parent, n)
-      if (p === staging || (n.startsWith(oldPrefix) && n.endsWith('.app'))) {
+      if (staging.includes(n) || (oldPrefixes.some(prefix => n.startsWith(prefix)) && n.endsWith('.app'))) {
         log(`removing leftover ${p}`)
         remove(p)
       }
@@ -290,13 +296,15 @@ async function verifyRunningApp(appPath: string): Promise<boolean> {
 
 /**
  * The app at the top of the mounted image (a real folder, not a link):
- * "MLX Studio.app" when present (its bundle id is checked next), otherwise
- * the one other .app carrying our bundle id.
+ * "MLX Harness.app" (or a 0.1.x "MLX Studio.app") when present (its bundle id
+ * is checked next), otherwise the one other .app carrying our bundle id.
  */
 async function findStudioApp(mount: string): Promise<string | null> {
   const isDir = (p: string) => { try { return lstatSync(p).isDirectory() } catch { return false } }
-  const named = join(mount, STUDIO_APP_NAME)
-  if (isDir(named)) return named
+  for (const name of [STUDIO_APP_NAME, ...LEGACY_APP_NAMES]) {
+    const named = join(mount, name)
+    if (isDir(named)) return named
+  }
   let entries: string[] = []
   try { entries = readdirSync(mount) } catch { return null }
   for (const n of entries.filter(e => e.endsWith('.app'))) {
@@ -328,7 +336,7 @@ async function doInstall(r: LatestRelease, p: Extract<InstallPlan, { ok: true }>
   const version = r.version
   send({ phase: 'downloading', currentVersion, version, notes: r.notes, blocked: null, received: 0, total: r.size ?? 0 })
   const dir = updatesDir()
-  const dmg = join(dir, `MLX-Studio-${version.replace(/[^0-9A-Za-z.-]/g, '')}.dmg`)
+  const dmg = join(dir, `MLX-Harness-${version.replace(/[^0-9A-Za-z.-]/g, '')}.dmg`)
   const abort = new AbortController()
   let notOurs = false
   const ownCheck = verifyRunningApp(p.appPath).then((ok) => {
@@ -352,7 +360,7 @@ async function doInstall(r: LatestRelease, p: Extract<InstallPlan, { ok: true }>
     if (bad) throw new UpdateFail(bad, `${got.size} bytes, sha256 ${got.sha256}`)
 
     patch({ phase: 'verifying' })
-    mount = mkdtempSync(join(tmpdir(), 'mlx-studio-update-'))
+    mount = mkdtempSync(join(tmpdir(), 'mlx-harness-update-'))
     const attach = await run('/usr/bin/hdiutil', hdiutilAttachArgs(dmg, mount), 180_000)
     if (!attach.ok) throw new UpdateFail('mount', attach.out)
     const candidate = await findStudioApp(mount)
@@ -377,7 +385,7 @@ async function doInstall(r: LatestRelease, p: Extract<InstallPlan, { ok: true }>
     }
     staged = { appPath: p.appPath, stagingPath: p.stagingPath, version: String(stagedInfo?.CFBundleShortVersionString) }
     stagedOk = true
-    log(`MLX Studio ${staged.version} is staged at ${p.stagingPath}`)
+    log(`MLX Harness ${staged.version} is staged at ${p.stagingPath}`)
     send({ phase: 'ready', currentVersion, version, notes: r.notes, blocked: null, dismissed: false })
   } catch (e) {
     const code: UpdateFailure = e instanceof UpdateFail ? e.code : 'copy'
@@ -420,28 +428,66 @@ export function cancelUpdateRelaunch(): void {
  * Called as the very last step of quitting: if a verified update is staged,
  * start the detached swap (it waits for this process to exit). It relaunches
  * only when the quit came from "Restart to update"; any other quit installs
- * it for the next launch.
+ * it for the next launch. A copy still called "MLX Studio.app" gets the new
+ * copy under "MLX Harness.app" (the swap falls back to the old name when
+ * that exists). With nothing staged, such a copy is renamed after quit
+ * instead (runPendingRename).
  */
 export function runPendingUpdateSwap(): void {
-  if (!staged || process.platform !== 'darwin') return
+  if (process.platform !== 'darwin') return
+  if (!staged) { runPendingRename(); return }
   try {
-    if (!statSync(staged.stagingPath).isDirectory()) return
+    if (!statSync(staged.stagingPath).isDirectory()) { runPendingRename(); return }
     const dir = updatesDir()
     mkdirSync(dir, { recursive: true })
+    const target = preferredAppPath(staged.appPath)
     const { file, args } = swapCommand({
       pid: process.pid,
       appPath: staged.appPath,
       stagedPath: staged.stagingPath,
       backupPath: backupPathFor(staged.appPath, process.pid),
+      targetPath: target,
       relaunch: relaunchAfterSwap,
       logPath: join(dir, 'swap.log'),
     })
     const child = spawn(file, args, { detached: true, stdio: 'ignore' })
     child.unref()
-    log(`swap to ${staged.version} started (relaunch: ${relaunchAfterSwap})`)
+    log(`swap to ${staged.version} started (relaunch: ${relaunchAfterSwap}${target !== staged.appPath ? `, as ${target}` : ''})`)
     staged = null
   } catch (e) {
     log(`could not start the swap: ${(e as Error).message}`)
+  }
+}
+
+/**
+ * 0.1.x → 0.2.0: the old app's updater swapped this version into
+ * "MLX Studio.app". Rename it to "MLX Harness.app" once this process (and
+ * everything running from the bundle) has exited. Renaming a running bundle
+ * would break Electron's helpers and the bundled engine, so it never happens
+ * while the app runs. Never over an existing "MLX Harness.app"; if it can't
+ * happen the app keeps its old name and the next quit tries again.
+ */
+function runPendingRename(): void {
+  try {
+    const appPath = runningAppPath()
+    const target = appPath ? preferredAppPath(appPath) : null
+    const plan = planRename({
+      platform: process.platform,
+      packaged: app.isPackaged,
+      appPath,
+      parentWritable: !!appPath && writable(dirname(appPath)),
+      appWritable: !!appPath && writable(appPath),
+      targetExists: !!target && target !== appPath && existsSync(target),
+    })
+    if (!plan) return
+    const dir = updatesDir()
+    mkdirSync(dir, { recursive: true })
+    const { file, args } = renameCommand({ pid: process.pid, appPath: plan.from, targetPath: plan.to, logPath: join(dir, 'rename.log') })
+    const child = spawn(file, args, { detached: true, stdio: 'ignore' })
+    child.unref()
+    log(`renaming ${plan.from} → ${plan.to} after quit`)
+  } catch (e) {
+    log(`could not start the rename: ${(e as Error).message}`)
   }
 }
 
