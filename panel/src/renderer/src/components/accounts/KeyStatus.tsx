@@ -34,7 +34,7 @@ export function KeyStatus({ state, site, service, onRetry, okText }: {
     ['rejected', <StatusLine tone="error">{site ? t('accounts.key.rejected', { site }) : t('accounts.key.rejectedCustom')}</StatusLine>],
     ['no-credit', <StatusLine tone="warn">{site ? t('accounts.key.noCredit', { site }) : t('accounts.key.noCreditCustom')}</StatusLine>],
     ['network', (
-      <span className="flex items-start gap-2">
+      <span className="flex items-start gap-1">
         <StatusLine tone="warn">{t('accounts.key.network', { service })}</StatusLine>
         <button
           type="button"

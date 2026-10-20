@@ -231,6 +231,20 @@ function WelcomeStep({ onStart, onSkip }: { onStart: () => void; onSkip: () => v
 function AccountsStep({ connected }: { connected: ReadonlySet<string> }) {
   const { t } = useTranslation()
   const reachable = reachableFeaturedModels(connected)
+  const preview = useRef<HTMLDivElement>(null)
+  const before = useRef(reachable.length)
+  // When the first account connects, glide the new "Best models" list into view
+  // (after it has opened), so it is not hidden below the fold.
+  useEffect(() => {
+    const grew = before.current === 0 && reachable.length > 0
+    before.current = reachable.length
+    if (!grew) return
+    const timer = window.setTimeout(() => {
+      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+      preview.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' })
+    }, 420)
+    return () => window.clearTimeout(timer)
+  }, [reachable.length])
   return (
     <StepFrame title={t('onboarding.accounts.title')} subtitle={t('onboarding.accounts.subtitle')}>
       <AccountRowsLarge connected={connected} onConnect={openConnectAccount} />
@@ -242,7 +256,7 @@ function AccountsStep({ connected }: { connected: ReadonlySet<string> }) {
         {t('accounts.otherOrCustom')}
       </button>
       <Reveal open={reachable.length > 0}>
-        <div className="pt-4">
+        <div ref={preview} className="pt-4">
           <h3 className="mb-2 text-[15px] font-semibold leading-5">{t('onboarding.accounts.best')}</h3>
           <div className="overflow-hidden rounded-[12px] border border-border divide-y divide-border/70">
             {reachable.map(({ model, via }) => (

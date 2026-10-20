@@ -32,7 +32,7 @@ export function validEndpointUrl(value: string): boolean {
   }
 }
 
-const field = 'h-8 w-full rounded-[8px] border border-input bg-background px-2.5 text-[13px] leading-[18px] transition-[border-color,box-shadow] duration-200 placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/25'
+const field = 'placeholder:font-sans h-8 w-full rounded-[8px] border border-input bg-background px-2.5 text-[13px] leading-[18px] transition-[border-color,box-shadow] duration-200 placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/25'
 
 export function CustomEndpointSheet({ open, providers, onClose, onClosed, onSaved }: {
   open: boolean

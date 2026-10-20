@@ -15,11 +15,9 @@ export function RemoteAccountsCard() {
   const { t } = useTranslation()
   return (
     <div data-vmlx-surface="remote-accounts" className="rounded-[12px] border border-border bg-card px-6 py-8 text-center mlx-view-in">
-      <div className="flex justify-center -space-x-1.5" aria-hidden>
+      <div className="flex justify-center gap-1.5" aria-hidden>
         {FEATURED_ACCOUNTS.map(account => (
-          <span key={account.id} className="rounded-[9px] ring-2 ring-card">
-            <AccountGlyph providerId={account.catalogId} size={32} />
-          </span>
+          <AccountGlyph key={account.id} providerId={account.catalogId} size={28} />
         ))}
       </div>
       <h3 className="mt-4 text-[17px] font-semibold leading-[22px]">{t('accounts.remote.title')}</h3>

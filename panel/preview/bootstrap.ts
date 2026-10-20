@@ -12,7 +12,7 @@
  *   ?session=<id>                       session for panel=session|settings
  *   ?engine=missing                     engine not installed (SetupScreen)
  *   ?locale=en|zh|ko|ja|es              UI language
- *   ?setup=1                            reserved for the first-run flow (window.__PREVIEW__.setup)
+ *   ?setup=1                            show first-run setup (otherwise it counts as done)
  *   ?sidebar=collapsed                  start with the sidebar collapsed
  *
  * When the page has settled, <html data-preview-ready="1"> is set.
@@ -26,7 +26,7 @@ export interface PreviewGlobal {
   params: Record<string, string>
   scenario: ScenarioName
   theme: 'light' | 'dark' | 'system'
-  /** `?setup=1`: a first-run flow should show (reserved; nothing reads it yet). */
+  /** `?setup=1`: first-run setup shows (the onboardingDone setting is left unset). */
   setup: boolean
   /** Hardware the preview pretends to be (no IPC exposes the chip yet). */
   hardware: typeof HARDWARE
@@ -74,6 +74,8 @@ export function installPreview(): { afterMount: () => void } {
   // What AppStateContext restores on mount (settings.get on appMode etc.).
   const s = fixtures.settings
   s.appMode = mode
+  // First-run setup shows only with ?setup=1 (otherwise it would cover every screenshot).
+  if (params.setup !== '1') s.onboardingDone = '1'
   if (params.sidebar === 'collapsed') s.sidebarCollapsed = 'true'
   if (mode === 'chat') {
     const chat = params.chat

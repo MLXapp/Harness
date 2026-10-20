@@ -24,7 +24,7 @@ export function AccountRowsLarge({ connected, onConnect }: {
             <AccountGlyph providerId={account.catalogId} size={32} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-[15px] font-semibold leading-5">{account.name}</p>
-              <p className="truncate text-[13px] leading-[18px] text-muted-foreground">{account.tagline}</p>
+              <p className="truncate text-[13px] leading-[18px] text-muted-foreground" title={account.tagline}>{account.tagline}</p>
             </div>
             <div className="mlx-xfade shrink-0 justify-items-end">
               <div data-active={!isOn ? 'true' : 'false'} aria-hidden={isOn}>
