@@ -151,7 +151,7 @@ export function ImageSettings({ settings, onChange, model, mode, capabilities }:
 
         {/* Strength (edit mode only; hidden with a note when the loaded edit class never uses it) */}
         {strengthUnused && (
-          <div data-vmlx-image-cap="strength-unused" className="text-[10px] text-muted-foreground self-end pb-1">
+          <div data-vmlx-image-cap="strength-unused" className="text-[11px] text-muted-foreground self-end pb-1">
             {t('image.settings.strengthNotUsed', { model: capModel })}
           </div>
         )}
@@ -207,7 +207,7 @@ export function ImageSettings({ settings, onChange, model, mode, capabilities }:
           </button>
         </div>
         {showNegativeHelp && (
-          <p className="text-[10px] text-muted-foreground bg-muted/50 rounded px-2 py-1.5 mb-1.5">
+          <p className="text-[11px] text-muted-foreground bg-muted/50 rounded px-2 py-1.5 mb-1.5">
             {t('image.settings.negativeHelpBody')}{' '}
             <em>{t('image.settings.negativeHelpExample')}</em>
           </p>
@@ -222,7 +222,7 @@ export function ImageSettings({ settings, onChange, model, mode, capabilities }:
           className="w-full px-2 py-1 bg-background border border-input rounded text-xs focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
         />
         {negativeUnused && (
-          <p className="text-[10px] text-muted-foreground mt-1">{negativeUnavailable}</p>
+          <p className="text-[11px] text-muted-foreground mt-1">{negativeUnavailable}</p>
         )}
       </div>
 
@@ -283,7 +283,7 @@ export function ImageSettings({ settings, onChange, model, mode, capabilities }:
               <p>{t('image.settings.capCount')}: {capabilities.count ? t('image.settings.capYes') : t('image.settings.capSingle')}</p>
             </div>
           )}
-          <p className="text-[10px] mt-2 opacity-70">
+          <p className="text-[11px] mt-2 opacity-70">
             {t('image.settings.serverManagedAutomatically')}
           </p>
         </div>

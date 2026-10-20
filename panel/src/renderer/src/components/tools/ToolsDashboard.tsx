@@ -191,7 +191,7 @@ function ModelCard({ model, onInspect, onDiagnose, onConvert, onServe }: {
               // pushing the size to the far edge. flex-shrink-0 meant it could
               // not even shrink. The full value stays in the tooltip.
               <span
-                className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary flex-shrink-0"
+                className="text-[11px] px-1.5 py-0.5 rounded bg-primary/10 text-primary flex-shrink-0"
                 title={model.quantization}
                 aria-label={`Quantization: ${model.quantization}`}
               >
@@ -199,7 +199,7 @@ function ModelCard({ model, onInspect, onDiagnose, onConvert, onServe }: {
               </span>
             )}
             {model.size && (
-              <span className="text-[10px] text-muted-foreground flex-shrink-0">
+              <span className="text-[11px] text-muted-foreground flex-shrink-0">
                 {model.size}
               </span>
             )}

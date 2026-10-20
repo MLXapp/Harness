@@ -1051,7 +1051,7 @@ function formatMtpDepthRates(
 function InfoCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="bg-background px-2 py-1.5 rounded border border-border">
-      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className="font-mono text-xs break-words">{value}</div>
     </div>
   )
@@ -1061,7 +1061,7 @@ function MemoryCard({ label, value }: { label: string; value: number }) {
   const formatted = value >= 1024 ? `${(value / 1024).toFixed(1)} GB` : `${value.toFixed(0)} MB`
   return (
     <div className="bg-background px-2 py-1.5 rounded border border-border text-center">
-      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className="font-mono text-sm">{formatted}</div>
     </div>
   )

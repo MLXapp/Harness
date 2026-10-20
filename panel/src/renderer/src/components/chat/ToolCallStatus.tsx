@@ -256,7 +256,7 @@ export function ToolCallStatus({ statuses, isStreaming }: ToolCallStatusProps) {
                   <div className="ml-5 mt-1 space-y-1">
                     {callingStatus?.detail && (
                       <div>
-                        <span className="text-muted-foreground text-[10px] uppercase">args</span>
+                        <span className="text-muted-foreground text-[11px] uppercase">args</span>
                         <pre className="text-[11px] text-muted-foreground bg-background/50 rounded px-2 py-1 overflow-x-auto max-h-[100px] overflow-y-auto">
                           {formatJson(callingStatus.detail)}
                         </pre>
@@ -264,7 +264,7 @@ export function ToolCallStatus({ statuses, isStreaming }: ToolCallStatusProps) {
                     )}
                     {resultStatus?.detail && (
                       <div>
-                        <span className={`text-[10px] uppercase ${resultStatus.phase === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}>
+                        <span className={`text-[11px] uppercase ${resultStatus.phase === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}>
                           {resultStatus.phase === 'error' ? 'error' : 'result'}
                         </span>
                         <pre className="text-[11px] text-muted-foreground bg-background/50 rounded px-2 py-1 overflow-x-auto max-h-[400px] overflow-y-auto whitespace-pre-wrap break-words">
