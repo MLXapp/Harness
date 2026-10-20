@@ -387,6 +387,29 @@ const api = {
     },
   },
 
+  // Model providers (Preferences → Models, chat model picker). API keys go
+  // in (setKey / save) and never come back: views only say `configured`.
+  providers: {
+    catalog: () => ipcRenderer.invoke('providers:catalog'),
+    list: () => ipcRenderer.invoke('providers:list'),
+    probeLocal: () => ipcRenderer.invoke('providers:probeLocal'),
+    save: (draft: unknown, apiKey?: string) => ipcRenderer.invoke('providers:save', draft, apiKey),
+    delete: (id: string) => ipcRenderer.invoke('providers:delete', id),
+    setKey: (id: string, apiKey: string) => ipcRenderer.invoke('providers:setKey', id, apiKey),
+    clearKey: (id: string) => ipcRenderer.invoke('providers:clearKey', id),
+    discover: (request: unknown) => ipcRenderer.invoke('providers:discover', request),
+    getChatModel: (chatId: string) => ipcRenderer.invoke('providers:getChatModel', chatId),
+    setChatModel: (binding: unknown) => ipcRenderer.invoke('providers:setChatModel', binding),
+    clearChatModel: (chatId: string) => ipcRenderer.invoke('providers:clearChatModel', chatId),
+    remoteSessionCandidates: () => ipcRenderer.invoke('providers:remoteSessionCandidates'),
+    importRemoteSession: (sessionId: string) => ipcRenderer.invoke('providers:importRemoteSession', sessionId),
+    onChanged: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('providers:changed', handler)
+      return () => { ipcRenderer.removeListener('providers:changed', handler) }
+    },
+  },
+
   // App-level settings (API keys, preferences)
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),

@@ -227,7 +227,9 @@ export class ProviderStore {
       ...rest,
       headerNames: Object.keys(headers),
       configured: this.hasCredential(record.id),
-      needsKey: true,
+      // Catalog clouds always need a key; a custom endpoint may be open
+      // (self-hosted server, gateway that authenticates by network).
+      needsKey: record.kind === 'catalog',
     }
   }
 

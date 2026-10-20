@@ -88,6 +88,9 @@ import {
 import { detectModelConfigFromDir } from "../model-config-registry";
 import { localEngineReadyFromHealthBody } from "../engineReadiness";
 import { getAuthHeaders } from "./utils";
+import { resolveProviderRoute, type ProviderRoute } from "../providers/transport";
+import { providerErrorMessage } from "../providers/errors";
+import type { PipelineFetch } from "../providers/anthropic";
 import {
   appendResponseTerminalWarning,
   contextExhaustionNotice,
@@ -1338,6 +1341,27 @@ export function registerChatHandlers(
         throw new Error("Chat not found");
       }
 
+      // A chat bound to a provider model (Preferences → Models: a cloud API, a
+      // compatible endpoint, or Ollama / LM Studio) runs through the remote
+      // code path with that provider's endpoint, credential and protocol.
+      // The binding wins over the renderer endpoint and the chat's local
+      // model path; switching the model mid-chat applies here, next request.
+      const providerRoute: ProviderRoute | undefined = (() => {
+        let binding;
+        try {
+          binding = db.providers.getChatBinding(chatId);
+        } catch {
+          return undefined;
+        }
+        if (!binding) return undefined;
+        return resolveProviderRoute(binding, {
+          getProvider: (id) => db.providers.get(id),
+          resolveCredential: (id) => db.providers.resolveCredential(id),
+          nodeFetch: streamingFetch as PipelineFetch,
+          netFetch: remoteFetch as unknown as PipelineFetch,
+        });
+      })();
+
       // Look up session for this chat — needed for timeout, reasoning parser,
       // AND for endpoint resolution (remote sessions need remoteUrl/apiKey/type)
       let timeoutSeconds = 300;
@@ -1366,7 +1390,20 @@ export function registerChatHandlers(
       let sessionVideoMaxPixels: number | undefined;
       let sessionVideoTokenBudget: number | undefined;
       let chatSession: import("../database").Session | undefined;
-      if (chat.modelPath) {
+      if (providerRoute) {
+        // Not a stored session: a remote-shaped description of the provider
+        // route (see providers/transport.ts). Capabilities come from the
+        // model row the user configured in Preferences → Models.
+        chatSession = providerRoute.session;
+        timeoutSeconds = 600;
+        const providerModel = providerRoute.model;
+        chatModelMaxContextLength = providerModel?.contextWindow;
+        chatIsMultimodal = providerModel ? providerModel.input.includes("image") : false;
+        const levels = providerModel?.reasoningEfforts?.filter(
+          (level): level is ReasoningEffort => level !== "off",
+        );
+        supportedReasoningEfforts = levels && levels.length > 0 ? levels : undefined;
+      } else if (chat.modelPath) {
         chatSession = sessionManager.getSessionByModelPath(
           chat.modelPath.replace(/\/+$/, ""),
         );
@@ -1531,7 +1568,7 @@ export function registerChatHandlers(
       // CRITICAL: When endpoint is passed from the renderer, attach the chatSession
       // so remote sessions get proper remoteUrl, auth headers, and health check path.
       // SECURITY: Validate renderer-provided endpoint is localhost or matches a known session
-      if (endpoint) {
+      if (endpoint && !providerRoute) {
         const isLocalhost =
           endpoint.host === "127.0.0.1" ||
           endpoint.host === "localhost" ||
@@ -1547,7 +1584,13 @@ export function registerChatHandlers(
           );
         }
       }
-      const resolved = endpoint
+      const resolved = providerRoute
+        ? ({
+            host: providerRoute.session.host,
+            port: providerRoute.session.port,
+            session: chatSession,
+          } as ResolvedEndpoint)
+        : endpoint
         ? ({
             host: endpoint.host,
             port: endpoint.port,
@@ -1630,9 +1673,11 @@ export function registerChatHandlers(
       console.log(
         `[CHAT] Endpoint resolution: isRemote=${isRemote}, rawBaseUrl=${rawBaseUrl}, baseUrl=${baseUrl}, session=${resolvedSession?.id ?? "none"}, type=${resolvedSession?.type ?? "none"}`,
       );
-      const authHeaders: Record<string, string> = resolvedSession?.id
-        ? getAuthHeaders(resolvedSession.id)
-        : {};
+      const authHeaders: Record<string, string> = providerRoute
+        ? {} // the provider fetch adds the credential (main process only)
+        : resolvedSession?.id
+          ? getAuthHeaders(resolvedSession.id)
+          : {};
       // Update active request entry with resolved baseUrl and auth for cancel support
       const activeEntry = activeRequests.get(chatId);
       if (activeEntry) {
@@ -1650,10 +1695,12 @@ export function registerChatHandlers(
       // within the last 15 seconds, skip the per-message health check entirely.
       // The global monitor runs every 5s, so 15s gives a generous window.
       // This avoids adding 100-500ms+ RTT on every single message for remote sessions.
-      const recentlyHealthy = resolvedSession?.id
-        ? Date.now() - sessionManager.getLastHealthyAt(resolvedSession.id) <
-          15_000
-        : false;
+      const recentlyHealthy = providerRoute
+        ? true
+        : resolvedSession?.id
+          ? Date.now() - sessionManager.getLastHealthyAt(resolvedSession.id) <
+            15_000
+          : false;
 
       // Remote sessions: 1 quick attempt then proceed (the request itself has a timeout).
       // Local sessions: 15 retries with 2s delays (30s total — JANG models need longer to dequantize).
@@ -1764,9 +1811,18 @@ export function registerChatHandlers(
       // ordinary text context and do not require multimodal routing.
       const hasMediaAttachments =
         hasAttachments && attachments!.some((a) => inferKind(a) !== "text");
+      if (
+        providerRoute?.model &&
+        hasMediaAttachments &&
+        !providerRoute.model.input.includes("image")
+      ) {
+        throw new Error(
+          `${providerRoute.model.name || providerRoute.modelId} is set to text input only. Remove the attachment, or turn on Image input for this model in Preferences → Models.`,
+        );
+      }
       const modelForceTextOnly = chatModelForceTextOnly || (() => {
         try {
-          return !!chat.modelPath &&
+          return !providerRoute && !!chat.modelPath &&
             detectModelConfigFromDir(chat.modelPath).forceTextOnly === true;
         } catch (_) {
           return false;
@@ -1890,6 +1946,15 @@ export function registerChatHandlers(
         ...(db.getChatOverrides(chatId) || {}),
         chatId,
       });
+      if (providerRoute) {
+        // The model picker owns reasoning for provider chats.
+        delete overrides.reasoningEffort;
+        delete overrides.enableThinking;
+        delete overrides.thinkingMode;
+        if (providerRoute.reasoningEffort === "off") overrides.enableThinking = false;
+        else if (providerRoute.reasoningEffort) overrides.reasoningEffort = providerRoute.reasoningEffort;
+        overrides.wireApi = providerRoute.wireApi;
+      }
       // Adaptive MTP never rewrites the sampler (compatible-only: greedy
       // requests verify by identity, sampled requests by rejection sampling),
       // so the request boundary forwards the user's overrides untouched.
@@ -3090,8 +3155,8 @@ export function registerChatHandlers(
           };
           armFetchInactivityTimeout();
           const summaryResponse = useNodeStreamingFetch
-            ? await streamingFetch(apiUrl, summaryInit)
-            : await remoteFetch(apiUrl, summaryInit);
+            ? await (providerRoute?.fetch ?? streamingFetch)(apiUrl, summaryInit as any)
+            : await (providerRoute?.fetch ?? remoteFetch)(apiUrl, summaryInit as any);
           if (!summaryResponse.ok) {
             const detail = await summaryResponse.text();
             return { text: "", error: `${summaryResponse.status} ${detail.slice(0, 500)}` };
@@ -3231,7 +3296,14 @@ export function registerChatHandlers(
           // Inference begins HERE — arm the inactivity watchdog now, not at
           // entry, so queued load/wake waiting never counts against it.
           armFetchInactivityTimeout();
-          response = useNodeStreamingFetch
+          response = providerRoute
+            ? await providerRoute.fetch(apiUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: requestBody,
+                signal: abortController.signal,
+              })
+            : useNodeStreamingFetch
             ? await streamingFetch(apiUrl, {
                 method: "POST",
                 headers: {
@@ -3289,7 +3361,11 @@ export function registerChatHandlers(
             ) {
               continue;
             }
-            throw new Error(`API error: ${response.status} - ${errorDetail}`);
+            throw new Error(
+              providerRoute
+                ? providerErrorMessage(response.status, errorText, providerRoute.providerName)
+                : `API error: ${response.status} - ${errorDetail}`,
+            );
           }
           break;
         }
@@ -3758,7 +3834,7 @@ export function registerChatHandlers(
               const respId = parsed.response?.id || parsed.id;
               if (responsesEventType === "response.created" && respId) {
                 const entry = activeRequests.get(chatId);
-                if (entry) {
+                if (entry && !providerRoute) {
                   // A single visible UI turn can issue more than one HTTP
                   // response (for example, after a tool result). Always retain
                   // the newest response identity so cancellation and terminal
@@ -4062,7 +4138,7 @@ export function registerChatHandlers(
               // Track response ID for server-side cancel
               if (parsed.id) {
                 const entry = activeRequests.get(chatId);
-                if (entry) {
+                if (entry && !providerRoute) {
                   // Tool/result continuation requests receive a new response
                   // ID. Keeping only the first ID makes Stop target a completed
                   // request and misattributes final cache/usage telemetry.
@@ -4515,6 +4591,7 @@ export function registerChatHandlers(
               signal: abortController.signal,
             };
             const useNodeStreamingFetch = !isRemote || isLoopbackUrl(url);
+            if (providerRoute) return await providerRoute.fetch(url, followUpInit as any);
             return useNodeStreamingFetch
               ? await streamingFetch(url, followUpInit as any)
               : await remoteFetch(url, followUpInit);
@@ -4538,7 +4615,9 @@ export function registerChatHandlers(
             emitToolStatus(
               "error",
               "",
-              `Follow-up error: ${res.status} ${errText}`,
+              providerRoute
+                ? `Follow-up error: ${providerErrorMessage(res.status, errText, providerRoute.providerName)}`
+                : `Follow-up error: ${res.status} ${errText}`,
               toolIteration,
             );
             return false;
@@ -5209,8 +5288,8 @@ export function registerChatHandlers(
             } catch (_) {}
             // Reset idle timer before tool execution — builtin tools run locally
             // without server contact, so the model could sleep during long tool runs
-            if (chatSession) sessionManager.touchSession(chatSession.id);
-            const touchInterval = chatSession
+            if (chatSession && !providerRoute) sessionManager.touchSession(chatSession.id);
+            const touchInterval = chatSession && !providerRoute
               ? setInterval(() => {
                   sessionManager.touchSession(chatSession.id);
                 }, 30000)
@@ -5298,7 +5377,7 @@ export function registerChatHandlers(
               exactlyOnceToolsComplete,
             });
             // Reset idle timer before follow-up — tools may have consumed minutes
-            if (chatSession) sessionManager.touchSession(chatSession.id);
+            if (chatSession && !providerRoute) sessionManager.touchSession(chatSession.id);
             if (!(await sendFollowUp())) break;
           } else if (
             toolIteration > 0 &&
@@ -5392,7 +5471,7 @@ export function registerChatHandlers(
               toolIteration,
             );
             // Reset idle timer before auto-continue follow-up
-            if (chatSession) sessionManager.touchSession(chatSession.id);
+            if (chatSession && !providerRoute) sessionManager.touchSession(chatSession.id);
             if (!(await sendFollowUp())) break;
           } else {
             break;
