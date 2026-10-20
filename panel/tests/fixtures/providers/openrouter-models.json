@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "id": "deepseek/deepseek-chat",
+      "name": "DeepSeek: DeepSeek V3",
+      "context_length": 163840,
+      "architecture": { "modality": "text->text", "input_modalities": ["text"], "output_modalities": ["text"] },
+      "top_provider": { "context_length": 163840, "max_completion_tokens": 8192, "is_moderated": false }
+    },
+    {
+      "id": "google/gemini-2.5-flash",
+      "name": "Google: Gemini 2.5 Flash",
+      "context_length": 1048576,
+      "architecture": { "modality": "text+image->text", "input_modalities": ["text", "image", "file"], "output_modalities": ["text"] },
+      "top_provider": { "context_length": 1048576, "max_completion_tokens": 65535, "is_moderated": false }
+    }
+  ]
+}
