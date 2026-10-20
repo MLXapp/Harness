@@ -1,3 +1,11 @@
+/**
+ * Default tool rounds per user message when the chat sets no limit. It was 10
+ * while long tool loops could overflow the context window; with automatic
+ * compaction (agent/compaction.ts) a real coding task can take more steps.
+ * The per-chat "Max Tool Iterations" setting (1–100) still overrides it.
+ */
+export const DEFAULT_MAX_TOOL_ITERATIONS = 50
+
 export interface ToolAutoContinueInput {
   content: string
   iterationTokenCount: number
