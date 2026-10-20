@@ -573,7 +573,7 @@
     "input": {
       "dropOverlay": "拖放图像、视频、音频或文本文件以附加",
       "placeholderWaiting": "等待响应...",
-      "placeholderDefault": "消息...",
+      "placeholderDefault": "问任何问题…",
       "attachTitle": "附加图像、视频、音频或文本文件",
       "stopTitle": "停止生成 (Esc)",
       "sendTitle": "发送消息 (Enter)",
@@ -657,7 +657,8 @@
       "sttMissing": "STT 不可用 — 服务器未安装 mlx-audio",
       "micDenied": "麦克风访问被拒绝",
       "startFailed": "启动录音失败",
-      "transcribeFailed": "转录失败"
+      "transcribeFailed": "转录失败",
+      "dictateTitle": "听写（Apple）"
     },
     "tts": {
       "stopTitle": "停止播放",
@@ -725,6 +726,47 @@
       "deny": "拒绝",
       "alwaysAllow": "在此聊天中始终允许此命令",
       "autoDeny": "{time} 后自动拒绝"
+    },
+    "switcher": {
+      "title": "切换模型 (⌘⇧M)",
+      "chooseModel": "选择模型",
+      "chooseFirst": "请先选择模型",
+      "searchPlaceholder": "搜索模型",
+      "topModels": "热门模型",
+      "onThisMac": "在这台 Mac 上",
+      "moreFrom": "{{account}} 的更多模型",
+      "otherConnections": "其他连接",
+      "connectAccount": "连接账户…",
+      "connectHint": "DeepSeek、Claude、OpenAI、Gemini 或 WaveSpeed AI",
+      "manageModels": "管理模型…",
+      "addLocal": "在这台 Mac 上添加模型…",
+      "reasoning": "推理",
+      "defaultLevel": "默认",
+      "loaded": "已加载",
+      "starting": "正在启动…",
+      "noMatches": "没有与“{{query}}”匹配的模型",
+      "from": "{{price}} 起",
+      "priceTitle": "每百万 token：输入 {{input}} · 输出 {{output}}",
+      "viaWavespeed": "经由 WaveSpeed AI",
+      "badge": {
+        "best": "最佳",
+        "bestValue": "最超值",
+        "fast": "快速"
+      },
+      "levels": {
+        "off": "关",
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "xhigh": "超高",
+        "max": "最大"
+      }
+    },
+    "voiceInput": {
+      "title": "语音输入",
+      "apple": "Apple 听写",
+      "whisper": "Whisper（这台 Mac）",
+      "hint": "Apple 听写使用 macOS 的系统听写。Whisper 在这台 Mac 上用模型录音并转写。"
     }
   },
   "sessions": {

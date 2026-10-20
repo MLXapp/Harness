@@ -573,7 +573,7 @@
     "input": {
       "dropOverlay": "Suelte una imagen, video, audio o archivo de texto para adjuntar",
       "placeholderWaiting": "Esperando respuesta...",
-      "placeholderDefault": "Mensaje...",
+      "placeholderDefault": "Pregunta lo que quieras…",
       "attachTitle": "Adjuntar imagen, video, audio o archivo de texto",
       "stopTitle": "Detener generación (Esc)",
       "sendTitle": "Enviar mensaje (Enter)",
@@ -657,7 +657,8 @@
       "sttMissing": "STT no disponible — mlx-audio no está instalado en el servidor",
       "micDenied": "Acceso al micrófono denegado",
       "startFailed": "No se pudo iniciar la grabación",
-      "transcribeFailed": "Error en la transcripción"
+      "transcribeFailed": "Error en la transcripción",
+      "dictateTitle": "Dictar (Apple)"
     },
     "tts": {
       "stopTitle": "Detener reproducción",
@@ -725,6 +726,47 @@
       "deny": "Denegar",
       "alwaysAllow": "Permitir siempre este comando en este chat",
       "autoDeny": "Se denegará automáticamente en {time}"
+    },
+    "switcher": {
+      "title": "Cambiar de modelo (⌘⇧M)",
+      "chooseModel": "Elige un modelo",
+      "chooseFirst": "Elige un modelo primero",
+      "searchPlaceholder": "Buscar modelos",
+      "topModels": "Mejores modelos",
+      "onThisMac": "En este Mac",
+      "moreFrom": "Más de {{account}}",
+      "otherConnections": "Otras conexiones",
+      "connectAccount": "Conectar una cuenta…",
+      "connectHint": "DeepSeek, Claude, OpenAI, Gemini o WaveSpeed AI",
+      "manageModels": "Gestionar modelos…",
+      "addLocal": "Añadir un modelo en este Mac…",
+      "reasoning": "Razonamiento",
+      "defaultLevel": "Predeterminado",
+      "loaded": "Cargado",
+      "starting": "Iniciando…",
+      "noMatches": "Ningún modelo coincide con “{{query}}”",
+      "from": "desde {{price}}",
+      "priceTitle": "Por 1M de tokens: entrada {{input}} · salida {{output}}",
+      "viaWavespeed": "vía WaveSpeed AI",
+      "badge": {
+        "best": "El mejor",
+        "bestValue": "Mejor precio",
+        "fast": "Rápido"
+      },
+      "levels": {
+        "off": "No",
+        "low": "Baja",
+        "medium": "Media",
+        "high": "Alta",
+        "xhigh": "Extra",
+        "max": "Máx."
+      }
+    },
+    "voiceInput": {
+      "title": "Entrada de voz",
+      "apple": "Dictado de Apple",
+      "whisper": "Whisper (en este Mac)",
+      "hint": "El dictado de Apple usa el dictado del sistema de macOS. Whisper graba y transcribe con un modelo en este Mac."
     }
   },
   "sessions": {

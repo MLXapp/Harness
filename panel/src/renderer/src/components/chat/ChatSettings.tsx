@@ -3,6 +3,7 @@ import { AlertTriangle, X, Save, Trash2, Star } from 'lucide-react'
 import { useToast } from '../Toast'
 import { useTranslation } from '../../i18n'
 import { buildChatSettingsCompatibilityWarnings } from './chatSettingsCompatibility'
+import { VoiceInputSetting } from './VoiceInputSetting'
 import { buildChatSettingsResetOverrides } from '../../../../shared/chatSettingsResetPolicy'
 import { remoteServerBaseUrl } from '../../../../shared/remoteApiUrl'
 import { REASONING_EFFORT_LEVELS } from '../../../../shared/reasoningEffortPolicy'
@@ -480,6 +481,9 @@ function statusToneClass(status: string): string {
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-5">
+        {/* Mic: Apple Dictation or Whisper (app-wide) */}
+        <VoiceInputSetting />
+
         {/* Server Info */}
         <div>
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{t('chat.settings.serverInfo')}</h3>

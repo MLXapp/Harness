@@ -573,7 +573,7 @@
     "input": {
       "dropOverlay": "画像、動画、音声、またはテキストファイルをドロップして添付",
       "placeholderWaiting": "応答を待っています...",
-      "placeholderDefault": "メッセージ...",
+      "placeholderDefault": "何でも聞いてください…",
       "attachTitle": "画像、動画、音声、またはテキストファイルを添付",
       "stopTitle": "生成を停止 (Esc)",
       "sendTitle": "メッセージを送信 (Enter)",
@@ -657,7 +657,8 @@
       "sttMissing": "STT は利用できません — サーバーに mlx-audio がインストールされていません",
       "micDenied": "マイクへのアクセスが拒否されました",
       "startFailed": "録音の開始に失敗しました",
-      "transcribeFailed": "文字起こしに失敗しました"
+      "transcribeFailed": "文字起こしに失敗しました",
+      "dictateTitle": "音声入力（Apple）"
     },
     "tts": {
       "stopTitle": "再生を停止",
@@ -725,6 +726,47 @@
       "deny": "拒否",
       "alwaysAllow": "このチャットではこのコマンドを常に許可",
       "autoDeny": "{time} 後に自動的に拒否されます"
+    },
+    "switcher": {
+      "title": "モデルを切り替え (⌘⇧M)",
+      "chooseModel": "モデルを選択",
+      "chooseFirst": "先にモデルを選択してください",
+      "searchPlaceholder": "モデルを検索",
+      "topModels": "おすすめのモデル",
+      "onThisMac": "このMac",
+      "moreFrom": "{{account}}のその他のモデル",
+      "otherConnections": "その他の接続",
+      "connectAccount": "アカウントを接続…",
+      "connectHint": "DeepSeek、Claude、OpenAI、Gemini、WaveSpeed AI",
+      "manageModels": "モデルを管理…",
+      "addLocal": "このMacにモデルを追加…",
+      "reasoning": "推論",
+      "defaultLevel": "デフォルト",
+      "loaded": "読み込み済み",
+      "starting": "起動中…",
+      "noMatches": "“{{query}}”に一致するモデルはありません",
+      "from": "{{price}}から",
+      "priceTitle": "100万トークンあたり 入力 {{input}}・出力 {{output}}",
+      "viaWavespeed": "WaveSpeed AI経由",
+      "badge": {
+        "best": "最高",
+        "bestValue": "コスパ最高",
+        "fast": "高速"
+      },
+      "levels": {
+        "off": "オフ",
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "xhigh": "特高",
+        "max": "最大"
+      }
+    },
+    "voiceInput": {
+      "title": "音声入力",
+      "apple": "Apple の音声入力",
+      "whisper": "Whisper（このMac）",
+      "hint": "Apple の音声入力は macOS のシステム音声入力を使います。Whisper はこのMacのモデルで録音して文字に起こします。"
     }
   },
   "sessions": {
