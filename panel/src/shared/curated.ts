@@ -141,7 +141,7 @@ export const FEATURED_CLOUD_MODELS: readonly FeaturedCloudModel[] = [
   {
     key: 'claude-opus-5-5',
     name: 'Claude Opus 5.5',
-    blurb: 'The very best for hard tasks and coding',
+    blurb: 'Best for hard tasks and code',
     account: 'anthropic',
     modelId: 'claude-opus-5-5',
     effort: 'high',
@@ -165,7 +165,7 @@ export const FEATURED_CLOUD_MODELS: readonly FeaturedCloudModel[] = [
   {
     key: 'deepseek-flash',
     name: 'DeepSeek Flash',
-    blurb: 'V4.1 Flash 1017 · fast and very cheap',
+    blurb: 'V4.1 Flash 1017, very cheap',
     account: 'deepseek',
     modelId: 'deepseek-flash',
     wavespeedId: 'deepseek/deepseek-v4.1-flash-1017',
@@ -187,7 +187,7 @@ export const FEATURED_CLOUD_MODELS: readonly FeaturedCloudModel[] = [
   {
     key: 'gemini-4-argon',
     name: 'Gemini 4 Argon',
-    blurb: "Google's flagship, very long context",
+    blurb: "Google's flagship",
     account: 'google',
     modelId: 'gemini-4-argon',
     wavespeedId: 'google/gemini-4-argon',
