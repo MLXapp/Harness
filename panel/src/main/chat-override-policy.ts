@@ -41,6 +41,7 @@ export interface ChatOverridePolicyInput {
   gitEnabled?: boolean
   utilityToolsEnabled?: boolean
   toolPreset?: 'full' | 'lean'
+  permissionPreset?: 'read-only' | 'workspace' | 'full'
 }
 
 const NEW_CHAT_TOOL_INHERIT_KEYS = [
@@ -58,6 +59,7 @@ const NEW_CHAT_TOOL_INHERIT_KEYS = [
   'hideToolStatus',
   'toolResultMaxChars',
   'toolPreset',
+  'permissionPreset',
 ] as const
 
 const CHAT_OVERRIDE_STRING_KEYS = [
@@ -185,6 +187,9 @@ export function sanitizeChatOverrides<T extends ChatOverridePolicyInput>(overrid
 
   if (source.toolPreset === 'lean' || source.toolPreset === 'full') {
     sanitized.toolPreset = source.toolPreset
+  }
+  if (source.permissionPreset === 'read-only' || source.permissionPreset === 'full') {
+    sanitized.permissionPreset = source.permissionPreset
   }
 
   if (source.thinkingMode === 'adaptive') {

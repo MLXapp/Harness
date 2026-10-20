@@ -528,6 +528,15 @@
       "toolPresetFull": "Full (all enabled tools)",
       "toolPresetLean": "Lean (small models)",
       "toolPresetHelp": "Lean gives the model only read_file, write_file, edit_file, list_directory, search_files, run_command and ask_user, with a shorter system prompt. A smaller prompt and fewer choices help small models. Changing it re-reads the whole prompt once.",
+      "permissions": "Permissions",
+      "permissionsReadOnly": "Read only",
+      "permissionsWorkspace": "Workspace (default)",
+      "permissionsFull": "Full access",
+      "permissionsReadOnlyHelp": "The agent can read and search. Writing files, shell commands, AppleScript and MCP tools ask you first.",
+      "permissionsWorkspaceHelp": "The agent can change files in the working directory. Shell commands run in a macOS sandbox that allows writes only there and in temp folders and blocks the internet. AppleScript, git push/pull and anything outside the folder ask you first.",
+      "permissionsFullHelp": "No prompts and no sandbox: commands run with all your user rights.",
+      "permissionsFullWarning": "Full access lets the model run any command, change or delete any file you can, and reach the internet without asking. Use it only with models and projects you trust.",
+      "permissionsNoSandbox": "The macOS sandbox isn't available here, so every shell command asks you first.",
       "toolCategories": "Tool Categories",
       "toolFileIO": "File I/O",
       "toolFileIOHelp": "read, write, edit, copy, move, delete files and directories",
@@ -690,6 +699,32 @@
       "button": "Export session",
       "success": "Session exported",
       "failed": "Export failed"
+    },
+    "approval": {
+      "title": "Allow this action?",
+      "kind": {
+        "shell": "Run command",
+        "escalation": "Run outside the sandbox",
+        "write": "Change file",
+        "applescript": "Run AppleScript",
+        "git": "Run git",
+        "mcp": "Use MCP tool",
+        "tool": "Use tool"
+      },
+      "why": {
+        "read-only": "This chat is set to Read only.",
+        "no-sandbox": "The sandbox isn't available, so commands need your approval.",
+        "escalation": "The sandbox blocked this command. The model asks to run it without the sandbox.",
+        "network": "This git command connects to a remote.",
+        "outside": "This git command can act outside the working directory.",
+        "git-internals": "This changes git hooks or settings, which later run outside the sandbox.",
+        "workspace": "Workspace permissions ask before this."
+      },
+      "reason": "Model's reason",
+      "allowOnce": "Allow once",
+      "deny": "Deny",
+      "alwaysAllow": "Always allow this command in this chat",
+      "autoDeny": "Denied automatically in {time}"
     }
   },
   "sessions": {
@@ -2255,7 +2290,13 @@
         "occupied": "Another app named MLX Node is already in Applications, so nothing was changed. You can download MLX Node from mlx.app.",
         "signature": "The copy of MLX Node in MLX Studio didn't pass the signature check, so it wasn't installed. You can download it from mlx.app.",
         "failed": "Something went wrong and nothing was changed. You can download MLX Node from mlx.app."
-      }
+      },
+      "quitAgentTitle": "Quit MLX Studio?",
+      "quitAgentChats": "The coding agent is still working in: {names}.",
+      "quitAgentProcesses": "Background processes started by the agent: {count}.",
+      "quitAgentDetail": "Quitting stops this work. Closing the window instead keeps it running.",
+      "quitAgentQuit": "Quit",
+      "quitAgentCancel": "Cancel"
     },
     "window": {
       "downloads": "Downloads"
@@ -2317,6 +2358,9 @@
       "initializingEngine": "Initializing engine...",
       "restoringAcceleration": "Restoring acceleration...",
       "preparing": "Preparing..."
+    },
+    "notify": {
+      "approvalTitle": "MLX Studio needs your approval"
     }
   },
   "tools": {

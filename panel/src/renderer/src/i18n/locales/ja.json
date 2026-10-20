@@ -528,6 +528,15 @@
       "toolPresetFull": "フル(有効なすべてのツール)",
       "toolPresetLean": "軽量(小型モデル向け)",
       "toolPresetHelp": "軽量では read_file、write_file、edit_file、list_directory、search_files、run_command、ask_user のみを、短いシステムプロンプトとともにモデルに渡します。プロンプトが小さく選択肢が少ないほど小型モデルに有利です。変更するとプロンプト全体が一度だけ再処理されます。",
+      "permissions": "権限",
+      "permissionsReadOnly": "読み取りのみ",
+      "permissionsWorkspace": "ワークスペース(デフォルト)",
+      "permissionsFull": "フルアクセス",
+      "permissionsReadOnlyHelp": "エージェントは読み取りと検索ができます。ファイルの書き込み、シェルコマンド、AppleScript、MCP ツールは実行前に確認します。",
+      "permissionsWorkspaceHelp": "エージェントは作業ディレクトリ内のファイルを変更できます。シェルコマンドは macOS のサンドボックスで実行され、書き込みは作業ディレクトリと一時フォルダのみ、インターネットは遮断されます。AppleScript、git push/pull、フォルダ外の操作は実行前に確認します。",
+      "permissionsFullHelp": "確認もサンドボックスもありません。コマンドはあなたのユーザー権限をすべて使って実行されます。",
+      "permissionsFullWarning": "フルアクセスでは、モデルが確認なしに任意のコマンドを実行し、あなたが変更・削除できるすべてのファイルを操作し、インターネットにアクセスできます。信頼できるモデルとプロジェクトでのみ使用してください。",
+      "permissionsNoSandbox": "この環境では macOS のサンドボックスを使えないため、シェルコマンドは毎回実行前に確認します。",
       "toolCategories": "ツールカテゴリ",
       "toolFileIO": "ファイル I/O",
       "toolFileIOHelp": "ファイルやディレクトリの読み取り、書き込み、編集、コピー、移動、削除",
@@ -690,6 +699,32 @@
       "button": "セッションをエクスポート",
       "success": "セッションをエクスポートしました",
       "failed": "エクスポートに失敗しました"
+    },
+    "approval": {
+      "title": "この操作を許可しますか?",
+      "kind": {
+        "shell": "コマンドを実行",
+        "escalation": "サンドボックス外で実行",
+        "write": "ファイルを変更",
+        "applescript": "AppleScript を実行",
+        "git": "git を実行",
+        "mcp": "MCP ツールを使用",
+        "tool": "ツールを使用"
+      },
+      "why": {
+        "read-only": "このチャットは読み取りのみに設定されています。",
+        "no-sandbox": "サンドボックスを使えないため、コマンドには承認が必要です。",
+        "escalation": "サンドボックスがこのコマンドをブロックしました。モデルはサンドボックスなしでの実行を求めています。",
+        "network": "この git コマンドはリモートに接続します。",
+        "outside": "この git コマンドは作業ディレクトリの外で動作する可能性があります。",
+        "git-internals": "git のフックまたは設定を変更します。これらは後でサンドボックス外で実行されます。",
+        "workspace": "ワークスペース権限ではこの操作の前に確認します。"
+      },
+      "reason": "モデルの理由",
+      "allowOnce": "今回だけ許可",
+      "deny": "拒否",
+      "alwaysAllow": "このチャットではこのコマンドを常に許可",
+      "autoDeny": "{time} 後に自動的に拒否されます"
     }
   },
   "sessions": {
@@ -2255,7 +2290,13 @@
         "occupied": "「アプリケーション」に MLX Node という名前の別のアプリがあるため、何も変更していません。mlx.app から MLX Node をダウンロードできます。",
         "signature": "MLX Studio に含まれる MLX Node が署名の確認に合格しなかったため、インストールしませんでした。mlx.app からダウンロードできます。",
         "failed": "問題が発生したため、何も変更していません。mlx.app から MLX Node をダウンロードできます。"
-      }
+      },
+      "quitAgentTitle": "MLX Studio を終了しますか?",
+      "quitAgentChats": "コーディングエージェントはまだ作業中です: {names}。",
+      "quitAgentProcesses": "エージェントが起動したバックグラウンドプロセス: {count}。",
+      "quitAgentDetail": "終了するとこの作業は停止します。ウィンドウを閉じるだけなら作業は続きます。",
+      "quitAgentQuit": "終了",
+      "quitAgentCancel": "キャンセル"
     },
     "window": {
       "downloads": "ダウンロード"
@@ -2317,6 +2358,9 @@
       "initializingEngine": "エンジンを初期化中...",
       "restoringAcceleration": "アクセラレーションを復元中...",
       "preparing": "準備中..."
+    },
+    "notify": {
+      "approvalTitle": "MLX Studio があなたの承認を待っています"
     }
   },
   "tools": {
