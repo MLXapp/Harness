@@ -20,6 +20,7 @@ import { MetalMemoryNotice } from './components/MetalMemoryNotice'
 import { useAppState } from './contexts/AppStateContext'
 import { useSessionsContext } from './contexts/SessionsContext'
 import { ChatModeToolbar } from './components/layout/ChatModeToolbar'
+import { ModelProvidersPreference } from './components/settings/ModelProvidersPreference'
 import { ToolsDashboard } from './components/tools/ToolsDashboard'
 import { ModelInspector } from './components/tools/ModelInspector'
 import { ModelDoctor } from './components/tools/ModelDoctor'
@@ -497,6 +498,7 @@ function ServerModeContent() {
             <h2 className="text-2xl font-bold">{t('console.preferences')}</h2>
             <AppearancePreference />
             <SingleModelPreference />
+            <ModelProvidersPreference />
             <MlxNodePreference />
             <div className="border border-border rounded-lg p-5">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">{t('app.about.language')}</h3>

@@ -399,3 +399,17 @@ button, input, select, textarea, a {
 
 /* Orange text links need a deeper orange to read on light surfaces. */
 .light a.text-primary { color: var(--link); }
+
+/* Disclosure (components/ui/Reveal.tsx): content opens and closes by height,
+   never with a jump. Grid rows 0fr → 1fr animates to the content's height. */
+.mlx-disclose {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--dur-lg) var(--ease), opacity var(--dur) var(--ease);
+}
+.mlx-disclose[data-open="true"] { grid-template-rows: 1fr; opacity: 1; }
+.mlx-disclose > .mlx-disclose-inner { min-height: 0; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .mlx-disclose { transition-duration: 1ms; }
+}
