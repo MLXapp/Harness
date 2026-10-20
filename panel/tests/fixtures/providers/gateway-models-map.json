@@ -1,0 +1,8 @@
+{
+  "models": {
+    "fast": { "id": "vendor/fast-model-v2", "name": "Fast", "limit": { "context": 131072, "output": 16384 } },
+    "smart": { "display_name": "Smart", "context_window": 200000, "max_output_tokens": 32000 },
+    "version": "2026-10-01",
+    "": { "id": "fallback-id" }
+  }
+}

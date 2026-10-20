@@ -36,6 +36,14 @@ Copyright (c) 2026 DeepSeek, MIT License. The MIT permission notice is
 reproduced in panel/src/main/agent/compaction.ts and
 panel/src/main/agent/seatbelt.ts.
 
+Portions of the model-provider support (panel/src/shared/providers/ and
+panel/src/main/providers/: the provider endpoint catalog, API-key validation,
+model discovery, and the Settings → Models editor in
+panel/src/renderer/src/components/settings/) are adapted from DeepSeek Harness,
+Copyright (c) 2026 DeepSeek, MIT License. Each such file starts with that
+notice; the MIT permission notice is reproduced in
+panel/src/main/providers/discovery.ts.
+
 MLX Studio does not include NVIDIA's C-RADIOv2-H model code, which upstream vMLX
 vendors under vmlx_engine/vendor/transformers_modules/nvidia/ and which carries
 NVIDIA's proprietary terms rather than Apache-2.0. Nemotron Omni image and video
