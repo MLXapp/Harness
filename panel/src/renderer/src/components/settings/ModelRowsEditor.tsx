@@ -104,7 +104,7 @@ const PROBLEM_KEYS: Record<RowProblem, string> = {
 }
 
 const inputClass =
-  'w-full px-2 py-1 bg-background border border-input rounded text-xs focus:outline-none focus:ring-1 focus:ring-ring transition-colors'
+  'w-full h-7 px-2 bg-background border border-input rounded-[7px] text-[13px] focus:outline-none focus:ring-1 focus:ring-ring transition-colors'
 
 export function ModelRowsEditor({ rows, onChange, onDiscover, canDiscover, idPrefix, showProblems }: {
   rows: ModelDraftRow[]
@@ -186,7 +186,7 @@ export function ModelRowsEditor({ rows, onChange, onDiscover, canDiscover, idPre
       </div>
 
       <Reveal open={!!discoverError}>
-        <p role="alert" className="text-[11px] text-destructive break-words pb-1">{discoverError}</p>
+        <p role="alert" className="text-[12px] text-destructive break-words pb-1">{discoverError}</p>
       </Reveal>
 
       {/* Searchable multi-select of what the endpoint advertises. */}
@@ -204,7 +204,7 @@ export function ModelRowsEditor({ rows, onChange, onDiscover, canDiscover, idPre
           </div>
           <div className="max-h-56 overflow-y-auto space-y-0.5" role="listbox" aria-multiselectable="true">
             {visible.length === 0 && (
-              <p className="text-[11px] text-muted-foreground px-1 py-2">{t('providers.noModelsFound')}</p>
+              <p className="text-[12px] text-muted-foreground px-1 py-2">{t('providers.noModelsFound')}</p>
             )}
             {visible.map(m => {
               const already = existingIds.has(m.id)
@@ -235,14 +235,14 @@ export function ModelRowsEditor({ rows, onChange, onDiscover, canDiscover, idPre
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => setSelected(new Set([...selected, ...visible.filter(m => !existingIds.has(m.id)).map(m => m.id)]))}
             >
               {t('providers.selectAll')}
             </button>
             <button
               type="button"
-              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => setSelected(new Set())}
             >
               {t('providers.deselectAll')}
@@ -264,7 +264,7 @@ export function ModelRowsEditor({ rows, onChange, onDiscover, canDiscover, idPre
       </Reveal>
 
       <Reveal open={openRows.length === 0}>
-        <p className="text-[11px] text-muted-foreground pb-1">{t('providers.noModelsYet')}</p>
+        <p className="text-[12px] text-muted-foreground pb-1">{t('providers.noModelsYet')}</p>
       </Reveal>
 
       {rows.map(row => {
@@ -300,7 +300,7 @@ export function ModelRowsEditor({ rows, onChange, onDiscover, canDiscover, idPre
                 </button>
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground" htmlFor={`${fieldId}-ctx`}>
+                <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground" htmlFor={`${fieldId}-ctx`}>
                   {t('providers.contextWindow')}
                   <input
                     id={`${fieldId}-ctx`}
@@ -314,7 +314,7 @@ export function ModelRowsEditor({ rows, onChange, onDiscover, canDiscover, idPre
                     className={`${inputClass} w-20 font-mono mlx-num`}
                   />
                 </label>
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground" htmlFor={`${fieldId}-max`}>
+                <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground" htmlFor={`${fieldId}-max`}>
                   {t('providers.maxTokens')}
                   <input
                     id={`${fieldId}-max`}
@@ -328,11 +328,11 @@ export function ModelRowsEditor({ rows, onChange, onDiscover, canDiscover, idPre
                     className={`${inputClass} w-20 font-mono mlx-num`}
                   />
                 </label>
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+                <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground cursor-pointer">
                   <input type="checkbox" checked={row.image} onChange={e => update(row.key, { image: e.target.checked })} />
                   {t('providers.imageInput')}
                 </label>
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer" title={t('providers.reasoningHelp')}>
+                <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground cursor-pointer" title={t('providers.reasoningHelp')}>
                   <input
                     type="checkbox"
                     checked={row.reasoning !== null}
@@ -355,7 +355,7 @@ export function ModelRowsEditor({ rows, onChange, onDiscover, canDiscover, idPre
                           const levels = r.reasoning ?? []
                           return { ...r, reasoning: levels.includes(level) ? levels.filter(l => l !== level) : [...levels, level] }
                         }))}
-                        className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors ${
+                        className={`px-2 py-0.5 text-[12px] rounded-full border transition-colors ${
                           on ? 'bg-primary/15 border-primary/40 text-primary' : 'border-border text-muted-foreground hover:bg-accent'
                         }`}
                       >
@@ -366,7 +366,7 @@ export function ModelRowsEditor({ rows, onChange, onDiscover, canDiscover, idPre
                 </div>
               </Reveal>
               <Reveal open={!!problem}>
-                <p className="text-[11px] text-destructive">{problem ? t(PROBLEM_KEYS[problem]) : ''}</p>
+                <p className="text-[12px] text-destructive">{problem ? t(PROBLEM_KEYS[problem]) : ''}</p>
               </Reveal>
             </div>
           </Reveal>

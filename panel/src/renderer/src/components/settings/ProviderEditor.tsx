@@ -52,7 +52,7 @@ function validUrl(value: string): boolean {
 }
 
 const inputClass =
-  'w-full px-2.5 py-1.5 bg-background border border-input rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-ring transition-colors'
+  'w-full h-8 px-2.5 bg-background border border-input rounded-[8px] text-[13px] focus:outline-none focus:ring-1 focus:ring-ring transition-colors'
 
 export function ProviderEditor({ existing, catalog, takenIds, onSaved, onCancel }: {
   /** The provider being edited; absent when adding. */
@@ -178,7 +178,7 @@ export function ProviderEditor({ existing, catalog, takenIds, onSaved, onCancel 
               </button>
             ))}
           </div>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[12px] text-muted-foreground">
             {mode === 'catalog' ? t('providers.modeCatalogHint') : t('providers.modeCustomHint')}
           </p>
         </div>
@@ -208,7 +208,7 @@ export function ProviderEditor({ existing, catalog, takenIds, onSaved, onCancel 
               aria-invalid={idError}
               className={`${inputClass} font-mono ${idError || (attempted && !id.trim()) ? 'border-destructive' : ''}`}
             />
-            <p className="text-[11px] text-muted-foreground">{t('providers.providerIdHint')}</p>
+            <p className="text-[12px] text-muted-foreground">{t('providers.providerIdHint')}</p>
           </div>
         ) : null}
         <div className="space-y-1">
@@ -245,7 +245,7 @@ export function ProviderEditor({ existing, catalog, takenIds, onSaved, onCancel 
           disabled={saving}
         />
         {configured && (
-          <button type="button" onClick={clearKey} className="text-[11px] text-muted-foreground hover:text-destructive transition-colors">
+          <button type="button" onClick={clearKey} className="text-[12px] text-muted-foreground hover:text-destructive transition-colors">
             {t('providers.keyRemove')}
           </button>
         )}

@@ -55,7 +55,7 @@ export function ApiKeyField({ id, value, onChange, configured, optional, disable
             setRevealedValue(undefined)
             onChange(event.target.value)
           }}
-          className={`w-full pl-2.5 pr-9 py-1.5 bg-background border rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring transition-colors ${
+          className={`w-full h-8 pl-2.5 pr-9 bg-background border rounded-[8px] text-[13px] font-mono focus:outline-none focus:ring-1 focus:ring-ring transition-colors ${
             error ? 'border-destructive' : 'border-input'
           }`}
         />
@@ -73,7 +73,7 @@ export function ApiKeyField({ id, value, onChange, configured, optional, disable
           </button>
         )}
       </div>
-      <p id={`${id}-help`} className={`text-[11px] ${error ? 'text-destructive' : 'text-muted-foreground'}`}>
+      <p id={`${id}-help`} className={`text-[12px] ${error ? 'text-destructive' : 'text-muted-foreground'}`}>
         {error ?? t('providers.keyStoredNote')}
       </p>
     </div>
