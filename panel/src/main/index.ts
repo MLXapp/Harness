@@ -1,3 +1,5 @@
+// Must stay the first import: keeps a 0.1.x ("MLX Studio") Mac's userData folder and Keychain item.
+import './app-identity'
 import './user-data-dir'
 import { getPowerMode } from './powerMode'
 import { app, BrowserWindow, ipcMain, dialog, shell, session, nativeTheme } from 'electron'
@@ -40,6 +42,7 @@ import { startMemoryEnforcer, stopMemoryEnforcer } from './memory-enforcer'
 import { registerModelSettingsHandlers } from './db/model-settings'
 import { registerImageHandlers } from './ipc/image'
 import { networkInterfaces } from 'os'
+import { APP_DISPLAY_NAME } from '../shared/appIdentity'
 import { selectLanAddress, type NetworkInterfaceMap } from './network-address'
 import {
   resolveProofOwnedGatewayPort,
@@ -449,14 +452,14 @@ app.whenReady().then(async () => {
     app.dock?.setIcon(join(app.getAppPath(), 'resources/icon.png'))
   }
   electronApp.setAppUserModelId('app.mlx.studio')
-  // MLX Studio is a modified version of vMLX (Apache-2.0); the About panel
+  // MLX Harness is a modified version of vMLX (Apache-2.0); the About panel
   // always carries the credit.
   app.setAboutPanelOptions({
-    applicationName: 'MLX Studio',
+    applicationName: APP_DISPLAY_NAME,
     applicationVersion: app.getVersion(),
     copyright: 'Copyright 2026 Flex UK Limited (MLX Network)',
     credits: 'Built on vMLX by JANGQ AI (Apache License 2.0).\nPowered by MTPLX — https://github.com/youssofal/mtplx',
-    website: 'https://studio.mlx.app',
+    website: 'https://harness.mlx.app',
   })
 
   // Main-process i18n: load all 5 locale JSONs. The active locale is
@@ -560,7 +563,7 @@ app.whenReady().then(async () => {
   }
 
   // First run: offer to install the MLX Node this build carries (once). Asked
-  // after the window is up, so the question has MLX Studio behind it.
+  // after the window is up, so the question has MLX Harness behind it.
   if (!proofOwnedEngineLifecycle && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.once('ready-to-show', () => {
       setTimeout(() => {
