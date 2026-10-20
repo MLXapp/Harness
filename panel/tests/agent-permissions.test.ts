@@ -1,0 +1,160 @@
+import { describe, expect, it } from 'vitest'
+import {
+  alwaysAllowKey,
+  applyPermissionPresetToTools,
+  approvalRefusalMessage,
+  classifyGitCommand,
+  decideToolPermission,
+  isProtectedGitPath,
+  normalizePermissionPreset,
+  readEscalation,
+  sandboxEscalationMarker,
+  type PermissionInput,
+} from '../src/main/agent/permissions'
+import { BUILTIN_TOOLS } from '../src/main/tools/registry'
+
+const decide = (over: Partial<PermissionInput> & Pick<PermissionInput, 'toolName'>) =>
+  decideToolPermission({ preset: 'workspace', args: {}, isBuiltin: true, sandboxAvailable: true, ...over })
+
+describe('permission preset resolution', () => {
+  it('defaults to Workspace for anything unknown', () => {
+    expect(normalizePermissionPreset(undefined)).toBe('workspace')
+    expect(normalizePermissionPreset('lean')).toBe('workspace')
+    expect(normalizePermissionPreset('read-only')).toBe('read-only')
+    expect(normalizePermissionPreset('full')).toBe('full')
+  })
+
+  it('Full access never asks and never sandboxes', () => {
+    for (const toolName of ['run_command', 'spawn_process', 'run_applescript', 'write_file', 'git', 'mystery_tool']) {
+      expect(decide({ preset: 'full', toolName, args: { command: 'push origin main' } })).toEqual({ action: 'allow', sandbox: false })
+    }
+    expect(decide({ preset: 'full', toolName: 'mcp_x', isBuiltin: false })).toEqual({ action: 'allow', sandbox: false })
+  })
+
+  it('Read only allows reads and asks for writes, shell, AppleScript, MCP and non-read git', () => {
+    const ro = (toolName: string, args: Record<string, unknown> = {}, isBuiltin = true) =>
+      decide({ preset: 'read-only', toolName, args, isBuiltin })
+    expect(ro('read_file', { path: 'a' })).toEqual({ action: 'allow', sandbox: false })
+    expect(ro('fetch_url', { url: 'https://x' }).action).toBe('allow')
+    expect(ro('todo_write').action).toBe('allow')
+    expect(ro('write_file', { path: 'a.txt' })).toMatchObject({ action: 'ask', kind: 'write', subject: 'a.txt' })
+    expect(ro('move_file', { source: 'a', destination: 'b' })).toMatchObject({ action: 'ask', subject: 'a → b' })
+    expect(ro('run_command', { command: 'ls' })).toMatchObject({ action: 'ask', kind: 'shell', allowAlways: true, subject: 'ls' })
+    expect(ro('run_applescript', { script: 'beep' })).toMatchObject({ action: 'ask', kind: 'applescript', allowAlways: false })
+    expect(ro('git', { command: 'status' }).action).toBe('allow')
+    expect(ro('git', { command: 'commit -m "x"' })).toMatchObject({ action: 'ask', kind: 'git' })
+    expect(ro('some_mcp_tool', { a: 1 }, false)).toMatchObject({ action: 'ask', kind: 'mcp', subject: '{"a":1}' })
+  })
+
+  it('Workspace sandboxes shell, allows workspace writes and asks for AppleScript and git network', () => {
+    expect(decide({ toolName: 'run_command', args: { command: 'npm test' } })).toEqual({ action: 'allow', sandbox: true })
+    expect(decide({ toolName: 'spawn_process', args: { command: 'npm run dev' } })).toEqual({ action: 'allow', sandbox: true })
+    expect(decide({ toolName: 'write_file', args: { path: 'src/a.ts' } })).toEqual({ action: 'allow', sandbox: false })
+    expect(decide({ toolName: 'run_applescript', args: { script: 'beep' } })).toMatchObject({ action: 'ask', kind: 'applescript' })
+    expect(decide({ toolName: 'git', args: { command: 'commit -m "x"' } })).toEqual({ action: 'allow', sandbox: true })
+    expect(decide({ toolName: 'git', args: { command: 'push origin main' } })).toMatchObject({ action: 'ask', why: 'network' })
+    expect(decide({ toolName: 'git', args: { command: '-C /etc status' } })).toMatchObject({ action: 'ask', why: 'outside' })
+    expect(decide({ toolName: 'mcp_tool', isBuiltin: false }).action).toBe('allow')
+    expect(decide({ toolName: 'unknown_builtin' })).toMatchObject({ action: 'ask', kind: 'tool' })
+  })
+
+  it('Workspace asks for every shell command when the sandbox is unavailable', () => {
+    expect(decide({ toolName: 'run_command', args: { command: 'ls' }, sandboxAvailable: false })).toMatchObject({
+      action: 'ask', kind: 'shell', why: 'no-sandbox', allowAlways: true,
+    })
+  })
+
+  it('Workspace asks before writing git hooks or config', () => {
+    expect(isProtectedGitPath('.git/hooks/pre-commit')).toBe(true)
+    expect(isProtectedGitPath('./sub/.git/config')).toBe(true)
+    expect(isProtectedGitPath('.git/HEAD')).toBe(false)
+    expect(isProtectedGitPath('src/git/config.ts')).toBe(false)
+    expect(decide({ toolName: 'write_file', args: { path: '.git/hooks/pre-push' } })).toMatchObject({ action: 'ask', why: 'git-internals' })
+    expect(decide({ toolName: 'copy_file', args: { source: 'x', destination: '.git/config' } })).toMatchObject({ action: 'ask' })
+  })
+
+  it('"Always allow" is an exact command match per tool', () => {
+    const alwaysAllowed = new Set([alwaysAllowKey('run_command', 'npm ci')])
+    expect(decide({ preset: 'read-only', toolName: 'run_command', args: { command: 'npm ci' }, alwaysAllowed })).toEqual({ action: 'allow', sandbox: false })
+    expect(decide({ preset: 'read-only', toolName: 'run_command', args: { command: 'npm ci ' }, alwaysAllowed }).action).toBe('ask')
+    expect(decide({ preset: 'read-only', toolName: 'spawn_process', args: { command: 'npm ci' }, alwaysAllowed }).action).toBe('ask')
+    // In Workspace a remembered command runs as approved: outside the sandbox.
+    expect(decide({ toolName: 'run_command', args: { command: 'npm ci' }, alwaysAllowed })).toEqual({ action: 'allow', sandbox: false })
+  })
+})
+
+describe('sandbox escalation', () => {
+  it('pairs sandbox_permissions with a justification', () => {
+    expect(readEscalation({ command: 'x' })).toEqual({ requested: false })
+    expect(readEscalation({ sandbox_permissions: 'full_access' })).toMatchObject({ error: expect.stringContaining('justification') })
+    expect(readEscalation({ justification: 'because' })).toMatchObject({ error: expect.stringContaining('only valid') })
+    expect(readEscalation({ sandbox_permissions: 'root', justification: 'x' })).toMatchObject({ error: expect.stringContaining('full_access') })
+    expect(readEscalation({ sandbox_permissions: 'full_access', justification: ' needs npm registry \nsecond line' })).toEqual({
+      requested: true, justification: 'needs npm registry',
+    })
+  })
+
+  it('asks with the justification, refuses malformed and repeated escalations', () => {
+    const args = { command: 'npm ci', sandbox_permissions: 'full_access', justification: 'Install deps from the registry.' }
+    expect(decide({ toolName: 'run_command', args })).toMatchObject({
+      action: 'ask', kind: 'escalation', justification: 'Install deps from the registry.', subject: 'npm ci', allowAlways: false,
+    })
+    expect(decide({ toolName: 'run_command', args: { command: 'npm ci', sandbox_permissions: 'full_access' } }).action).toBe('deny')
+    const refused = new Set([alwaysAllowKey('run_command', 'npm ci')])
+    const again = decide({ toolName: 'run_command', args, refusedEscalations: refused })
+    expect(again.action).toBe('deny')
+    if (again.action === 'deny') expect(again.message).toMatch(/already refused/)
+  })
+
+  it('the marker tells the model it may retry once with a justification', () => {
+    const marker = sandboxEscalationMarker(true)
+    expect(marker).toContain('ONCE')
+    expect(marker).toContain('"sandbox_permissions": "full_access"')
+    expect(marker).toContain('"justification"')
+    expect(marker).toContain('outbound network')
+    expect(sandboxEscalationMarker(false)).not.toContain('network')
+  })
+
+  it('refusal messages are model-directed and say the call did not run', () => {
+    for (const outcome of ['deny', 'timeout', 'unavailable'] as const) {
+      const msg = approvalRefusalMessage(outcome, 'run_command')
+      expect(msg).toMatch(/not run/)
+      expect(msg).toMatch(/Do not retry/)
+    }
+  })
+})
+
+describe('git command classes', () => {
+  it.each([
+    ['status', 'read'], ['log --oneline -5', 'read'], ['diff HEAD', 'read'], ['branch', 'read'], ['branch -a', 'read'],
+    ['branch -D x', 'local'], ['commit -m "fix: a thing"', 'local'], ['checkout -b x', 'local'], ['stash list', 'read'],
+    ['stash', 'local'], ['push', 'network'], ['pull --rebase', 'network'], ['fetch origin', 'network'],
+    ['remote -v', 'read'], ['remote update', 'network'], ['--no-pager log', 'read'], ['-c core.pager=x log', 'outside'],
+    ['-C ../other status', 'outside'], ['--git-dir=/x status', 'outside'], ['config --get user.name', 'read'],
+    ['config user.name x', 'local'], ['archive --remote=x HEAD', 'network'],
+  ])('git %s → %s', (cmd, cls) => {
+    expect(classifyGitCommand(cmd)).toBe(cls)
+  })
+})
+
+describe('tool catalog under Workspace', () => {
+  it('adds the escalation fields to the shell tools only, deterministically', () => {
+    const a = applyPermissionPresetToTools(BUILTIN_TOOLS as any[], 'workspace')
+    const b = applyPermissionPresetToTools(BUILTIN_TOOLS as any[], undefined)
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b))
+    const run = a.find(t => t.function.name === 'run_command')
+    expect(run.function.parameters.properties.sandbox_permissions.enum).toEqual(['full_access'])
+    expect(run.function.parameters.required).toEqual(['command'])
+    expect(run.function.description).toMatch(/sandbox/)
+    const read = a.find(t => t.function.name === 'read_file')
+    expect(read).toBe((BUILTIN_TOOLS as any[]).find(t => t.function.name === 'read_file'))
+    // The registry itself is untouched.
+    expect((BUILTIN_TOOLS as any[]).find(t => t.function.name === 'run_command').function.parameters.properties.sandbox_permissions).toBeUndefined()
+  })
+
+  it('leaves the catalog unchanged for Read only and Full access', () => {
+    for (const preset of ['read-only', 'full']) {
+      expect(JSON.stringify(applyPermissionPresetToTools(BUILTIN_TOOLS as any[], preset))).toBe(JSON.stringify(BUILTIN_TOOLS))
+    }
+  })
+})

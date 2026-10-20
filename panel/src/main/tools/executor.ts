@@ -9,6 +9,7 @@ import { execFileSync, spawn, ChildProcess } from 'child_process'
 import { clipboard } from 'electron'
 import { db } from '../database'
 import { attachChildProcessStreamErrorGuard } from '../childProcessStreamGuards'
+import { SANDBOX_EXEC } from '../agent/seatbelt'
 
 // ─── Spawned Process Tracking ────────────────────────────────────────────────
 
@@ -25,6 +26,8 @@ const spawnedProcesses = new Map<string, SpawnedEntry>()
 export interface ToolResult {
   content: string
   is_error: boolean
+  /** The shell ran inside the Seatbelt sandbox (Workspace permissions). */
+  sandboxed?: boolean
   /** For read_image: base64 data URL to inject as a multimodal content part in VLM follow-ups */
   imageDataUrl?: string
   /** For read_video: base64 data URL to inject as a multimodal content part in VLM follow-ups */
@@ -178,12 +181,35 @@ export const WORKING_DIR_INDEPENDENT_TOOLS: ReadonlySet<string> = new Set([
   'get_current_datetime',
 ])
 
+export interface ExecuteToolOptions {
+  /**
+   * SBPL profile: run_command, spawn_process and git run under
+   * `/usr/bin/sandbox-exec -p <profile>` (Workspace permissions).
+   */
+  sandboxProfile?: string | null
+}
+
+/** The program + argv prefix for a shell command, sandboxed when a profile is given. */
+export function shellInvocation(command: string, sandboxProfile?: string | null, shell = '/bin/bash'): { file: string; args: string[] } {
+  if (sandboxProfile) return { file: SANDBOX_EXEC, args: ['-p', sandboxProfile, shell, '-c', command] }
+  return { file: shell, args: ['-c', command] }
+}
+
+/** Running agent-spawned background processes (for the quit confirmation). */
+export function runningSpawnedProcessCount(): number {
+  let n = 0
+  for (const entry of spawnedProcesses.values()) if (entry.running) n++
+  return n
+}
+
 export async function executeBuiltinTool(
   toolName: string,
   args: Record<string, any>,
   workingDir: string,
-  maxResultChars?: number
+  maxResultChars?: number,
+  options: ExecuteToolOptions = {}
 ): Promise<ToolResult> {
+  const sandboxProfile = options.sandboxProfile || null
   if (!WORKING_DIR_INDEPENDENT_TOOLS.has(toolName)) {
     const workingDirProblem = describeUnusableWorkingDir(workingDir)
     if (workingDirProblem) {
@@ -224,7 +250,7 @@ export async function executeBuiltinTool(
       case 'copy_file':
         result = copyFile(args.source, args.destination, workingDir); break
       case 'run_command':
-        result = await runCommand(args.command, workingDir); break
+        result = await runCommand(args.command, workingDir, sandboxProfile); break
       case 'run_applescript':
         result = await runAppleScript(args.script); break
       case 'web_search':
@@ -244,7 +270,7 @@ export async function executeBuiltinTool(
       case 'read_video':
         result = readVideo(args.path, workingDir); break
       case 'spawn_process':
-        result = spawnProcess(args.command, workingDir); break
+        result = spawnProcess(args.command, workingDir, sandboxProfile); break
       case 'get_process_output':
         result = getProcessOutput(args.pid); break
       case 'diff_files':
@@ -256,7 +282,7 @@ export async function executeBuiltinTool(
       case 'clipboard_write':
         result = await clipboardWrite(args.text); break
       case 'git':
-        result = gitCommand(args.command, workingDir); break
+        result = gitCommand(args.command, workingDir, sandboxProfile); break
       case 'get_current_datetime':
         result = getCurrentDatetime(); break
       // ask_user is handled in chat.ts (needs IPC to renderer), not here
@@ -265,6 +291,9 @@ export async function executeBuiltinTool(
     }
     // Truncate large results to prevent context overflow in follow-up requests
     result.content = truncateResult(result.content, maxResultChars)
+    if (sandboxProfile && (toolName === 'run_command' || toolName === 'spawn_process' || toolName === 'git')) {
+      result.sandboxed = true
+    }
     return result
   } catch (err: any) {
     return { content: err.message || String(err), is_error: true }
@@ -611,12 +640,13 @@ function copyFile(source: string, destination: string, workingDir: string): Tool
   return { content: `Copied ${source} → ${destination}`, is_error: false }
 }
 
-async function runCommand(command: string, workingDir: string): Promise<ToolResult> {
+async function runCommand(command: string, workingDir: string, sandboxProfile?: string | null): Promise<ToolResult> {
   if (!command) return { content: 'Missing required parameter: command', is_error: true }
   return new Promise((resolve) => {
     let stdout = '', stderr = ''
     let killReason = ''
-    const proc = spawn('/bin/bash', ['-c', command], {
+    const shell = shellInvocation(command, sandboxProfile)
+    const proc = spawn(shell.file, shell.args, {
       cwd: workingDir,
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe']
@@ -1458,7 +1488,7 @@ function cleanupFinishedProcesses(): void {
   }
 }
 
-function spawnProcess(command: string, workingDir: string): ToolResult {
+function spawnProcess(command: string, workingDir: string, sandboxProfile?: string | null): ToolResult {
   if (!command) return { content: 'Missing required parameter: command', is_error: true }
 
   // Clean up old finished processes before creating new ones
@@ -1466,7 +1496,8 @@ function spawnProcess(command: string, workingDir: string): ToolResult {
 
   const id = `proc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
-  const proc = spawn('/bin/bash', ['-c', command], {
+  const shell = shellInvocation(command, sandboxProfile)
+  const proc = spawn(shell.file, shell.args, {
     cwd: workingDir,
     env: { ...process.env },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -1585,7 +1616,7 @@ function getCurrentDatetime(): ToolResult {
 
 // ─── Git ─────────────────────────────────────────────────────────────────────
 
-function gitCommand(command: string, workingDir: string): ToolResult {
+function gitCommand(command: string, workingDir: string, sandboxProfile?: string | null): ToolResult {
   if (!command) return { content: 'Missing required parameter: command', is_error: true }
 
   // Block shell metacharacters that could enable command injection via /bin/sh -c.
@@ -1611,7 +1642,8 @@ function gitCommand(command: string, workingDir: string): ToolResult {
   // Use shell execution via /bin/sh -c to handle quoted args correctly
   // (e.g., git commit -m "fix: some bug" would break with naive split)
   try {
-    const output = execFileSync('/bin/sh', ['-c', `git ${command}`], {
+    const shell = shellInvocation(`git ${command}`, sandboxProfile, '/bin/sh')
+    const output = execFileSync(shell.file, shell.args, {
       cwd: workingDir,
       encoding: 'utf-8',
       timeout: 30000,
