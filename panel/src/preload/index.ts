@@ -169,6 +169,14 @@ const api = {
     answerUser: (chatId: string, answer: string) =>
       ipcRenderer.send('chat:answerUser', chatId, answer),
 
+    // Coding agent: todo list written by the todo_write tool
+    getTodos: (chatId: string) => ipcRenderer.invoke('chat:getTodos', chatId),
+    onTodos: (callback: (data: any) => void) => {
+      const handler = (_: any, data: any) => callback(data)
+      ipcRenderer.on('chat:todos', handler)
+      return () => { ipcRenderer.removeListener('chat:todos', handler) }
+    },
+
     // Image picker for vision/multimodal input
     pickImages: () => ipcRenderer.invoke('dialog:pickImages') as Promise<Array<{ dataUrl: string; name: string }>>,
     openDirectory: () => ipcRenderer.invoke('dialog:openDirectory') as Promise<{ canceled: boolean; filePaths: string[] }>,

@@ -412,6 +412,14 @@ export function getToolSummary(
       return { label: "Datetime", context: "" };
     case "get_diagnostics":
       return { label: "Diagnostics", context: args.path || "" };
+    case "todo_write": {
+      // Counts only (never the untrusted item text) in the compact header.
+      const todos: unknown[] = Array.isArray(rawArgs.todos) ? rawArgs.todos : [];
+      const done = todos.filter(
+        (t) => !!t && typeof t === "object" && (t as { status?: unknown }).status === "completed",
+      ).length;
+      return { label: "Todos", context: todos.length ? `${done}/${todos.length} done` : "cleared" };
+    }
     default:
       return { label: name, context: "" };
   }

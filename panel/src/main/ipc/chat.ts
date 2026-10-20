@@ -37,6 +37,7 @@ import {
 } from "../agent/toolResultPruning";
 import { FileReadTracker } from "../agent/readGuard";
 import { RepeatCallTracker, appendReminder } from "../agent/repeatCallReminder";
+import { parseStoredTodos, parseTodoWriteArgs, renderTodoList } from "../agent/todos";
 import { detectModelConfigFromDir } from "../model-config-registry";
 import { localEngineReadyFromHealthBody } from "../engineReadiness";
 import { getAuthHeaders } from "./utils";
@@ -4221,6 +4222,24 @@ export function registerChatHandlers(
                   }, 300000);
                 });
                 emitToolStatus("result", "ask_user", resultText, toolIteration, tc.id);
+              } else if (tc.function.name === "todo_write") {
+                // Whole-list replacement, stored per chat (needs the chat id,
+                // so it runs here rather than in the executor).
+                try {
+                  const todos = parseTodoWriteArgs(toolArgs);
+                  db.setChatTodos(chatId, JSON.stringify(todos));
+                  resultText = renderTodoList(todos);
+                  emitToolStatus("result", tc.function.name, resultText, toolIteration, tc.id);
+                  try {
+                    const win = getWindow();
+                    if (win && !win.isDestroyed()) {
+                      win.webContents.send("chat:todos", { chatId, todos });
+                    }
+                  } catch (_) {}
+                } catch (todoErr: any) {
+                  resultText = `Error: ${todoErr?.message || String(todoErr)} The list was not changed.`;
+                  emitToolStatus("error", tc.function.name, resultText, toolIteration, tc.id);
+                }
               } else if (isBuiltinTool(tc.function.name)) {
                 // Enforce tool category toggles at execution time (defense-in-depth:
                 // filterTools removes disabled tools from definitions sent to model,
@@ -5587,6 +5606,11 @@ export function registerChatHandlers(
       return { success: true };
     },
   );
+
+  // The coding agent's current todo list for a chat (written by todo_write).
+  ipcMain.handle("chat:getTodos", async (_, chatId: string) => {
+    return parseStoredTodos(db.getChatAgentState(chatId).todosJson);
+  });
 
   ipcMain.handle("chat:getOverrides", async (_, chatId: string) => {
     return sanitizeChatOverrides({

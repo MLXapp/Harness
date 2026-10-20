@@ -4,6 +4,8 @@
  * Server merges these with MCP tools automatically.
  */
 
+import { TODO_WRITE_DESCRIPTION } from '../agent/todos'
+
 export interface ToolDefinition {
   type: 'function'
   function: {
@@ -641,6 +643,37 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
         required: []
       }
     }
+  },
+  // Appended last on purpose: the catalog order is part of the cached prompt
+  // prefix, so new tools go at the end (see agent/toolPresets.ts).
+  {
+    type: 'function',
+    function: {
+      name: 'todo_write',
+      description: TODO_WRITE_DESCRIPTION,
+      parameters: {
+        type: 'object',
+        properties: {
+          todos: {
+            type: 'array',
+            description: 'The COMPLETE task list, replacing any previous list.',
+            items: {
+              type: 'object',
+              properties: {
+                content: { type: 'string', description: 'What the task is: a short imperative line.' },
+                status: {
+                  type: 'string',
+                  enum: ['pending', 'in_progress', 'completed'],
+                  description: 'pending (not started) | in_progress (now) | completed (done).'
+                }
+              },
+              required: ['content', 'status']
+            }
+          }
+        },
+        required: ['todos']
+      }
+    }
   }
 ]
 
@@ -662,7 +695,7 @@ export function isBuiltinTool(toolName: string): boolean {
  */
 export const AGENTIC_SYSTEM_PROMPT = `You are an expert software engineer with direct access to the project's file system, terminal, and the web.
 
-You have tools available for file I/O (read, write, edit, patch, copy, move, delete, create directories, read images), search and navigation (list directories, project tree, search file contents, find files by name, diff files, diagnostics), terminal commands (run commands, spawn background processes), git operations, web search, and utility functions (token counting, clipboard, asking the user questions).
+You have tools available for file I/O (read, write, edit, patch, copy, move, delete, create directories, read images), search and navigation (list directories, project tree, search file contents, find files by name, diff files, diagnostics), terminal commands (run commands, spawn background processes), git operations, web search, and utility functions (token counting, clipboard, asking the user questions), and a todo list for planning.
 
 Use the provided tools to complete tasks. Chain multiple tool calls as needed — don't stop after a single tool call if more work is required.
 
@@ -675,4 +708,5 @@ CRITICAL RULES:
 - Prefer batch edits for multiple changes to the same file.
 - Use search tools to find code patterns instead of reading entire files.
 - Use diagnostics after making code changes to catch errors early.
-- Ask the user when you need clarification — don't guess.`
+- Ask the user when you need clarification — don't guess.
+- For multi-step tasks, plan with todo_write and keep it up to date.`
