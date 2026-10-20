@@ -382,11 +382,11 @@ export function MaskPainter({
       </div>
 
       {/* Help text */}
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-[11px] text-muted-foreground">
         {t('image.mask.helpText')}
       </p>
       {maskError && (
-        <p className="text-[10px] text-destructive">{t(maskError)}</p>
+        <p className="text-[11px] text-destructive">{t(maskError)}</p>
       )}
 
       {/* Canvas */}

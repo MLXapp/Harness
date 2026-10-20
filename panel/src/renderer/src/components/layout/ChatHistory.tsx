@@ -155,7 +155,7 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
           <>
             <MessageSquare className="h-5 w-5 text-muted-foreground/40 mb-2" />
             <span className="text-xs text-muted-foreground">{t('layout.chatHistory.empty')}</span>
-            <span className="text-[10px] text-muted-foreground/50 mt-0.5">{t('layout.chatHistory.emptyHint')}</span>
+            <span className="text-[11px] text-muted-foreground/50 mt-0.5">{t('layout.chatHistory.emptyHint')}</span>
           </>
         )}
       </div>
@@ -166,14 +166,14 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
     <div className="flex-1 overflow-y-auto">
       {/* vmlx#70: bulk-delete header — shown when there's at least one chat */}
       {chats.length > 0 && !searchQuery && (
-        <div className="px-3 pt-2 pb-1 flex items-center justify-between border-b border-border/40">
-          <span className="text-[10px] text-muted-foreground/70">
+        <div className="px-3 pt-2 pb-1 flex items-center justify-between gap-2 border-b border-border/40">
+          <span className="min-w-0 truncate text-[11px] text-muted-foreground/70" title={t('layout.chatHistory.chatCountHint', { n: chats.length })}>
             {t('layout.chatHistory.chatCountHint', { n: chats.length })}
           </span>
           <button
             type="button"
             onClick={handleClearAll}
-            className="text-[10px] text-destructive hover:text-destructive/80 hover:underline flex items-center gap-1"
+            className="flex-shrink-0 whitespace-nowrap text-[11px] text-destructive hover:text-destructive/80 hover:underline flex items-center gap-1"
             aria-label={t('layout.chatHistory.clearAllAria')}
             title={t('layout.chatHistory.clearAllTitle')}
           >
@@ -184,14 +184,14 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
       )}
       {groups.map(group => (
         <div key={group.label}>
-          <div className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="px-4 pt-3 pb-1 text-[11px] font-semibold text-muted-foreground">
             {t(`layout.chatHistory.group${group.label.replace(/\s+/g, '')}`)}
           </div>
           {group.chats.map(chat => (
             <div
               key={chat.id}
               onClick={() => onChatSelect(chat.id, chat.modelPath)}
-              className={`group flex items-center gap-2 px-3 py-2 mx-1 rounded-md cursor-pointer transition-colors ${
+              className={`group flex min-h-[34px] items-center gap-2 px-2.5 py-1 mx-1.5 rounded-lg cursor-pointer transition-colors ${
                 chat.id === currentChatId
                   ? 'bg-accent text-foreground'
                   : 'text-foreground/80 hover:bg-accent/50'
@@ -207,18 +207,18 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
                       if (e.key === 'Enter') handleRename(chat.id)
                       if (e.key === 'Escape') { setRenamingId(null); setRenameValue('') }
                     }}
-                    className="flex-1 bg-background border border-input rounded px-1.5 py-0.5 text-xs"
+                    className="flex-1 min-w-0 bg-background border border-input rounded-md px-2 py-1 text-[13px]"
                   />
-                  <button onClick={() => handleRename(chat.id)} className="text-primary">
-                    <Check className="h-3 w-3" />
+                  <button onClick={() => handleRename(chat.id)} className="flex h-6 w-6 items-center justify-center rounded-md text-primary hover:bg-foreground/[0.06]" aria-label={t('common.save')}>
+                    <Check className="h-4 w-4" />
                   </button>
-                  <button onClick={() => { setRenamingId(null); setRenameValue('') }} className="text-muted-foreground">
-                    <X className="h-3 w-3" />
+                  <button onClick={() => { setRenamingId(null); setRenameValue('') }} className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.06]" aria-label={t('common.cancel')}>
+                    <X className="h-4 w-4" />
                   </button>
                 </div>
               ) : (
                 <>
-                  <span className="flex-1 text-xs truncate">{chat.title}</span>
+                  <span className="flex-1 text-[13px] leading-5 truncate">{chat.title}</span>
                   <div className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
                     <button
                       onClick={(e) => {
@@ -226,15 +226,15 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
                         setRenamingId(chat.id)
                         setRenameValue(chat.title)
                       }}
-                      className="p-0.5 text-muted-foreground hover:text-foreground rounded"
+                      className="flex h-6 w-6 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] rounded-md"
                     >
-                      <Pencil className="h-3 w-3" />
+                      <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={(e) => handleDelete(chat.id, e)}
-                      className="p-0.5 text-muted-foreground hover:text-destructive rounded"
+                      className="flex h-6 w-6 items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md"
                     >
-                      <Trash2 className="h-3 w-3" />
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 </>

@@ -883,7 +883,7 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
                 style={{ width: sessionLoadProgress?.indeterminate === false ? `${sessionLoadProgress.progress}%` : '100%' }}
               />
             </div>
-            <span className="text-[10px] text-muted-foreground flex-shrink-0">
+            <span className="text-[11px] text-muted-foreground flex-shrink-0">
               {sessionLoadProgress
                 ? `${sessionLoadProgress.labelKey
                     ? t(sessionLoadProgress.labelKey, {
@@ -895,7 +895,7 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
             </span>
           </div>
           {formatResidentLoad(sessionLoadProgress) && (
-            <p className="text-[10px] text-muted-foreground/80 mt-1 text-center">
+            <p className="text-[11px] text-muted-foreground/80 mt-1 text-center">
               {t('sessions.card.residentRam')} {formatResidentLoad(sessionLoadProgress)}
             </p>
           )}

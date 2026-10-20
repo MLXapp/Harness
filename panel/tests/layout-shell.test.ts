@@ -493,12 +493,17 @@ describe('ChatModeToolbar narrow-width controls', () => {
   const chatSettingsSource = readFileSync('src/renderer/src/components/chat/ChatSettings.tsx', 'utf8')
   const serverSettingsSource = readFileSync('src/renderer/src/components/sessions/ServerSettingsDrawer.tsx', 'utf8')
 
-  it('wraps settings below the shrinkable model and lifecycle controls', () => {
-    expect(toolbarSource).toContain('flex flex-wrap items-center gap-2')
-    expect(toolbarSource).toContain('relative flex-1 min-w-0')
-    expect(toolbarSource).toContain('flex w-full items-center gap-1.5')
-    expect(toolbarSource).toContain('flex-1 max-[800px]:hidden')
-    expect(toolbarSource).toContain('max-[800px]:basis-full max-[800px]:justify-end')
+  it('keeps settings visible beside a shrinkable lifecycle group; the model pill collapses in the composer', () => {
+    // The model is chosen in the composer now: no picker in the top bar.
+    expect(toolbarSource).not.toContain('showModelPicker')
+    expect(toolbarSource).not.toContain('handleConnectRemote')
+    expect(toolbarSource).toContain('flex min-w-0 items-center gap-1 mlx-view-in')
+    expect(toolbarSource).toContain('<div className="min-w-0 flex-1" />')
+    expect(toolbarSource).toContain('flex flex-shrink-0 items-center gap-1')
+    const inputBox = readFileSync('src/renderer/src/components/chat/InputBox.tsx', 'utf8')
+    expect(inputBox).toContain('export const COMPACT_COMPOSER_PX = 420')
+    expect(inputBox).toContain('setCompact(width < COMPACT_COMPOSER_PX)')
+    expect(inputBox).toContain('<ModelSwitcher compact={compact} />')
   })
 
   it('bounds both settings drawers to the visible main pane', () => {

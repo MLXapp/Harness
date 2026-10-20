@@ -573,7 +573,7 @@
     "input": {
       "dropOverlay": "이미지, 비디오, 오디오 또는 텍스트 파일을 드래그하여 첨부",
       "placeholderWaiting": "응답 대기 중...",
-      "placeholderDefault": "메시지...",
+      "placeholderDefault": "무엇이든 물어보세요…",
       "attachTitle": "이미지, 비디오, 오디오 또는 텍스트 파일 첨부",
       "stopTitle": "생성 중지 (Esc)",
       "sendTitle": "메시지 전송 (Enter)",
@@ -657,7 +657,8 @@
       "sttMissing": "STT 사용 불가 — 서버에 mlx-audio가 설치되지 않음",
       "micDenied": "마이크 접근이 거부되었습니다",
       "startFailed": "녹음 시작 실패",
-      "transcribeFailed": "변환 실패"
+      "transcribeFailed": "변환 실패",
+      "dictateTitle": "받아쓰기 (Apple)"
     },
     "tts": {
       "stopTitle": "재생 중지",
@@ -725,6 +726,47 @@
       "deny": "거부",
       "alwaysAllow": "이 채팅에서 이 명령을 항상 허용",
       "autoDeny": "{time} 후 자동으로 거부됩니다"
+    },
+    "switcher": {
+      "title": "모델 전환 (⌘⇧M)",
+      "chooseModel": "모델 선택",
+      "chooseFirst": "먼저 모델을 선택하세요",
+      "searchPlaceholder": "모델 검색",
+      "topModels": "인기 모델",
+      "onThisMac": "이 Mac에서",
+      "moreFrom": "{{account}}의 다른 모델",
+      "otherConnections": "기타 연결",
+      "connectAccount": "계정 연결…",
+      "connectHint": "DeepSeek, Claude, OpenAI, Gemini 또는 WaveSpeed AI",
+      "manageModels": "모델 관리…",
+      "addLocal": "이 Mac에 모델 추가…",
+      "reasoning": "추론",
+      "defaultLevel": "기본값",
+      "loaded": "로드됨",
+      "starting": "시작 중…",
+      "noMatches": "“{{query}}”와 일치하는 모델이 없습니다",
+      "from": "{{price}}부터",
+      "priceTitle": "100만 토큰당 입력 {{input}} · 출력 {{output}}",
+      "viaWavespeed": "WaveSpeed AI 경유",
+      "badge": {
+        "best": "최고",
+        "bestValue": "최고 가성비",
+        "fast": "빠름"
+      },
+      "levels": {
+        "off": "끔",
+        "low": "낮음",
+        "medium": "보통",
+        "high": "높음",
+        "xhigh": "매우 높음",
+        "max": "최대"
+      }
+    },
+    "voiceInput": {
+      "title": "음성 입력",
+      "apple": "Apple 받아쓰기",
+      "whisper": "Whisper",
+      "hint": "Apple 받아쓰기는 macOS 시스템 받아쓰기를 사용합니다. Whisper는 이 Mac의 모델로 녹음하고 받아씁니다."
     }
   },
   "sessions": {

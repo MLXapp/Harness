@@ -174,8 +174,8 @@ export function ImagePromptBar({ prompt, onPromptChange: setPrompt, capabilities
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 mb-0.5">
                 <RefreshCw className="h-3 w-3 text-emerald-500 flex-shrink-0" />
-                <span className="text-[10px] font-medium text-emerald-500 uppercase tracking-wider">{t('image.prompt.variationLabel')}</span>
-                <span className="text-[10px] text-muted-foreground ml-1">{t('image.prompt.strengthValue', { value: settings.strength })}</span>
+                <span className="text-[11px] font-medium text-emerald-500 uppercase tracking-wider">{t('image.prompt.variationLabel')}</span>
+                <span className="text-[11px] text-muted-foreground ml-1">{t('image.prompt.strengthValue', { value: settings.strength })}</span>
               </div>
               <p className="text-xs text-foreground line-clamp-2" title={iteratePrompt!}>{iteratePrompt}</p>
             </div>
@@ -200,7 +200,7 @@ export function ImagePromptBar({ prompt, onPromptChange: setPrompt, capabilities
               <img src={sourceImage.dataUrl} alt={t('image.gallery.sourceAlt')} className="h-12 w-12 rounded object-cover flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium truncate">{sourceImage.name}</p>
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-[11px] text-muted-foreground">
                   {upscale ? t('image.settings.upscaleSource') : isFillModel ? t('image.prompt.sourceInpainting') : t('image.prompt.sourceInstructionEdit')}
                   {supportsMask && maskBase64 && <span className="text-violet-400 ml-1">{t('image.prompt.maskApplied')}</span>}
                 </p>
@@ -337,7 +337,7 @@ export function ImagePromptBar({ prompt, onPromptChange: setPrompt, capabilities
       {nativeJson && prompt.trim() && !validPrompt && <p className="mt-1 text-xs text-destructive" role="alert">{t('image.settings.nativeJsonPromptInvalid')}</p>}
       {/* Prompt preview for variation */}
       {isVariation && !nativeJson && (
-        <p className="mt-1.5 text-[10px] text-muted-foreground truncate">
+        <p className="mt-1.5 text-[11px] text-muted-foreground truncate">
           {prompt.trim()
             ? <>{t('image.prompt.promptLabel')} <span className="text-foreground/70">{iteratePrompt}, {prompt.trim()}</span></>
             : <>{t('image.promptBar.variationOf')} <span className="text-foreground/70">{iteratePrompt}</span> {t('image.prompt.variationNewSeed')}</>
