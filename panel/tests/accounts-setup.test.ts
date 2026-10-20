@@ -18,7 +18,8 @@ import {
   withShownModels,
   ONBOARDING_STEPS,
 } from '../src/shared/accountSetup'
-import { FEATURED_ACCOUNTS, LOCAL_PICKS, featuredAccount } from '../src/shared/curated'
+import { FEATURED_ACCOUNTS, FEATURED_CLOUD_MODELS, LOCAL_PICKS, featuredAccount } from '../src/shared/curated'
+import { featuredProviderModel } from '../src/shared/providers/switcherGroups'
 import { freeGBFromStatfs, modelNameFromIdentifier, parseChip, parseSystemProfiler, readHardware } from '../src/main/hardware'
 import { hardwareParts } from '../src/shared/hardware'
 import { groupPickerEntries } from '../src/shared/providers/pickerGroups'
@@ -80,19 +81,24 @@ describe('hardware', () => {
 })
 
 describe('connecting an account', () => {
-  it('adds the featured models with documented levels and 1M context', () => {
+  it('adds the featured models exactly as the model switcher does, with 1M context', () => {
     expect(featuredModelsFor('deepseek')).toEqual([
-      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro Max', contextWindow: 1_000_000, input: ['text'], reasoningEfforts: ['low', 'high', 'max'] },
-      { id: 'deepseek-flash', name: 'DeepSeek Flash', contextWindow: 1_000_000, input: ['text'] },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro Max', contextWindow: 1_000_000, input: ['text', 'image'], reasoningEfforts: ['high', 'max'] },
+      { id: 'deepseek-flash', name: 'DeepSeek Flash', contextWindow: 1_000_000, input: ['text', 'image'] },
     ])
-    expect(featuredModelsFor('anthropic')[0]).toMatchObject({ id: 'claude-opus-5-5', reasoningEfforts: ['low', 'medium', 'high', 'max'] })
-    expect(featuredModelsFor('openai')[0].reasoningEfforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
-    expect(featuredModelsFor('google')[0].reasoningEfforts).toEqual(['low', 'medium', 'high'])
+    expect(featuredModelsFor('anthropic')[0]).toMatchObject({ id: 'claude-opus-5-5', reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'] })
+    expect(featuredModelsFor('openai')[0].reasoningEfforts).toEqual(['low', 'medium', 'high', 'xhigh'])
+    expect(featuredModelsFor('google')[0].reasoningEfforts).toBeUndefined()
     const ws = featuredModelsFor('wavespeed')
     expect(ws.map(m => m.id)).toEqual([
       'anthropic/claude-opus-5.5', 'deepseek/deepseek-v4-pro-0813', 'deepseek/deepseek-v4.1-flash-1017', 'openai/gpt-6-astra', 'google/gemini-4-argon',
     ])
-    expect(ws.every(m => m.reasoningEfforts === undefined && m.contextWindow === 1_000_000)).toBe(true)
+    expect(ws.every(m => m.contextWindow === 1_000_000)).toBe(true)
+    // One definition: the switcher's featuredProviderModel.
+    for (const m of FEATURED_CLOUD_MODELS) {
+      const { contextWindow: _c, ...rest } = featuredModelsFor(m.account).find(x => x.id === m.modelId)!
+      expect(rest).toEqual(featuredProviderModel(m, m.modelId))
+    }
   })
 
   it('shows featured models, stores the rest hidden, keeps earlier choices', () => {

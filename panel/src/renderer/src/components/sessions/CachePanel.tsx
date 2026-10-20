@@ -532,9 +532,9 @@ export function CachePanel({ endpoint, sessionStatus, sessionId }: CachePanelPro
                 if (n === 0 && b === 0) return null
                 return (
                   <div key={entryType} className="bg-background px-2 py-1.5 rounded border border-border">
-                    <div className="text-[10px] uppercase text-muted-foreground">{t(`sessions.cache.entryType.${entryType}`)}</div>
+                    <div className="text-[11px] uppercase text-muted-foreground">{t(`sessions.cache.entryType.${entryType}`)}</div>
                     <div className="font-mono">{t('sessions.cache.entriesCount', { n })}</div>
-                    <div className="font-mono text-[10px] text-muted-foreground">{(b / (1024 * 1024)).toFixed(1)} MB</div>
+                    <div className="font-mono text-[11px] text-muted-foreground">{(b / (1024 * 1024)).toFixed(1)} MB</div>
                   </div>
                 )
               })}
@@ -664,7 +664,7 @@ export function CachePanel({ endpoint, sessionStatus, sessionId }: CachePanelPro
           )}
           {schedulerStats.cache_hit_tokens_by_detail && Object.keys(schedulerStats.cache_hit_tokens_by_detail).length > 0 && (
             <div className="mt-2">
-              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">{t('sessions.cachePanel.hitTokensByDetail')}</div>
+              <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">{t('sessions.cachePanel.hitTokensByDetail')}</div>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 {Object.entries(schedulerStats.cache_hit_tokens_by_detail).map(([detail, tokens]: [string, any]) => (
                   <StatCard key={detail} label={detail} value={(Number(tokens) || 0).toLocaleString()} />

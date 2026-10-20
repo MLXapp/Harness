@@ -136,7 +136,7 @@ export function LogsPanel({ sessionId, sessionStatus, isRemote }: LogsPanelProps
       </div>
 
       {/* Status bar */}
-      <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-muted-foreground border-b border-border flex-shrink-0">
+      <div className="flex items-center gap-2 px-3 py-1 text-[11px] text-muted-foreground border-b border-border flex-shrink-0">
         <span>{t('sessions.logs.lineCount', { n: displayLines.length })}</span>
         {filter && <span>{t('sessions.logs.totalCount', { n: lines.length })}</span>}
         {paused && <span className="text-warning font-medium">{t('sessions.logs.paused')}</span>}

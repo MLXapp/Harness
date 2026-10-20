@@ -2013,7 +2013,7 @@ export function Tooltip({ text }: { text: string }) {
       onMouseLeave={handleLeave}
     >
       <span
-        className={`inline-flex items-center justify-center w-3.5 h-3.5 rounded-full text-[10px] font-bold cursor-help select-none ${pinned ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}
+        className={`inline-flex items-center justify-center w-3.5 h-3.5 rounded-full text-[11px] font-bold cursor-help select-none ${pinned ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}
       >
         ?
       </span>
@@ -2299,7 +2299,7 @@ function ParserField({ label, tooltip, value, onChange, options, detectedValue, 
         <button
           type="button"
           onClick={() => setShowHelp(!showHelp)}
-          className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-muted text-muted-foreground text-[10px] font-bold cursor-help select-none hover:bg-accent"
+          className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-muted text-muted-foreground text-[11px] font-bold cursor-help select-none hover:bg-accent"
           title={t('sessions.config.modelCompatTitle')}
         >
           ?
@@ -2319,13 +2319,13 @@ function ParserField({ label, tooltip, value, onChange, options, detectedValue, 
                 <div className={`font-medium leading-snug ${isSelected ? 'text-primary' : 'text-foreground'}`}>
                   {o.label}
                 </div>
-                <code className="block mt-0.5 text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded break-all leading-snug">
+                <code className="block mt-0.5 text-[11px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded break-all leading-snug">
                   {o.format}
                 </code>
                 {o.models && o.models.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {o.models.map((m, i) => (
-                      <span key={i} className={`inline-block text-[10px] px-1.5 py-px rounded-sm leading-tight ${m.startsWith('\u26A0') ? 'bg-warning/15 text-warning border border-warning/30' : 'bg-muted text-muted-foreground'
+                      <span key={i} className={`inline-block text-[11px] px-1.5 py-px rounded-sm leading-tight ${m.startsWith('\u26A0') ? 'bg-warning/15 text-warning border border-warning/30' : 'bg-muted text-muted-foreground'
                         }`}>{m}</span>
                     ))}
                   </div>
@@ -2333,13 +2333,13 @@ function ParserField({ label, tooltip, value, onChange, options, detectedValue, 
               </div>
             )
           })}
-          <div className="pt-1 border-t border-border text-[10px] text-muted-foreground/70 italic leading-snug">
+          <div className="pt-1 border-t border-border text-[11px] text-muted-foreground/70 italic leading-snug">
             {t('sessions.config.parserFinetunesNote')}
           </div>
         </div>
       )}
       {selected?.format && !helpVisible && (
-        <p className="text-[10px] text-muted-foreground mt-0.5 font-mono truncate" title={selected.format}>
+        <p className="text-[11px] text-muted-foreground mt-0.5 font-mono truncate" title={selected.format}>
           {selected.format}
         </p>
       )}
@@ -2545,7 +2545,7 @@ export function SliderField({
             disabled={disabled}
             aria-pressed={isUnlimited}
             aria-label={`${label}: ${unlimitedLabel} ${isUnlimited ? 'active' : 'inactive'}`}
-            className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${isUnlimited
+            className={`text-[11px] px-1.5 py-0.5 rounded border transition-colors ${isUnlimited
               ? 'bg-primary/15 border-primary/40 text-primary'
               : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
               }`}

@@ -11,10 +11,11 @@ import {
   reachableFeaturedModels,
   type FeaturedAccount,
   type FeaturedAccountId,
+  type FeaturedCloudModel,
   type LocalPick,
 } from './curated'
 import { catalogProvider } from './providers/catalog'
-import { PROVIDER_REASONING_LEVELS } from './providers/types'
+import { featuredProviderModel } from './providers/switcherGroups'
 import type {
   DiscoveredModel,
   ProviderDraft,
@@ -25,49 +26,21 @@ import type {
 
 // ── Models an account adds ─────────────────────────────────────────────────
 
-/** Reasoning levels each service documents for its featured models. */
-export const ACCOUNT_REASONING: Partial<Record<FeaturedAccountId, ProviderReasoningLevel[]>> = {
-  deepseek: ['low', 'high', 'max'],
-  // Claude's effort levels skip "xhigh" (platform.claude.com/docs, effort).
-  anthropic: PROVIDER_REASONING_LEVELS.filter(level => level !== 'off' && level !== 'xhigh'),
-  openai: ['low', 'medium', 'high', 'xhigh', 'max'],
-  google: ['low', 'medium', 'high'],
-}
-
-/** Featured models whose reasoning levels are not documented: offered without a level. */
-const NO_LEVELS = new Set(['deepseek-flash'])
-
 /** All five featured models take 1M tokens of context (providers' model pages). */
 export const FEATURED_CONTEXT_WINDOW = 1_000_000
-
-/** Services whose featured models also read images. */
-const IMAGE_INPUT = new Set<FeaturedAccountId>(['anthropic', 'openai', 'google'])
 
 /**
  * The models a newly connected account shows in the chat picker: its
  * featured models (native ids), or for WaveSpeed AI every featured model
- * through its gateway. Levels only where the service documents them; none
- * through WaveSpeed (not documented for the gateway).
+ * through its gateway. Same shape (name, inputs, reasoning levels) as the
+ * composer's model switcher adds (`featuredProviderModel`), so a model looks
+ * the same however it was added.
  */
 export function featuredModelsFor(accountId: FeaturedAccountId): ProviderModel[] {
-  if (accountId === 'wavespeed') {
-    return FEATURED_CLOUD_MODELS.filter(m => m.wavespeedId).map(m => ({
-      id: m.wavespeedId!,
-      name: m.name,
-      contextWindow: FEATURED_CONTEXT_WINDOW,
-      input: IMAGE_INPUT.has(m.account) ? ['text', 'image'] : ['text'],
-    }))
-  }
-  return FEATURED_CLOUD_MODELS.filter(m => m.account === accountId).map(m => {
-    const levels = NO_LEVELS.has(m.key) ? undefined : ACCOUNT_REASONING[accountId]
-    return {
-      id: m.modelId,
-      name: m.name,
-      contextWindow: FEATURED_CONTEXT_WINDOW,
-      input: IMAGE_INPUT.has(accountId) ? ['text', 'image'] : ['text'],
-      ...(levels ? { reasoningEfforts: [...levels] } : {}),
-    }
-  })
+  const via = (m: FeaturedCloudModel) => (accountId === 'wavespeed' ? m.wavespeedId : m.account === accountId ? m.modelId : undefined)
+  return FEATURED_CLOUD_MODELS
+    .filter(m => via(m))
+    .map(m => ({ ...featuredProviderModel(m, via(m)!), contextWindow: FEATURED_CONTEXT_WINDOW }))
 }
 
 /**

@@ -548,7 +548,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
           <div className="prose-on-accent bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-2.5 text-sm">
             {renderUserContent()}
           </div>
-          <span className="text-[10px] text-muted-foreground/50 mt-1 mr-1">
+          <span className="text-[11px] text-muted-foreground/50 mt-1 mr-1">
             {timeLabel}
           </span>
         </div>
@@ -595,7 +595,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
       <div className="flex-1 min-w-0">
         {/* Header: timestamp + actions */}
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-[10px] text-muted-foreground/50">
+          <span className="text-[11px] text-muted-foreground/50">
             {timeLabel}
           </span>
           {!isStreaming && message.content && (

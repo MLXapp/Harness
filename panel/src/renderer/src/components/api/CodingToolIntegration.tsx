@@ -126,7 +126,7 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-medium">{t('api.codingTools.title')}</h3>
-          <p className="text-[10px] text-muted-foreground">{t('api.codingTools.subtitle')}</p>
+          <p className="text-[11px] text-muted-foreground">{t('api.codingTools.subtitle')}</p>
         </div>
         <button onClick={refresh} className="p-1 text-muted-foreground hover:text-foreground" title={t('api.codingTools.refreshTitle')}>
           <RefreshCw className="h-3.5 w-3.5" />
@@ -152,7 +152,7 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
                     'bg-gray-400'
                   }`} />
                   <span className="text-sm font-medium">{tool.name}</span>
-                  <span className="text-[10px] text-muted-foreground">{t(tool.descKey)}</span>
+                  <span className="text-[11px] text-muted-foreground">{t(tool.descKey)}</span>
                 </div>
                 <a href={tool.link} target="_blank" rel="noopener noreferrer"
                   className="text-muted-foreground hover:text-foreground">
@@ -173,7 +173,7 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
                   </button>
                 ) : (
                   <>
-                    <span className="text-[10px] text-green-500 flex items-center gap-0.5">
+                    <span className="text-[11px] text-green-500 flex items-center gap-0.5">
                       <Check className="h-3 w-3" /> {t('api.codingTools.installed')}
                     </span>
                     {baseUrl && modelName && (
@@ -231,7 +231,7 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
                         }
                       }}
                       disabled={isLoading}
-                      className="text-[10px] text-muted-foreground hover:text-destructive mt-1"
+                      className="text-[11px] text-muted-foreground hover:text-destructive mt-1"
                     >
                       {t('api.codingTools.removeAllEntries')}
                     </button>
@@ -241,7 +241,7 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
 
               {/* Message */}
               {msg && (
-                <p className={`text-[10px] mt-1.5 ${msg.type === 'error' ? 'text-destructive' : 'text-green-500'}`}>
+                <p className={`text-[11px] mt-1.5 ${msg.type === 'error' ? 'text-destructive' : 'text-green-500'}`}>
                   {msg.text}
                 </p>
               )}
@@ -253,7 +253,7 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
                 {/* Install command */}
                 {!status?.installed && (
                   <div>
-                    <p className="text-[10px] font-medium text-muted-foreground mb-1">{t('api.codingTools.installStep', { tool: tool.name })}</p>
+                    <p className="text-[11px] font-medium text-muted-foreground mb-1">{t('api.codingTools.installStep', { tool: tool.name })}</p>
                     <div className="relative group">
                       <pre className="text-[11px] bg-black/80 text-green-400 rounded p-2 pr-8 overflow-x-auto font-mono">
                         {tool.install}
@@ -271,7 +271,7 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
 
                 {/* Config file path */}
                 <div>
-                  <p className="text-[10px] font-medium text-muted-foreground mb-1">
+                  <p className="text-[11px] font-medium text-muted-foreground mb-1">
                     {!status?.installed ? '2. ' : ''}{t('api.codingTools.editConfigFile')}
                   </p>
                   <div className="relative group">
@@ -290,7 +290,7 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
 
                 {/* Config snippet */}
                 <div>
-                  <p className="text-[10px] font-medium text-muted-foreground mb-1">
+                  <p className="text-[11px] font-medium text-muted-foreground mb-1">
                     {tool.id === 'codex' ? t('api.codingTools.appendToFile') : t('api.codingTools.mergeIntoFile')}
                   </p>
                   <div className="relative group">
@@ -308,7 +308,7 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
                 </div>
 
                 {/* Notes */}
-                <p className="text-[10px] text-muted-foreground italic leading-snug">
+                <p className="text-[11px] text-muted-foreground italic leading-snug">
                   {snippet.notes}
                 </p>
               </div>
@@ -318,7 +318,7 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
       })}
 
       {!baseUrl && (
-        <p className="text-[10px] text-muted-foreground italic">
+        <p className="text-[11px] text-muted-foreground italic">
           {t('api.codingTools.startServerHint')}
         </p>
       )}

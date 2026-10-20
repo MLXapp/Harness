@@ -3,6 +3,7 @@ import { AlertTriangle, X, Save, Trash2, Star } from 'lucide-react'
 import { useToast } from '../Toast'
 import { useTranslation } from '../../i18n'
 import { buildChatSettingsCompatibilityWarnings } from './chatSettingsCompatibility'
+import { VoiceInputSetting } from './VoiceInputSetting'
 import { buildChatSettingsResetOverrides } from '../../../../shared/chatSettingsResetPolicy'
 import { remoteServerBaseUrl } from '../../../../shared/remoteApiUrl'
 import { REASONING_EFFORT_LEVELS } from '../../../../shared/reasoningEffortPolicy'
@@ -480,6 +481,9 @@ function statusToneClass(status: string): string {
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-5">
+        {/* Mic: Apple Dictation or Whisper (app-wide) */}
+        <VoiceInputSetting />
+
         {/* Server Info */}
         <div>
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{t('chat.settings.serverInfo')}</h3>
@@ -592,7 +596,7 @@ function statusToneClass(status: string): string {
         {/* Profiles */}
         <div>
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{t('chat.settings.profiles')}</h3>
-          <p className="text-[10px] text-muted-foreground/70 mb-2">
+          <p className="text-[11px] text-muted-foreground/70 mb-2">
             {t('chat.settings.profilesInheritHint')}
           </p>
           <div className="space-y-2">
@@ -1350,7 +1354,7 @@ function BraveSearchToggle({ checked, onChange }: { checked: boolean; onChange: 
           href="https://brave.com/search/api/"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[10px] text-primary hover:underline mt-0.5 inline-block"
+          className="text-[11px] text-primary hover:underline mt-0.5 inline-block"
         >
           {t('chat.settings.braveGetKey')}
         </a>
