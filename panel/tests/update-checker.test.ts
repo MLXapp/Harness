@@ -226,12 +226,14 @@ describe('multi-source update manifests', () => {
   })
 })
 
-describe('MLX Studio update feed', () => {
+describe('MLX Harness update feed (repo MLXapp/studio)', () => {
   it('reads latest.json from MLXapp/studio and trusts studio.mlx.app downloads', async () => {
     const { LATEST_MANIFEST_URL, RELEASES_PAGE } = await import('../src/main/update-manifest')
     expect(LATEST_MANIFEST_URL).toBe('https://raw.githubusercontent.com/MLXapp/studio/main/latest.json')
     expect(RELEASES_PAGE).toBe('https://github.com/MLXapp/studio/releases')
     expect(isValidUpdateUrlFromSource('https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Studio-0.2.0-arm64.dmg')).toBe(true)
+    expect(isValidUpdateUrlFromSource('https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg')).toBe(true)
+    expect(isValidUpdateUrlFromSource('https://harness.mlx.app/download')).toBe(true)
     expect(isValidUpdateUrlFromSource('https://studio.mlx.app/download')).toBe(true)
     expect(isValidUpdateUrlFromSource('https://mlx.studio/update/latest.json')).toBe(false)
     expect(isValidUpdateUrlFromSource('https://evilmlx.app/x.dmg')).toBe(false)
@@ -255,7 +257,7 @@ describe('MLX Studio update feed', () => {
 
   it('announces a newer release only with a trusted download', async () => {
     const { decideUpdate } = await import('../src/main/update-manifest')
-    const url = 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Studio-0.2.0-arm64.dmg'
+    const url = 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg'
     const ok = decideUpdate({ version: '0.2.0', url }, '0.1.0', '15.6.0')
     expect(ok.kind).toBe('available')
     expect(ok.kind === 'available' && ok.release.url).toBe(url)

@@ -26,7 +26,7 @@ async function fetchJson<T>(url: string, parse: (raw: unknown) => T | null): Pro
     const res = await net.fetch(url, {
       method: 'GET',
       signal: ctrl.signal,
-      headers: { Accept: 'application/json', 'User-Agent': `MLXStudio/${app.getVersion()}` },
+      headers: { Accept: 'application/json', 'User-Agent': `MLXHarness/${app.getVersion()}` },
     })
     if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status}` }
     const data = parse(await res.json())

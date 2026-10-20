@@ -1,6 +1,6 @@
 /**
  * The chat model picker, local first:
- *   1. On this Mac  — MLX Studio sessions (as before)
+ *   1. On this Mac  — MLX Harness sessions (as before)
  *   2. Local servers — Ollama / LM Studio while they run
  *   3. Cloud providers — providers the user added, then remote connections
  */

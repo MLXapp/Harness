@@ -23,7 +23,7 @@
  *   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  *   SOFTWARE.
  *
- * Changes for MLX Studio: the writable roots also include the agent's spill
+ * Changes for MLX Harness: the writable roots also include the agent's spill
  * folder and the per-user Darwin cache folder; `.git/hooks` and `.git/config`
  * inside a writable root stay read-only (a hook written by a sandboxed command
  * would later run unsandboxed); outbound network is denied except to

@@ -3,13 +3,13 @@
  * (endpoint data from packages/llm/llm-pi-ai/src/provider-data.generated.ts).
  *
  * The built-in list of cloud providers offered by Settings → Models →
- * Add model provider → Catalog, and the local model servers MLX Studio probes.
+ * Add model provider → Catalog, and the local model servers MLX Harness probes.
  *
  * `dshBaseURL` records the endpoint DeepSeek Harness ships for the same
  * provider (`null` where it ships none). Where `baseURL` differs it is
- * because DSH talks to that provider through a native protocol MLX Studio does
+ * because DSH talks to that provider through a native protocol MLX Harness does
  * not implement (Google, Mistral) or ships only a plan-specific endpoint (Z.ai
- * coding plan, Qwen token plan); MLX Studio then uses the provider's
+ * coding plan, Qwen token plan); MLX Harness then uses the provider's
  * documented OpenAI-compatible endpoint, and `note` says so. Tests pin every
  * entry, so a change here is deliberate.
  *
@@ -67,7 +67,7 @@ export const PROVIDER_CATALOG: readonly CatalogProvider[] = [
     api: 'openai-completions',
     baseURL: 'https://openrouter.ai/api/v1',
     dshBaseURL: 'https://openrouter.ai/api/v1',
-    headers: { 'HTTP-Referer': 'https://studio.mlx.app', 'X-Title': 'MLX Studio' },
+    headers: { 'HTTP-Referer': 'https://harness.mlx.app', 'X-Title': 'MLX Harness' },
   },
   {
     id: 'groq',

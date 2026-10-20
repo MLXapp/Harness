@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 
 /**
- * MLX Studio follows the system appearance by default. The user can pin Light
+ * MLX Harness follows the system appearance by default. The user can pin Light
  * or Dark in Preferences; the choice is stored per machine.
  *
  * The resolved theme is written to <html> as class `light` or `dark`

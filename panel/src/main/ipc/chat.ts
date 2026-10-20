@@ -701,7 +701,7 @@ function tokenCalibratorFor(chatId: string): TokenCalibrator {
 
 /**
  * Exact shell commands the user chose "Always allow this command in this
- * chat" for (in memory: the grant lasts until MLX Studio quits).
+ * chat" for (in memory: the grant lasts until MLX Harness quits).
  */
 const alwaysAllowedCommands = new Map<string, Set<string>>();
 

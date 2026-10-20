@@ -1,5 +1,5 @@
 /*
- * MLX brand marks for MLX Studio (same shapes as mlx.app components/Logo.tsx).
+ * MLX brand marks for MLX Harness (same shapes as mlx.app components/Logo.tsx).
  * Shapes are Material Design Icons "alpha-x" (Pictogrammers, Apache 2.0).
  *   box          the MLX emblem: sidebar, app icon
  *   box-outline  secondary surfaces

@@ -1,4 +1,4 @@
-// MLX Node (bundle id app.mlx.mac): find it, install the copy MLX Studio
+// MLX Node (bundle id app.mlx.mac): find it, install the copy MLX Harness
 // carries (Contents/Resources/bundled-node/MLX Node.zip), open it, and offer
 // it once on first run. Decisions are pure functions in shared/mlxNode.ts.
 import { app, dialog, shell, type BrowserWindow, type MessageBoxOptions } from 'electron'
@@ -158,7 +158,7 @@ async function doInstall(): Promise<MlxNodeInstallResult> {
     if (apps.length !== 1) return fail('failed', `expected one app in the zip, found ${apps.length}`)
     const staged = join(staging, apps[0])
     if (!isMlxNode(await readBundleInfo(staged))) return fail('signature', 'bundle id')
-    // Our own copy only: the zip may carry the quarantine flag of the MLX Studio download.
+    // Our own copy only: the zip may carry the quarantine flag of the MLX Harness download.
     await run('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', staged], 30_000)
     const verify = await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '-R', `=${MLX_NODE_REQUIREMENT}`, staged], 120_000)
     if (!verify.ok) return fail('signature', verify.stderr.trim())

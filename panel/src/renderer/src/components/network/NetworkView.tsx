@@ -1,4 +1,4 @@
-// MLX Network page: the tie-in between MLX Studio and the MLX Network.
+// MLX Network page: the tie-in between MLX Harness and the MLX Network.
 // Every number comes from mlx.app (via the main process) or from this Mac;
 // while loading or on error the figures read "–", never a guess.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
@@ -154,7 +154,7 @@ export function NetworkView() {
   }, 15_000)
   const totals = net.snap?.totals ?? null
 
-  // (b) MLX Node on this Mac (installable from the copy MLX Studio carries)
+  // (b) MLX Node on this Mac (installable from the copy MLX Harness carries)
   const node = useMlxNode()
   const app = node.status
   // Keep the last message while its row folds away.

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fetch the public MLX Node build and stage it for MLX Studio to carry:
+# Fetch the public MLX Node build and stage it for MLX Harness to carry:
 #   panel/resources/bundled-node/MLX Node.zip   (ditto zip of "MLX Node.app")
 #   panel/resources/bundled-node/MLX Node.json  (version, build, sha256)
 # electron-builder ships both to Contents/Resources/bundled-node/ (extraResources)
@@ -39,7 +39,7 @@ trap cleanup EXIT
 
 echo "==> Downloading MLX Node from $URL"
 /usr/bin/curl -fL --proto '=https' --proto-redir '=https' --retry 3 --retry-delay 5 --max-time 600 \
-  -A "MLXStudio-CI" -o "$WORK/node.dmg" "$URL"
+  -A "MLXHarness-CI" -o "$WORK/node.dmg" "$URL"
 DMG_SHA="$(/usr/bin/shasum -a 256 "$WORK/node.dmg" | awk '{print $1}')"
 echo "    $(du -h "$WORK/node.dmg" | awk '{print $1}')  sha256 $DMG_SHA"
 

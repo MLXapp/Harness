@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build the MLX Studio DMG for Apple Silicon:
-#   panel/release/MLX-Studio-<version>-arm64.dmg
+# Build the MLX Harness DMG for Apple Silicon:
+#   panel/release/MLX-Harness-<version>-arm64.dmg
 #
 # Flavours (same source, different MLX wheels — see upstream vmlx#169):
 #   MLX_STUDIO_FLAVOR=sequoia (default)  macosx_14 wheels, macOS 14.5 and newer
@@ -40,7 +40,7 @@ case "$FLAVOR" in
 esac
 
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
-  echo "ERROR: MLX Studio DMGs are built on an Apple Silicon Mac" >&2
+  echo "ERROR: MLX Harness DMGs are built on an Apple Silicon Mac" >&2
   exit 1
 fi
 
@@ -53,7 +53,7 @@ for tool in /opt/homebrew/bin/node /opt/homebrew/bin/npx; do
 done
 
 VERSION="$(/opt/homebrew/bin/node -p "require('./package.json').version")"
-echo "==> MLX Studio $VERSION ($FLAVOR, $PLATFORM, macOS $MIN_SYSTEM+)"
+echo "==> MLX Harness $VERSION ($FLAVOR, $PLATFORM, macOS $MIN_SYSTEM+)"
 
 if [[ "${MLX_STUDIO_REUSE_PYTHON:-0}" == "1" && -x bundled-python/python/bin/python3 ]]; then
   echo "==> Reusing panel/bundled-python"
@@ -86,10 +86,10 @@ fi
 rm -rf release
 /opt/homebrew/bin/npx --no-install electron-builder --mac dmg --arm64 --publish never \
   --config.mac.minimumSystemVersion="$MIN_SYSTEM" \
-  --config.artifactName="MLX-Studio-\${version}${SUFFIX}-\${arch}.\${ext}" \
+  --config.artifactName="MLX-Harness-\${version}${SUFFIX}-\${arch}.\${ext}" \
   ${identity_args[@]+"${identity_args[@]}"}
 
-DMG="release/MLX-Studio-${VERSION}${SUFFIX}-arm64.dmg"
+DMG="release/MLX-Harness-${VERSION}${SUFFIX}-arm64.dmg"
 if [[ ! -f "$DMG" ]]; then
   echo "ERROR: expected $DMG was not produced" >&2
   ls -la release >&2 || true
@@ -98,7 +98,7 @@ fi
 
 NODE_ZIP="resources/bundled-node/MLX Node.zip"
 if [[ -f "$NODE_ZIP" ]]; then
-  PACKED_APP="$(ls -d release/mac*/"MLX Studio.app" 2>/dev/null | head -1 || true)"
+  PACKED_APP="$(ls -d release/mac*/"MLX Harness.app" 2>/dev/null | head -1 || true)"
   PACKED="$PACKED_APP/Contents/Resources/bundled-node/MLX Node.zip"
   if [[ ! -f "$PACKED" ]]; then
     echo "ERROR: MLX Node was staged but isn't in the packaged app ($PACKED)" >&2

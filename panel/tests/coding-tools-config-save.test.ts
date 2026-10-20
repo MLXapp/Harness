@@ -217,6 +217,43 @@ describe('coding tool config saving', () => {
     expect(repaired).not.toContain('max_context =')
     expect(repaired.match(new RegExp(`\\[model_providers\\.${provider}\\]`, 'g'))).toHaveLength(1)
   })
+
+  it('takes over the managed Codex block written by 0.1.x (MLX Studio) and names itself MLX Harness', async () => {
+    const add = electronMock.handlers.get('tools:addCodingToolConfig')!
+    const remove = electronMock.handlers.get('tools:removeCodingToolConfig')!
+    const baseUrl = 'http://localhost:8080'
+    const model = 'mlx-community/Qwen3-4B-4bit'
+    const provider = 'MLXSTUDIO_MLX_COMMUNITY_QWEN3_4B_4BIT'
+    const previous = 'model = "gpt-5"\nmodel_provider = "openai"'
+    mkdirSync(join(home, '.codex'), { recursive: true })
+    writeFileSync(
+      join(home, '.codex', 'config.toml'),
+      '# >>> MLX Studio managed Codex defaults\n' +
+        `# previous-defaults-base64: ${Buffer.from(previous, 'utf8').toString('base64')}\n` +
+        `model = "${model}"\n` +
+        `model_provider = "${provider}"\n` +
+        'model_context_window = 32768\n' +
+        '# <<< MLX Studio managed Codex defaults\n\n' +
+        `[model_providers.${provider}]\n` +
+        `name = "MLX Studio (${model})"\n` +
+        `base_url = "${baseUrl}/v1"\n` +
+        'wire_api = "responses"\n',
+    )
+
+    expect(await add({}, 'codex', baseUrl, model, 8080)).toEqual({ success: true })
+    const updated = readFileSync(join(home, '.codex', 'config.toml'), 'utf8')
+    expect(updated).not.toContain('Studio')
+    expect(updated).toContain('# >>> MLX Harness managed Codex defaults')
+    expect(updated).toContain(`name = "MLX Harness (${model})"`)
+    expect(updated.match(/^model\s*=/gm)).toHaveLength(1) // the user's own defaults stay parked, not duplicated
+    expect(updated).toContain(`# previous-defaults-base64: ${Buffer.from(previous, 'utf8').toString('base64')}`)
+
+    expect(await remove({}, 'codex', provider)).toEqual({ success: true })
+    const restored = readFileSync(join(home, '.codex', 'config.toml'), 'utf8')
+    expect(restored).toContain('model = "gpt-5"')
+    expect(restored).not.toContain('managed Codex defaults')
+    expect(restored).not.toContain(provider)
+  })
 })
 
 function mkTempHome(): string {

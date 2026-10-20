@@ -37,7 +37,7 @@ const HYBRID_JANG_PROFILES = [
 
 const HYBRID_LOAD_NOTE =
   'Hybrid GatedDeltaNet/Mamba conv1d may crash on direct mlx_lm/mlx_vlm load with jang < 2.5.27. ' +
-  'MLX Studio applies a runtime grouped-Conv1d backstop, but this is not a coherence guarantee. ' +
+  'MLX Harness applies a runtime grouped-Conv1d backstop, but this is not a coherence guarantee. ' +
   'For external loaders, re-convert with jang >= 2.5.27.'
 
 export const KNOWN_INCOMPATIBLE_FAMILIES: Record<string, FamilyCompatEntry> = {

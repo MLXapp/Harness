@@ -1,5 +1,5 @@
 // MLX Node on this Mac, for the Network page and Preferences: status (polled
-// while the window is visible), install the copy MLX Studio carries, open it.
+// while the window is visible), install the copy MLX Harness carries, open it.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MlxAppStatus } from '../../../../shared/mlxNetwork'
 import type { MlxNodeInstallError } from '../../../../shared/mlxNode'

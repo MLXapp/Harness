@@ -39,10 +39,10 @@ export function ConsoleSidebar({ onChatSelect, onNewChat }: ConsoleSidebarProps)
   return (
     <aside data-vmlx-section="console-sidebar"
       className={`shrink-0 border-r border-sidebar-border bg-sidebar flex flex-col min-h-0 overflow-hidden transition-[width] duration-300 ease-mlx ${collapsed ? 'w-14' : 'w-[244px] max-[900px]:w-[208px]'}`}>
-      <div className="h-16 flex items-center gap-2.5 px-[14px] shrink-0" aria-label="MLX Studio">
+      <div className="h-16 flex items-center gap-2.5 px-[14px] shrink-0" aria-label="MLX Harness">
         <Emblem size={28} className="shrink-0" />
         <span data-vmlx-control="app-logo" className={`text-[17px] leading-none text-foreground ${fade}`}>
-          <Wordmark /> <span className="font-medium text-muted-foreground">Studio</span>
+          <Wordmark /> <span className="font-medium text-muted-foreground">Harness</span>
         </span>
       </div>
       <nav aria-label={t('console.pages')} className="relative px-2 pb-3">

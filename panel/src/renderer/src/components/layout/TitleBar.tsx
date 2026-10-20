@@ -48,7 +48,7 @@ export function TitleBar() {
       </div>
 
       <div className="flex-1 min-w-0 text-center text-[12px] font-medium text-muted-foreground truncate">
-        MLX Studio
+        MLX Harness
       </div>
 
       {/* Right: language picker + preferences. Appearance lives in Preferences. */}

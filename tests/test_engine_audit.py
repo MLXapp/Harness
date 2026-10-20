@@ -35,12 +35,12 @@ import pytest
 
 
 
-# MLX Studio removes upstream's vendored NVIDIA C-RADIO code (proprietary terms; see NOTICE).
+# MLX Harness removes upstream's vendored NVIDIA C-RADIO code (proprietary terms; see NOTICE).
 from pathlib import Path as _P
 import pytest as _pytest
 _NO_VENDORED_CRADIO = _pytest.mark.skipif(
     not (_P(__file__).resolve().parents[1] / "vmlx_engine" / "vendor" / "transformers_modules" / "nvidia").is_dir(),
-    reason="MLX Studio does not ship NVIDIA's C-RADIO code",
+    reason="MLX Harness does not ship NVIDIA's C-RADIO code",
 )
 
 def _frames_stub(make_frames):

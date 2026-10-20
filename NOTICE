@@ -1,7 +1,8 @@
-MLX Studio
+MLX Harness
 Copyright 2026 Flex UK Limited (MLX Network)
 
-MLX Studio is a modified version of vMLX
+MLX Harness (called MLX Studio up to version 0.1.x; not JANGQ AI's app of
+that name) is a modified version of vMLX
 (https://github.com/jjang-ai/vmlx, imported at commit aa098f6, version 1.6.80).
 vMLX is Copyright 2026 JANGQ AI and is licensed under the Apache License,
 Version 2.0. The modifications in this repository are Copyright 2026 Flex UK
@@ -9,8 +10,8 @@ Limited (MLX Network) and are licensed under the same License. See LICENSE and
 panel/LICENSE.
 
 Files changed from vMLX carry their changes in this repository's Git history;
-docs/MLX-STUDIO.md summarises them. The vMLX name and logo are used only to
-credit the upstream project, not as MLX Studio branding.
+docs/MLX-HARNESS.md summarises them. The vMLX name and logo are used only to
+credit the upstream project, not as MLX Harness branding.
 
 The MLX emblem (Material Design Icons "alpha-x", Pictogrammers) is used under
 the Apache License 2.0.
@@ -20,7 +21,7 @@ licenses, among them:
 
   * Powered by MTPLX — https://github.com/youssofal/mtplx
     Copyright 2026 Youssof Altoukhi, Apache License 2.0. MTPLX requires this
-    attribution to be shown inside the product; MLX Studio shows it in
+    attribution to be shown inside the product; MLX Harness shows it in
     Preferences (About) and in the macOS About panel.
     See vmlx_engine/metal/third_party/mtplx_gdn/NOTICE and
     native_extensions/qsa_kernels/mtplx_qsa_kernels/NOTICE.
@@ -44,7 +45,7 @@ Copyright (c) 2026 DeepSeek, MIT License. Each such file starts with that
 notice; the MIT permission notice is reproduced in
 panel/src/main/providers/discovery.ts.
 
-MLX Studio does not include NVIDIA's C-RADIOv2-H model code, which upstream vMLX
+MLX Harness does not include NVIDIA's C-RADIOv2-H model code, which upstream vMLX
 vendors under vmlx_engine/vendor/transformers_modules/nvidia/ and which carries
 NVIDIA's proprietary terms rather than Apache-2.0. Nemotron Omni image and video
 input downloads that code from Hugging Face (nvidia/C-RADIOv2-H) on first use,
