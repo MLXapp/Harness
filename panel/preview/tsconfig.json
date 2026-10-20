@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["src/renderer/*"]
+    },
+    "types": ["node", "vite/client"]
+  },
+  "include": ["./**/*.ts", "./**/*.tsx", "../src/env.d.ts", "../src/renderer/src/**/*.d.ts"],
+  "exclude": ["./dist"],
+  "references": []
+}
