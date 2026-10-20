@@ -39,6 +39,18 @@ import { join } from 'node:path'
 
 export const SANDBOX_EXEC = '/usr/bin/sandbox-exec'
 
+let sandboxExecPath = SANDBOX_EXEC
+
+/** The sandbox-exec binary the shell tools invoke. */
+export function sandboxExec(): string {
+  return sandboxExecPath
+}
+
+/** Test hook: a fake sandbox-exec (Linux CI cannot run the real one). */
+export function setSandboxExecForTests(path?: string): void {
+  sandboxExecPath = path ?? SANDBOX_EXEC
+}
+
 export interface SeatbeltPolicy {
   /** Folders (and everything under them) the confined command may write. */
   writableRoots: readonly string[]
@@ -102,7 +114,7 @@ export function buildSeatbeltProfile(policy: SeatbeltPolicy): string {
 
 /** argv that runs one shell command under the profile. */
 export function seatbeltArgv(profile: string, command: string, shell = '/bin/bash'): string[] {
-  return [SANDBOX_EXEC, '-p', profile, shell, '-c', command]
+  return [sandboxExec(), '-p', profile, shell, '-c', command]
 }
 
 let darwinCacheDir: string | null | undefined

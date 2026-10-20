@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Sparkles, Loader2 } from 'lucide-react'
 import { MessageList } from './MessageList'
+import { ApprovalCards } from './ApprovalCards'
 import { InputBox, MediaAttachment } from './InputBox'
 import { useToast } from '../Toast'
 import { useTranslation } from '../../i18n'
@@ -812,6 +813,8 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
         onRegenerate={handleRegenerate}
         onEdit={handleEdit}
       />
+      {/* Approval cards: the agent waits for Allow / Deny (permission presets) */}
+      {chatId && <ApprovalCards chatId={chatId} />}
       {/* ask_user tool: inline question from model */}
       {askUserQuestion && chatId && (
         <div className="border-t border-border bg-card px-4 py-3">

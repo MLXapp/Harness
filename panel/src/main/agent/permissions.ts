@@ -95,7 +95,8 @@ function splitWords(command: string): string[] {
 /**
  * Classify the argument string of the `git` tool (without the leading "git").
  *  - outside: a global option before the subcommand (-C, -c, --git-dir,
- *    --work-tree, --exec-path …) can point git elsewhere or run code;
+ *    --work-tree, --exec-path …) or a config write can point git elsewhere
+ *    or make a later git run execute code;
  *  - network: talks to a remote;
  *  - read: only reads the repository;
  *  - local: changes the repository in the working directory.
@@ -119,6 +120,8 @@ export function classifyGitCommand(command: string): GitCommandClass {
   if (sub === 'remote' && listOnly(['-v', '--verbose'])) return 'read'
   if (sub === 'stash' && (rest[0] === 'list' || rest[0] === 'show')) return 'read'
   if (sub === 'config' && rest.some(w => w === '--get' || w === '--list' || w === '-l' || w === '--get-all' || w === '--get-regexp')) return 'read'
+  // core.hooksPath, aliases, pagers, sshCommand …: config can make later git runs execute code.
+  if (sub === 'config') return 'outside'
   if (sub === 'reflog' && (rest.length === 0 || rest[0] === 'show')) return 'read'
   return 'local'
 }
@@ -255,7 +258,10 @@ export function decideToolPermission(input: PermissionInput): PermissionDecision
     if (preset === 'read-only') return cls === 'read' ? { action: 'allow', sandbox: false } : ask('git', 'read-only')
     if (cls === 'network') return ask('git', 'network')
     if (cls === 'outside') return ask('git', 'outside')
-    return { action: 'allow', sandbox: input.sandboxAvailable }
+    // Local git work runs as before (metacharacters are refused, the
+    // destructive set is blocked in the executor). Not sandboxed: the repo's
+    // .git may sit above the working directory.
+    return { action: 'allow', sandbox: false }
   }
 
   if (WRITE_TOOLS.has(toolName)) {

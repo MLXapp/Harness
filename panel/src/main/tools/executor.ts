@@ -9,7 +9,8 @@ import { execFileSync, spawn, ChildProcess } from 'child_process'
 import { clipboard } from 'electron'
 import { db } from '../database'
 import { attachChildProcessStreamErrorGuard } from '../childProcessStreamGuards'
-import { SANDBOX_EXEC } from '../agent/seatbelt'
+import { looksLikeSandboxDenial, sandboxExec, seatbeltSupport } from '../agent/seatbelt'
+import { sandboxEscalationMarker } from '../agent/permissions'
 
 // ─── Spawned Process Tracking ────────────────────────────────────────────────
 
@@ -19,6 +20,8 @@ interface SpawnedEntry {
   stderr: string
   running: boolean
   startedAt: number
+  /** Started inside the Workspace sandbox. */
+  sandboxed?: boolean
 }
 
 const spawnedProcesses = new Map<string, SpawnedEntry>()
@@ -183,7 +186,7 @@ export const WORKING_DIR_INDEPENDENT_TOOLS: ReadonlySet<string> = new Set([
 
 export interface ExecuteToolOptions {
   /**
-   * SBPL profile: run_command, spawn_process and git run under
+   * SBPL profile: run_command and spawn_process run under
    * `/usr/bin/sandbox-exec -p <profile>` (Workspace permissions).
    */
   sandboxProfile?: string | null
@@ -191,7 +194,7 @@ export interface ExecuteToolOptions {
 
 /** The program + argv prefix for a shell command, sandboxed when a profile is given. */
 export function shellInvocation(command: string, sandboxProfile?: string | null, shell = '/bin/bash'): { file: string; args: string[] } {
-  if (sandboxProfile) return { file: SANDBOX_EXEC, args: ['-p', sandboxProfile, shell, '-c', command] }
+  if (sandboxProfile) return { file: sandboxExec(), args: ['-p', sandboxProfile, shell, '-c', command] }
   return { file: shell, args: ['-c', command] }
 }
 
@@ -282,7 +285,7 @@ export async function executeBuiltinTool(
       case 'clipboard_write':
         result = await clipboardWrite(args.text); break
       case 'git':
-        result = gitCommand(args.command, workingDir, sandboxProfile); break
+        result = gitCommand(args.command, workingDir); break
       case 'get_current_datetime':
         result = getCurrentDatetime(); break
       // ask_user is handled in chat.ts (needs IPC to renderer), not here
@@ -291,7 +294,7 @@ export async function executeBuiltinTool(
     }
     // Truncate large results to prevent context overflow in follow-up requests
     result.content = truncateResult(result.content, maxResultChars)
-    if (sandboxProfile && (toolName === 'run_command' || toolName === 'spawn_process' || toolName === 'git')) {
+    if (sandboxProfile && (toolName === 'run_command' || toolName === 'spawn_process')) {
       result.sandboxed = true
     }
     return result
@@ -1503,7 +1506,7 @@ function spawnProcess(command: string, workingDir: string, sandboxProfile?: stri
     stdio: ['ignore', 'pipe', 'pipe']
   })
 
-  const entry: SpawnedEntry = { proc, stdout: '', stderr: '', running: true, startedAt: Date.now() }
+  const entry: SpawnedEntry = { proc, stdout: '', stderr: '', running: true, startedAt: Date.now(), sandboxed: !!sandboxProfile }
   proc.stdout?.on('data', (d: Buffer) => {
     entry.stdout += d.toString()
     if (entry.stdout.length > 100000) entry.stdout = entry.stdout.slice(-50000)
@@ -1539,6 +1542,11 @@ function getProcessOutput(pid: string): ToolResult {
   if (entry.stdout) output += `\nSTDOUT:\n${entry.stdout.slice(-20000)}`
   if (entry.stderr) output += `\nSTDERR:\n${entry.stderr.slice(-10000)}`
   if (!entry.stdout && !entry.stderr) output += '\n(no output yet)'
+  // A sandboxed background process that the sandbox stopped: same retry
+  // hint as run_command (re-spawn it with sandbox_permissions).
+  if (entry.sandboxed && !entry.running && looksLikeSandboxDenial(entry.stderr)) {
+    output += sandboxEscalationMarker(seatbeltSupport().network)
+  }
   return { content: output, is_error: false }
 }
 
@@ -1616,7 +1624,7 @@ function getCurrentDatetime(): ToolResult {
 
 // ─── Git ─────────────────────────────────────────────────────────────────────
 
-function gitCommand(command: string, workingDir: string, sandboxProfile?: string | null): ToolResult {
+function gitCommand(command: string, workingDir: string): ToolResult {
   if (!command) return { content: 'Missing required parameter: command', is_error: true }
 
   // Block shell metacharacters that could enable command injection via /bin/sh -c.
@@ -1642,8 +1650,7 @@ function gitCommand(command: string, workingDir: string, sandboxProfile?: string
   // Use shell execution via /bin/sh -c to handle quoted args correctly
   // (e.g., git commit -m "fix: some bug" would break with naive split)
   try {
-    const shell = shellInvocation(`git ${command}`, sandboxProfile, '/bin/sh')
-    const output = execFileSync(shell.file, shell.args, {
+    const output = execFileSync('/bin/sh', ['-c', `git ${command}`], {
       cwd: workingDir,
       encoding: 'utf-8',
       timeout: 30000,

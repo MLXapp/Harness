@@ -178,6 +178,22 @@ const api = {
       return () => { ipcRenderer.removeListener('chat:compaction', handler) }
     },
 
+    // Coding agent: approval cards (permission presets) and sandbox status
+    onApprovalRequest: (callback: (data: any) => void) => {
+      const handler = (_: any, data: any) => callback(data)
+      ipcRenderer.on('chat:approvalRequest', handler)
+      return () => { ipcRenderer.removeListener('chat:approvalRequest', handler) }
+    },
+    onApprovalSettled: (callback: (data: any) => void) => {
+      const handler = (_: any, data: any) => callback(data)
+      ipcRenderer.on('chat:approvalSettled', handler)
+      return () => { ipcRenderer.removeListener('chat:approvalSettled', handler) }
+    },
+    answerApproval: (id: string, answer: 'allow-once' | 'allow-always' | 'deny') =>
+      ipcRenderer.invoke('chat:answerApproval', id, answer),
+    getPendingApprovals: (chatId: string) => ipcRenderer.invoke('chat:pendingApprovals', chatId),
+    sandboxStatus: () => ipcRenderer.invoke('chat:sandboxStatus'),
+
     // Coding agent: todo list written by the todo_write tool
     getTodos: (chatId: string) => ipcRenderer.invoke('chat:getTodos', chatId),
     onTodos: (callback: (data: any) => void) => {

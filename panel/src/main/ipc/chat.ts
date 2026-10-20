@@ -1,5 +1,5 @@
 // vMLX panel chat IPC — authored by Jinho Jang
-import { app, ipcMain, BrowserWindow, net } from "electron";
+import { app, ipcMain, BrowserWindow, Notification, net } from "electron";
 import { v4 as uuidv4 } from "uuid";
 import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
@@ -45,6 +45,21 @@ import {
   orderToolsForPrefixCache,
 } from "../agent/toolPresets";
 import { loadProjectInstructions } from "../agent/projectInstructions";
+import {
+  alwaysAllowKey,
+  applyPermissionPresetToTools,
+  approvalRefusalMessage,
+  decideToolPermission,
+  normalizePermissionPreset,
+  sandboxEscalationMarker,
+} from "../agent/permissions";
+import { ApprovalBroker, type ApprovalCard } from "../agent/approvals";
+import { t as tMain } from "../i18n";
+import {
+  looksLikeSandboxDenial,
+  seatbeltSupport,
+  workspaceSandboxProfile,
+} from "../agent/seatbelt";
 import {
   SummaryStreamCollector,
   TokenCalibrator,
@@ -681,8 +696,39 @@ function tokenCalibratorFor(chatId: string): TokenCalibrator {
   return calibrator;
 }
 
+/**
+ * Exact shell commands the user chose "Always allow this command in this
+ * chat" for (in memory: the grant lasts until MLX Studio quits).
+ */
+const alwaysAllowedCommands = new Map<string, Set<string>>();
+
+/** Approval cards between the agent loop and the chat window (set up in registerChatHandlers). */
+let approvalBroker: ApprovalBroker | null = null;
+
+/**
+ * Chats whose agent turn is running right now (used by the quit
+ * confirmation to name what quitting would interrupt).
+ */
+export function activeAgentChatIds(): string[] {
+  return [...activeRequests.entries()]
+    .filter(([, entry]) => !entry.controller.signal.aborted)
+    .map(([chatId]) => chatId);
+}
+
+/** The model's stated intent for the pending call: its text before the tool call, last paragraph. */
+function statedIntent(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  if (!cleaned) return undefined;
+  const paragraphs = cleaned.split(/\n\s*\n/);
+  const last = paragraphs[paragraphs.length - 1].replace(/\s+/g, " ").trim();
+  if (!last) return undefined;
+  return last.length > 280 ? `…${last.slice(-279)}` : last;
+}
+
 /** Forget a deleted chat's agent session state and spilled tool results. */
 function clearChatAgentRuntime(chatId: string): void {
+  alwaysAllowedCommands.delete(chatId);
   fileReadTracker.clear(chatId);
   repeatCallTracker.clear(chatId);
   tokenCalibrators.delete(chatId);
@@ -890,6 +936,79 @@ export function registerChatHandlers(
   } catch (err) {
     console.warn("[CHAT] Could not prepare the tool-result spill folder", err);
   }
+
+  // Approval cards. A request is shown in the current window; with no window
+  // it fails closed at once, and if that window is destroyed while cards are
+  // pending they all resolve as refused. A reloaded window re-reads pending
+  // cards (chat:pendingApprovals), so a reload does not lose them.
+  const watchedContents = new WeakSet<object>();
+  const watchWindowGone = (win: BrowserWindow) => {
+    const wc: any = win.webContents;
+    if (!wc || watchedContents.has(wc) || typeof wc.once !== "function") return;
+    watchedContents.add(wc);
+    wc.once("destroyed", () => {
+      const n = approvalBroker?.cancelAll("unavailable") ?? 0;
+      if (n > 0) console.log(`[CHAT] Window closed: ${n} pending approval(s) refused`);
+    });
+  };
+  const notifyIfAway = (win: BrowserWindow, card: ApprovalCard) => {
+    try {
+      const visible = typeof win.isVisible === "function" ? win.isVisible() : true;
+      const focused = typeof win.isFocused === "function" ? win.isFocused() : true;
+      if (visible && focused) return;
+      if (typeof Notification !== "function" || !Notification.isSupported()) return;
+      const subject = card.subject.replace(/\s+/g, " ").trim();
+      const note = new Notification({
+        title: tMain("main.notify.approvalTitle"),
+        body: `${card.toolName}: ${subject.length > 120 ? `${subject.slice(0, 119)}…` : subject}`,
+      });
+      note.on("click", () => {
+        const w = getWindow();
+        if (!w || w.isDestroyed()) return;
+        if (w.isMinimized()) w.restore();
+        w.show();
+        w.focus();
+      });
+      note.show();
+    } catch (_) {
+      /* notifications are a convenience */
+    }
+  };
+  approvalBroker = new ApprovalBroker({
+    show: (card) => {
+      const win = getWindow();
+      if (!win || win.isDestroyed()) return false;
+      watchWindowGone(win);
+      win.webContents.send("chat:approvalRequest", card);
+      notifyIfAway(win, card);
+      return true;
+    },
+    settled: (card, outcome) => {
+      const win = getWindow();
+      if (win && !win.isDestroyed()) {
+        win.webContents.send("chat:approvalSettled", {
+          id: card.id,
+          chatId: card.chatId,
+          outcome,
+        });
+      }
+    },
+  });
+  ipcMain.handle(
+    "chat:answerApproval",
+    (event: any, id: string, answer: string) => {
+      // Only the chat window may answer (not another BrowserWindow).
+      const win = getWindow();
+      if (!win || win.isDestroyed() || event?.sender !== win.webContents) {
+        return { accepted: false };
+      }
+      return { accepted: approvalBroker?.answer(id, answer) ?? false };
+    },
+  );
+  ipcMain.handle("chat:pendingApprovals", (_, chatId: string) =>
+    approvalBroker?.list(typeof chatId === "string" ? chatId : undefined) ?? [],
+  );
+  ipcMain.handle("chat:sandboxStatus", () => seatbeltSupport());
   const pushChatSessionLog = (sessionId: string | undefined, line: string) => {
     if (!sessionId) return;
     const data = line.endsWith("\n") ? line : `${line}\n`;
@@ -1789,6 +1908,83 @@ export function registerChatHandlers(
         exactlyOnceToolNames.filter((name) => isBuiltinTool(name));
       const completedExactFinalTools = new Set<string>();
       const completedExactlyOnceTools = new Set<string>();
+      // Permission preset (Read only / Workspace / Full access) for this turn.
+      const permissionPreset = normalizePermissionPreset(overrides?.permissionPreset);
+      // Escalations the user refused this turn: the same one is not asked twice.
+      const refusedEscalations = new Set<string>();
+      /**
+       * Decide whether a tool call may run, asking the user when the preset
+       * says so. Resolves with whether to sandbox the shell, or with the
+       * model-directed refusal text. Throws AbortError when Stop is pressed
+       * while the card is open.
+       */
+      const refusalOf = (gate: { ok: true } | { ok: false; message: string }): string | null =>
+        gate.ok ? null : gate.message;
+      const gateToolCall = async (
+        toolName: string,
+        toolArgs: Record<string, any>,
+        toolCallId: string | undefined,
+        isBuiltin: boolean,
+        modelText: string,
+      ): Promise<{ ok: true; sandboxProfile: string | null } | { ok: false; message: string }> => {
+        const decision = decideToolPermission({
+          preset: permissionPreset,
+          toolName,
+          args: toolArgs,
+          isBuiltin,
+          sandboxAvailable: seatbeltSupport().available,
+          alwaysAllowed: alwaysAllowedCommands.get(chatId),
+          refusedEscalations,
+        });
+        if (decision.action === "deny") return { ok: false, message: decision.message };
+        if (decision.action === "allow") {
+          if (!decision.sandbox) return { ok: true, sandboxProfile: null };
+          const profile = workspaceSandboxProfile(
+            overrides?.workingDirectory ?? "",
+            join(agentSpillRoot(), chatId),
+          );
+          if (profile) return { ok: true, sandboxProfile: profile };
+          // The probe passed but no profile: never run unconfined silently.
+          return { ok: false, message: approvalRefusalMessage("unavailable", toolName) };
+        }
+        const broker = approvalBroker;
+        const outcome = broker
+          ? await broker.request({
+              chatId,
+              toolCallId,
+              toolName,
+              kind: decision.kind,
+              subject: decision.subject.length > 8000 ? `${decision.subject.slice(0, 8000)}…` : decision.subject,
+              reason: decision.justification ?? statedIntent(modelText),
+              why: decision.why,
+              allowAlways: decision.allowAlways,
+              signal: abortController.signal,
+            })
+          : "unavailable";
+        const key = alwaysAllowKey(toolName, toolArgs.command);
+        console.log(`[CHAT] Approval for ${toolName} (${decision.kind}): ${outcome}`);
+        if (outcome === "allow-once" || outcome === "allow-always") {
+          if (outcome === "allow-always") {
+            let set = alwaysAllowedCommands.get(chatId);
+            if (!set) alwaysAllowedCommands.set(chatId, (set = new Set()));
+            set.add(key);
+          }
+          // Approved as shown: runs outside the sandbox.
+          return { ok: true, sandboxProfile: null };
+        }
+        if (outcome === "aborted") {
+          throw Object.assign(new Error("AbortError"), { name: "AbortError" });
+        }
+        if (decision.kind === "escalation") refusedEscalations.add(key);
+        return {
+          ok: false,
+          message: approvalRefusalMessage(
+            outcome,
+            toolName,
+            Math.round((broker?.timeoutMs ?? 300000) / 60000),
+          ),
+        };
+      };
       let lastReplaySafeToolResultKey: string | null = null;
       const suppressGenericAgenticToolPromptForNativeTools =
         overrides?.builtinToolsEnabled === true &&
@@ -1815,11 +2011,16 @@ export function registerChatHandlers(
       const unscopedCurrentTurnToolDefinitions =
         attachBuiltinToolsForCurrentTurn
           ? orderToolsForPrefixCache(
-              applyToolPreset(
-                filterTools(overrides || {}, {
-                  zayaAppleScriptToolBundle: chatUsesZayaAppleScriptToolBundle,
-                }),
-                leanToolPreset ? "lean" : "full",
+              // Workspace adds the sandbox escalation fields to the shell
+              // tools: a function of the chat's preset only (cache-stable).
+              applyPermissionPresetToTools(
+                applyToolPreset(
+                  filterTools(overrides || {}, {
+                    zayaAppleScriptToolBundle: chatUsesZayaAppleScriptToolBundle,
+                  }),
+                  leanToolPreset ? "lean" : "full",
+                ),
+                overrides?.permissionPreset,
               ),
               BUILTIN_TOOL_ORDER,
             )
@@ -4526,6 +4727,7 @@ export function registerChatHandlers(
                 await flushToolStatusToRenderer();
               }
 
+              let mcpRefusal: string | null = null;
               if (!toolAuthorized) {
                 // A model may emit a built-in or MCP name from training or
                 // history even when that schema was not authorized for this
@@ -4659,55 +4861,100 @@ export function registerChatHandlers(
                       tc.id,
                     );
                   } else {
-                    console.log(`[CHAT] Builtin tool: ${tc.function.name}`);
-                    const result = await executeBuiltinTool(
+                    const gate = await gateToolCall(
                       tc.function.name,
                       toolArgs,
-                      workDir,
+                      tc.id,
+                      true,
+                      fullContent,
                     );
-                    fileReadTracker.afterTool(
-                      chatId,
-                      tc.function.name,
-                      toolArgs,
-                      workDir,
-                      !result.is_error,
-                    );
-                    resultText = result.content;
-                    if (replaySafeKey && !result.is_error) {
-                      lastReplaySafeToolResultKey = replaySafeKey;
-                    }
-                    // For read_image/read_video: inject media as multimodal
-                    // content for VLM follow-ups. Tool result text is not enough
-                    // for vision models to actually inspect local media bytes.
-                    // Keep local text-only models on text; vmlx-engine will
-                    // reject image_url/video_url content when the loaded runtime
-                    // is not multimodal. Remote endpoints may be multimodal even
-                    // when the local session registry cannot infer it.
-                    if ((result.imageDataUrl || result.videoDataUrl) && !(chatIsMultimodal || isRemote)) {
-                      resultText += "\n\n[Media bytes were not sent because this local session is text-only. Use a VL-compatible model/session to inspect the file visually.]";
-                      console.log(
-                        `[CHAT] Skipping tool media bytes for text-only local session (${tc.function.name})`,
+                    if (!gate.ok) {
+                      resultText = gate.message;
+                      emitToolStatus(
+                        "error",
+                        tc.function.name,
+                        resultText,
+                        toolIteration,
+                        tc.id,
                       );
                     } else {
-                      if (result.imageDataUrl) {
-                        pendingImageDataUrls.push(result.imageDataUrl);
+                      console.log(
+                        `[CHAT] Builtin tool: ${tc.function.name}${gate.sandboxProfile ? " (sandboxed)" : ""}`,
+                      );
+                      const result = await executeBuiltinTool(
+                        tc.function.name,
+                        toolArgs,
+                        workDir,
+                        undefined,
+                        { sandboxProfile: gate.sandboxProfile },
+                      );
+                      // The sandbox may be why it failed: offer the one-shot
+                      // escalation (DeepSeek Harness flow).
+                      if (
+                        result.sandboxed &&
+                        result.is_error &&
+                        looksLikeSandboxDenial(result.content)
+                      ) {
+                        result.content += sandboxEscalationMarker(seatbeltSupport().network);
                       }
-                      if (result.videoDataUrl) {
-                        pendingVideoDataUrls.push(result.videoDataUrl);
+                      fileReadTracker.afterTool(
+                        chatId,
+                        tc.function.name,
+                        toolArgs,
+                        workDir,
+                        !result.is_error,
+                      );
+                      resultText = result.content;
+                      if (replaySafeKey && !result.is_error) {
+                        lastReplaySafeToolResultKey = replaySafeKey;
                       }
+                      // For read_image/read_video: inject media as multimodal
+                      // content for VLM follow-ups. Tool result text is not enough
+                      // for vision models to actually inspect local media bytes.
+                      // Keep local text-only models on text; vmlx-engine will
+                      // reject image_url/video_url content when the loaded runtime
+                      // is not multimodal. Remote endpoints may be multimodal even
+                      // when the local session registry cannot infer it.
+                      if ((result.imageDataUrl || result.videoDataUrl) && !(chatIsMultimodal || isRemote)) {
+                        resultText += "\n\n[Media bytes were not sent because this local session is text-only. Use a VL-compatible model/session to inspect the file visually.]";
+                        console.log(
+                          `[CHAT] Skipping tool media bytes for text-only local session (${tc.function.name})`,
+                        );
+                      } else {
+                        if (result.imageDataUrl) {
+                          pendingImageDataUrls.push(result.imageDataUrl);
+                        }
+                        if (result.videoDataUrl) {
+                          pendingVideoDataUrls.push(result.videoDataUrl);
+                        }
+                      }
+                      emitToolStatus(
+                        result.is_error ? "error" : "result",
+                        tc.function.name,
+                        resultText,
+                        toolIteration,
+                        tc.id,
+                      );
                     }
-                    emitToolStatus(
-                      result.is_error ? "error" : "result",
-                      tc.function.name,
-                      resultText,
-                      toolIteration,
-                      tc.id,
-                    );
                   }
                 }
               } else if (isRemote) {
                 // MCP tool passthrough is only available on local vmlx-engine servers
                 resultText = `MCP tool "${tc.function.name}" is only available with local vmlx-engine sessions.`;
+                emitToolStatus(
+                  "error",
+                  tc.function.name,
+                  resultText,
+                  toolIteration,
+                  tc.id,
+                );
+              } else if (
+                (mcpRefusal = refusalOf(
+                  await gateToolCall(tc.function.name, toolArgs, tc.id, false, fullContent),
+                )) !== null
+              ) {
+                // Permission preset: Read only asks before an MCP tool runs.
+                resultText = mcpRefusal;
                 emitToolStatus(
                   "error",
                   tc.function.name,
