@@ -619,9 +619,6 @@ function isLoopbackUrl(url: string): boolean {
 const DIRECT_MEDIA_ATTACHMENT_TOOL_RULE =
   "\n\nIMPORTANT: When a user message includes media attachments as chat content, inspect those images, video, or audio directly through the model's multimodal input. Do not call read_image, read_video, or list_directory to find attached media unless the user explicitly gives a local filesystem path.";
 
-/** Live tool-card detail bound (the persisted copy is already cut to 4 KB). */
-const LIVE_TOOL_DETAIL_MAX_CHARS = 50_000;
-
 /**
  * Oversized tool results are saved in full under <userData>/agent-spill/<chatId>
  * so the model can page through them with read_file instead of re-running the
@@ -2811,11 +2808,11 @@ export function registerChatHandlers(
                 phase,
                 toolName,
                 toolCallId,
-                // The live card shows the raw tool output; bound it so a
-                // multi-megabyte result cannot stall the renderer.
+                // The live card shows the raw tool output; bound it (50k
+                // chars) so a multi-megabyte result cannot stall the renderer.
                 detail:
-                  detail && detail.length > LIVE_TOOL_DETAIL_MAX_CHARS
-                    ? detail.slice(0, LIVE_TOOL_DETAIL_MAX_CHARS) + "\n…"
+                  detail && detail.length > 50_000
+                    ? detail.slice(0, 50_000) + "\n…"
                     : detail,
                 iteration,
                 contentOffset,
