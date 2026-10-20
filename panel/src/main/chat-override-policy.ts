@@ -40,6 +40,7 @@ export interface ChatOverridePolicyInput {
   toolResultMaxChars?: number
   gitEnabled?: boolean
   utilityToolsEnabled?: boolean
+  toolPreset?: 'full' | 'lean'
 }
 
 const NEW_CHAT_TOOL_INHERIT_KEYS = [
@@ -56,6 +57,7 @@ const NEW_CHAT_TOOL_INHERIT_KEYS = [
   'workingDirectory',
   'hideToolStatus',
   'toolResultMaxChars',
+  'toolPreset',
 ] as const
 
 const CHAT_OVERRIDE_STRING_KEYS = [
@@ -179,6 +181,10 @@ export function sanitizeChatOverrides<T extends ChatOverridePolicyInput>(overrid
     CHAT_OVERRIDE_REASONING_EFFORTS.has(source.reasoningEffort)
   ) {
     sanitized.reasoningEffort = source.reasoningEffort
+  }
+
+  if (source.toolPreset === 'lean' || source.toolPreset === 'full') {
+    sanitized.toolPreset = source.toolPreset
   }
 
   if (source.thinkingMode === 'adaptive') {

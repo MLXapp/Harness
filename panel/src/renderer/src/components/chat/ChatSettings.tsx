@@ -72,6 +72,7 @@ interface ChatOverrides {
   toolResultMaxChars?: number
   gitEnabled?: boolean
   utilityToolsEnabled?: boolean
+  toolPreset?: 'full' | 'lean'
 }
 
 interface SessionInfo {
@@ -1030,6 +1031,21 @@ function statusToneClass(status: string): string {
                   <p className="text-xs text-muted-foreground">
                     {t('chat.settings.workingDirectoryHelp')}
                   </p>
+
+                  <div className="mt-3 pt-3 border-t border-border space-y-1">
+                    <label className="text-sm font-medium" htmlFor="chat-tool-preset">{t('chat.settings.toolPreset')}</label>
+                    <select
+                      id="chat-tool-preset"
+                      data-vmlx-control="tool-preset"
+                      value={overrides.toolPreset === 'lean' ? 'lean' : 'full'}
+                      onChange={e => update('toolPreset', e.target.value === 'lean' ? 'lean' : undefined)}
+                      className="w-full px-3 py-2 bg-background border border-input rounded text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="full">{t('chat.settings.toolPresetFull')}</option>
+                      <option value="lean">{t('chat.settings.toolPresetLean')}</option>
+                    </select>
+                    <p className="text-xs text-muted-foreground">{t('chat.settings.toolPresetHelp')}</p>
+                  </div>
 
                   <div className="mt-3 pt-3 border-t border-border space-y-2">
                     <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('chat.settings.toolCategories')}</p>

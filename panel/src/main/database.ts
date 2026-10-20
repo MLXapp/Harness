@@ -183,6 +183,8 @@ export interface ChatOverrides {
   toolResultMaxChars?: number;
   gitEnabled?: boolean;
   utilityToolsEnabled?: boolean;
+  /** Built-in tool set: undefined/"full" = every enabled tool, "lean" = minimal set for small models. */
+  toolPreset?: "full" | "lean";
 }
 
 class DatabaseManager {
@@ -538,6 +540,9 @@ class DatabaseManager {
         this.db.exec(
           "ALTER TABLE chat_overrides ADD COLUMN presence_penalty REAL",
         );
+      }
+      if (!overrideColumns.find((c) => c.name === "tool_preset")) {
+        this.db.exec("ALTER TABLE chat_overrides ADD COLUMN tool_preset TEXT");
       }
 
       // Fix: older migrations used DEFAULT 1 and later DEFAULT 0 for
@@ -1743,8 +1748,8 @@ class DatabaseManager {
        hide_tool_status,
        web_search_enabled, brave_search_enabled, fetch_url_enabled, file_tools_enabled,
        search_tools_enabled, shell_enabled, tool_result_max_chars,
-       git_enabled, utility_tools_enabled)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       git_enabled, utility_tools_enabled, tool_preset)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
       // enable_thinking tri-state: undefined/null → NULL (Auto), true → 1, false → 0
       const enableThinkingVal =
@@ -1783,6 +1788,7 @@ class DatabaseManager {
         overrides.toolResultMaxChars || null,
         overrides.gitEnabled === false ? 0 : 1,
         overrides.utilityToolsEnabled === false ? 0 : 1,
+        overrides.toolPreset === "lean" ? "lean" : null,
       );
     }); // end upsert transaction
     upsert();
@@ -1832,6 +1838,7 @@ class DatabaseManager {
       toolResultMaxChars: row.tool_result_max_chars || undefined,
       gitEnabled: row.git_enabled !== 0,
       utilityToolsEnabled: row.utility_tools_enabled !== 0,
+      toolPreset: row.tool_preset === "lean" ? "lean" : undefined,
     };
   }
 
