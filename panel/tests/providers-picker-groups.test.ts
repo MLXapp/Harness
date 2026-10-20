@@ -42,3 +42,21 @@ describe('model picker grouping', () => {
     expect(findBoundModel(null, local, providers)).toEqual({})
   })
 })
+
+describe('model picker wiring', () => {
+  it('renders the groups local first and binds provider chats without a session endpoint', async () => {
+    const { readFileSync } = await import('node:fs')
+    const toolbar = readFileSync('src/renderer/src/components/layout/ChatModeToolbar.tsx', 'utf8')
+    const order = ['groups.onThisMac.map(renderSessionRow)', 'groups.localServers.map(group', 'groups.cloud.map(group', 'groups.remoteSessions.map(renderSessionRow)']
+      .map(marker => toolbar.indexOf(marker))
+    expect(order.every(i => i > 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    // Picking a session clears the provider binding first; picking a provider model stores it.
+    expect(toolbar).toContain('await onProviderBindingChange(null)')
+    expect(toolbar).toContain('providerId: provider.id, modelId: model.id')
+
+    const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
+    expect(app).toContain('sessionEndpoint={providerBinding ? undefined : sessionEndpoint}')
+    expect(app).toContain('window.api.providers.setChatModel(next)')
+  })
+})
