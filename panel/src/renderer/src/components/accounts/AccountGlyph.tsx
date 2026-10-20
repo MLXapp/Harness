@@ -36,7 +36,8 @@ export function AccountGlyph({
     )
   }
   const featured = providerId ? featuredAccount(providerId) : undefined
-  const letter = (featured?.monogram ?? (name || providerId || '?').trim().charAt(0) || '?').toUpperCase()
+  const fallback = (name || providerId || '?').trim().charAt(0) || '?'
+  const letter = (featured?.monogram ?? fallback).toUpperCase()
   const tint = featured?.tint
   return (
     <span
