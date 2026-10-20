@@ -397,10 +397,10 @@ export function ChatList({ currentChatId, onChatSelect, onNewChat, modelPath }: 
               <div key={folder.id} className="mb-2">
                 <div className="group flex items-center gap-1 px-2 py-1 text-xs font-medium text-muted-foreground">
                   <span className="flex items-center gap-1"><Folder className="h-3 w-3" /> {folder.name}</span>
-                  <span className="text-[10px] opacity-60">({folderChats.length})</span>
+                  <span className="text-[11px] opacity-60">({folderChats.length})</span>
                   <button
                     onClick={(e) => handleDeleteFolder(folder.id, e)}
-                    className="ml-auto opacity-0 group-hover:opacity-100 text-[10px] hover:text-destructive"
+                    className="ml-auto opacity-0 group-hover:opacity-100 text-[11px] hover:text-destructive"
                     title={t('chat.list.deleteFolderTitle')}
                   >
                     <X className="h-3 w-3" />

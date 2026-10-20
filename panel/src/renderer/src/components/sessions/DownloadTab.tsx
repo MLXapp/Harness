@@ -424,7 +424,7 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
             <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
               <button
                 onClick={() => setShowHfToken(!showHfToken)}
-                className="px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                className="px-1 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
                 title={showHfToken ? t('sessions.download.hideTokenTitle') : t('sessions.download.showTokenTitle')}
               >
                 {showHfToken ? t('app.about.hide') : t('app.about.show')}
@@ -439,7 +439,7 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
             {hfTokenSaving ? t('common.saving') : t('common.save')}
           </button>
         </div>
-        <p className="text-[10px] text-muted-foreground ml-14">
+        <p className="text-[11px] text-muted-foreground ml-14">
           {t('sessions.download.gatedModelsNote')}{' '}
           <a
             href="https://huggingface.co/settings/tokens"
@@ -485,7 +485,7 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
             {t('sessions.download.useHfMirror')}
           </button>
         </div>
-        <p className="text-[10px] text-muted-foreground ml-16">
+        <p className="text-[11px] text-muted-foreground ml-16">
           {t('sessions.download.mirrorHelp')}
         </p>
       </div>
@@ -729,7 +729,7 @@ function ReadmeContent({ markdown }: { markdown: string }) {
   const html = simpleMarkdownToHtml(markdown)
   return (
     <div
-      className="prose prose-xs prose-invert max-w-none text-xs text-muted-foreground [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:mt-2 [&_p]:my-1 [&_img]:max-w-full [&_img]:rounded [&_img]:my-2 [&_table]:text-[10px] [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-border [&_th]:px-1.5 [&_th]:py-0.5 [&_th]:bg-muted [&_code]:bg-muted [&_code]:px-1 [&_code]:rounded [&_code]:text-[10px] [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_pre]:text-[10px] [&_pre]:overflow-x-auto [&_a]:text-primary [&_a]:underline [&_ul]:pl-4 [&_ul]:list-disc [&_ol]:pl-4 [&_li]:my-0.5 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-2 [&_blockquote]:italic [&_hr]:border-border [&_hr]:my-2"
+      className="prose prose-xs prose-invert max-w-none text-xs text-muted-foreground [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:mt-2 [&_p]:my-1 [&_img]:max-w-full [&_img]:rounded [&_img]:my-2 [&_table]:text-[11px] [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-border [&_th]:px-1.5 [&_th]:py-0.5 [&_th]:bg-muted [&_code]:bg-muted [&_code]:px-1 [&_code]:rounded [&_code]:text-[11px] [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_pre]:text-[11px] [&_pre]:overflow-x-auto [&_a]:text-primary [&_a]:underline [&_ul]:pl-4 [&_ul]:list-disc [&_ol]:pl-4 [&_li]:my-0.5 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-2 [&_blockquote]:italic [&_hr]:border-border [&_hr]:my-2"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )
@@ -765,17 +765,17 @@ function ModelCard({ model, isDownloading, isDownloaded, onDownload, dateField }
               </span>}
             </div>
             {model.note && (
-              <p className="text-[10px] text-muted-foreground mt-1 line-clamp-2 whitespace-pre-line">{model.note}</p>
+              <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 whitespace-pre-line">{model.note}</p>
             )}
             {model.tags.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-1.5">
                 {model.tags.slice(0, 5).map(tag => (
-                  <span key={tag} className="px-1.5 py-0.5 bg-muted rounded text-[10px] text-muted-foreground">
+                  <span key={tag} className="px-1.5 py-0.5 bg-muted rounded text-[11px] text-muted-foreground">
                     {tag}
                   </span>
                 ))}
                 {model.tags.length > 5 && (
-                  <span className="text-[10px] text-muted-foreground">+{model.tags.length - 5}</span>
+                  <span className="text-[11px] text-muted-foreground">+{model.tags.length - 5}</span>
                 )}
               </div>
             )}

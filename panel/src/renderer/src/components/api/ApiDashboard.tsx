@@ -198,7 +198,7 @@ export function ApiDashboard() {
               )}
               <h3 className="text-sm font-medium">{t('api.gateway')}</h3>
               <span
-                className={`text-[10px] px-1.5 py-0.5 rounded ${hasModels ? "bg-green-500/15 text-green-500" : "bg-muted text-muted-foreground"}`}
+                className={`text-[11px] px-1.5 py-0.5 rounded ${hasModels ? "bg-green-500/15 text-green-500" : "bg-muted text-muted-foreground"}`}
               >
                 {hasModels
                   ? t('api.runningModelsCount', { n: runningSessions.length })
@@ -231,7 +231,7 @@ export function ApiDashboard() {
                 className="w-24 px-2 py-1 bg-background rounded border border-border font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary"
               />
               {portError && (
-                <span className="text-[10px] text-red-400">{portError}</span>
+                <span className="text-[11px] text-red-400">{portError}</span>
               )}
             </div>
 
@@ -251,7 +251,7 @@ export function ApiDashboard() {
                   className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${lanEnabled ? "translate-x-[18px]" : "translate-x-0.5"}`}
                 />
               </button>
-              <span className="text-muted-foreground text-[10px]">
+              <span className="text-muted-foreground text-[11px]">
                 {lanEnabled
                   ? gwLanHost
                     ? `${t('api.lanEnabled')} (${gwLanHost})`
@@ -276,7 +276,7 @@ export function ApiDashboard() {
                   className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${singleModelMode ? "translate-x-[18px]" : "translate-x-0.5"}`}
                 />
               </button>
-              <span className="text-muted-foreground text-[10px]">
+              <span className="text-muted-foreground text-[11px]">
                 {singleModelMode
                   ? t('api.singleModelModeOn')
                   : t('api.singleModelModeOff')}
@@ -312,12 +312,12 @@ export function ApiDashboard() {
                       className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isSleeping ? "bg-blue-400" : "bg-green-500"}`}
                     />
                     <span className="font-medium flex-1 truncate">{name}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                       {type === 'image-gen' || type === 'image-edit'
                         ? type : liveCapabilities[apiCapabilityKey(s)] ?? '—'}
                     </span>
                     {isSleeping && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">
+                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">
                         {t('api.sleeping')}
                       </span>
                     )}

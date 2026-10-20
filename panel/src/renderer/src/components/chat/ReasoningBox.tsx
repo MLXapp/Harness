@@ -115,10 +115,10 @@ export function ReasoningBox({ content, isStreaming, isDone }: ReasoningBoxProps
           </span>
         </button>
         <span className="ml-auto flex items-center gap-2">
-          <span className="text-[10px] opacity-60">{t('chat.reasoning.charsSuffix', { n: content.length })}</span>
+          <span className="text-[11px] opacity-60">{t('chat.reasoning.charsSuffix', { n: content.length })}</span>
           <button
             onClick={() => setIsMaximized(!isMaximized)}
-            className="text-[10px] opacity-40 hover:opacity-80 transition-opacity"
+            className="text-[11px] opacity-40 hover:opacity-80 transition-opacity"
             title={isMaximized ? t('chat.reasoning.restoreTitle') : t('chat.reasoning.maximizeTitle')}
           >
             {isMaximized ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}

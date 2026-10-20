@@ -687,7 +687,7 @@ export function CreateSession({ initialModelPath, onBack, onCreated, filterType:
                     <div className="p-2 bg-muted rounded font-mono text-[11px] text-foreground select-all">
                       huggingface-cli download mlx-community/Llama-3.2-3B-Instruct-4bit --local-dir ~/.cache/huggingface/hub/mlx-community/Llama-3.2-3B-Instruct-4bit
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-2">
+                    <p className="text-[11px] text-muted-foreground mt-2">
                       {t('sessions.create.browseModels')}{' '}
                       <span className="text-primary select-all">huggingface.co/mlx-community</span>
                     </p>

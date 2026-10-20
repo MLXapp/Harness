@@ -596,7 +596,7 @@ function statusToneClass(status: string): string {
         {/* Profiles */}
         <div>
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{t('chat.settings.profiles')}</h3>
-          <p className="text-[10px] text-muted-foreground/70 mb-2">
+          <p className="text-[11px] text-muted-foreground/70 mb-2">
             {t('chat.settings.profilesInheritHint')}
           </p>
           <div className="space-y-2">
@@ -1354,7 +1354,7 @@ function BraveSearchToggle({ checked, onChange }: { checked: boolean; onChange: 
           href="https://brave.com/search/api/"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[10px] text-primary hover:underline mt-0.5 inline-block"
+          className="text-[11px] text-primary hover:underline mt-0.5 inline-block"
         >
           {t('chat.settings.braveGetKey')}
         </a>
