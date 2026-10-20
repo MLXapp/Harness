@@ -164,7 +164,7 @@ export function buildSwitcherGroups<S extends PickerSession>(input: {
         present: !!provider?.models.some(m => m.id === r.modelId),
       }
     })
-    .filter(row => subsequenceMatch(query, `${row.model.name} ${row.model.blurb} ${featuredAccount(row.model.account)?.name ?? ''}`))
+    .filter(row => subsequenceMatch(query, `${row.model.name} ${featuredAccount(row.model.account)?.name ?? ''}`))
 
   const onThisMac: Array<SwitcherSessionRow<S> | SwitcherProviderRow> = [
     ...base.onThisMac

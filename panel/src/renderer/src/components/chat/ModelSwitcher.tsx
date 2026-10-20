@@ -178,11 +178,11 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
     return binding.providerId === row.provider.id && binding.modelId === row.model.id
   }
 
-  const run = async (work: () => Promise<void>) => {
+  // `work` returns false when it already reported a failure: the popover stays open.
+  const run = async (work: () => Promise<void | boolean>) => {
     setBusy(true)
     try {
-      await work()
-      close()
+      if (await work() !== false) close()
     } catch (error) {
       showToast('error', t('providers.picker.switchFailed'), (error as Error).message)
     } finally {
@@ -238,10 +238,11 @@ export function ModelSwitcher({ compact = false }: { compact?: boolean }) {
       await chat.selectSession(row.session.id)
     } catch (error) {
       showToast('error', t('layout.chatToolbar.sessionSwitchFailed'), (error as Error).message)
-      return
+      return false
     }
     // A stopped model starts when picked, so the next message has somewhere to go.
     if (row.session.status === 'stopped' || row.session.status === 'error') void startSession(row.session)
+    return true
   })
 
   const choose = (row: SwitcherRow<SessionSummary> | undefined) => {
