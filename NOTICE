@@ -28,6 +28,12 @@ licenses, among them:
   * oMLX Qwen4 QSA kernel (Apache-2.0) and mlx-serve (MIT), see
     native_extensions/qsa_kernels/mtplx_qsa_kernels/.
 
+Portions of the chat agent in panel/src/main/agent/ (context compaction and its
+summary template, tool-result pruning, the repeat-call reminder and the todo
+tool) are adapted from DeepSeek Harness, Copyright (c) 2026 DeepSeek, MIT
+License. The MIT permission notice is reproduced in
+panel/src/main/agent/compaction.ts.
+
 MLX Studio does not include NVIDIA's C-RADIOv2-H model code, which upstream vMLX
 vendors under vmlx_engine/vendor/transformers_modules/nvidia/ and which carries
 NVIDIA's proprietary terms rather than Apache-2.0. Nemotron Omni image and video
