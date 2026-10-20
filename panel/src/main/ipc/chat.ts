@@ -856,6 +856,51 @@ ipcMain.on("chat:answerUser", (_, chatId: string, answer: string) => {
   }
 });
 
+/**
+ * Ask the engine to cancel one request, then abort its local stream (the
+ * same lifecycle ordering as chat:abort), so the turn saves what it has.
+ */
+function cancelAndAbortEntry(
+  chatId: string,
+  entry: { controller: AbortController; responseId?: string; endpoint?: { host: string; port: number }; baseUrl?: string; authHeaders?: Record<string, string> },
+): void {
+  // Start server-side cancellation before closing the local stream, for
+  // the same lifecycle ordering used by chat:abort.
+  if (entry.responseId && (entry.endpoint || entry.baseUrl)) {
+    try {
+      const cancelPath = entry.responseId.startsWith("resp_")
+        ? `/v1/responses/${entry.responseId}/cancel`
+        : `/v1/chat/completions/${entry.responseId}/cancel`;
+      const cancelBase =
+        entry.baseUrl ||
+        `http://${connectHost(entry.endpoint!.host)}:${entry.endpoint!.port}`;
+      fetch(`${cancelBase}${cancelPath}`, {
+        method: "POST",
+        headers: entry.authHeaders || {},
+        signal: AbortSignal.timeout(2000),
+      }).catch(() => {}); // Fire-and-forget, don't block window close
+      console.log(
+        `[CHAT] Cancel sent for ${chatId} (${entry.responseId})`,
+      );
+    } catch (_) {}
+  }
+  try {
+    entry.controller.abort();
+  } catch (_) {}
+}
+
+/**
+ * Stop every running chat turn (explicit reset, or a confirmed Quit).
+ * Pending approval cards resolve as stopped.
+ */
+export function abortAllChatRequests(): number {
+  const count = activeRequests.size;
+  for (const [chatId, entry] of activeRequests) cancelAndAbortEntry(chatId, entry);
+  activeRequests.clear();
+  approvalBroker?.cancelAll("aborted");
+  return count;
+}
+
 /** Abort all active chat requests targeting a specific endpoint (called when session stops) */
 export function abortByEndpoint(host: string, port: number): number {
   let count = 0;
@@ -6191,37 +6236,28 @@ export function registerChatHandlers(
     return activeRequests.has(chatId);
   });
 
-  // Clear all active locks (called on window reload/close)
-  ipcMain.handle("chat:clearAllLocks", async () => {
-    const count = activeRequests.size;
-    for (const [chatId, entry] of activeRequests) {
-      // Start server-side cancellation before closing the local stream, for
-      // the same lifecycle ordering used by chat:abort.
-      if (entry.responseId && (entry.endpoint || entry.baseUrl)) {
-        try {
-          const cancelPath = entry.responseId.startsWith("resp_")
-            ? `/v1/responses/${entry.responseId}/cancel`
-            : `/v1/chat/completions/${entry.responseId}/cancel`;
-          const cancelBase =
-            entry.baseUrl ||
-            `http://${connectHost(entry.endpoint!.host)}:${entry.endpoint!.port}`;
-          fetch(`${cancelBase}${cancelPath}`, {
-            method: "POST",
-            headers: entry.authHeaders || {},
-            signal: AbortSignal.timeout(2000),
-          }).catch(() => {}); // Fire-and-forget, don't block window close
-          console.log(
-            `[CHAT] clearAllLocks: cancel sent for ${chatId} (${entry.responseId})`,
-          );
-        } catch (_) {}
+  // Clear all active locks (explicit reset; quitting uses abortAllChatRequests)
+  ipcMain.handle("chat:clearAllLocks", async () => ({
+    cleared: abortAllChatRequests(),
+  }));
+
+  // On window (re)load: clear only locks that can no longer finish (aborted
+  // or past their stale limit). A turn that is still running keeps running,
+  // so closing and reopening the window does not stop the agent.
+  ipcMain.handle("chat:clearStaleLocks", async () => {
+    let cleared = 0;
+    const now = Date.now();
+    for (const [chatId, entry] of [...activeRequests]) {
+      const staleLockMs = Math.min(entry.timeoutMs + 30_000, 30 * 60 * 1000);
+      if (entry.controller.signal.aborted || now - entry.startedAt > staleLockMs) {
+        cancelAndAbortEntry(chatId, entry);
+        activeRequests.delete(chatId);
+        cleared++;
       }
-      try {
-        entry.controller.abort();
-      } catch (_) {}
     }
-    activeRequests.clear();
-    return { cleared: count };
+    return { cleared, running: activeRequests.size };
   });
+
 
   // Overrides — validate numeric bounds to prevent garbage values from reaching the engine
   ipcMain.handle(

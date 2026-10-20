@@ -2292,7 +2292,7 @@
         "failed": "出现问题，没有做任何更改。你可以从 mlx.app 下载 MLX Node。"
       },
       "quitAgentTitle": "退出 MLX Studio？",
-      "quitAgentChats": "编程代理仍在以下聊天中工作：{names}。",
+      "quitAgentChats": "仍在处理的聊天：{names}。",
       "quitAgentProcesses": "代理启动的后台进程：{count} 个。",
       "quitAgentDetail": "退出会停止这些工作。只关闭窗口则会继续运行。",
       "quitAgentQuit": "退出",

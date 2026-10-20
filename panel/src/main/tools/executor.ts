@@ -198,6 +198,17 @@ export function shellInvocation(command: string, sandboxProfile?: string | null,
   return { file: shell, args: ['-c', command] }
 }
 
+/** Stop every background process the agent started (on a confirmed Quit). */
+export function killSpawnedProcesses(): number {
+  let n = 0
+  for (const entry of spawnedProcesses.values()) {
+    if (!entry.running) continue
+    try { entry.proc.kill() } catch { }
+    n++
+  }
+  return n
+}
+
 /** Running agent-spawned background processes (for the quit confirmation). */
 export function runningSpawnedProcessCount(): number {
   let n = 0

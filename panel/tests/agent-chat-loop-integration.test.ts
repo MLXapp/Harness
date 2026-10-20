@@ -555,6 +555,21 @@ describe('permission presets in the chat loop', () => {
     expect(existsSync(join(workDir, 'stopped.txt'))).toBe(false)
   })
 
+  it('a window reload clears only stale locks: a running turn and its card survive', async () => {
+    h.state.overrides = { ...h.state.overrides, permissionPreset: 'read-only' }
+    replies = [
+      () => ({ kind: 'tool', calls: [{ id: 'r1', name: 'run_command', args: { command: 'echo kept' } }] }),
+      () => ({ kind: 'text', text: 'still here' }),
+    ]
+    const pending = send('go')
+    const card = await waitFor(() => cards()[0])
+    expect(await h.handlers.get('chat:clearStaleLocks')!({})).toEqual({ cleared: 0, running: 1 })
+    expect(await h.handlers.get('chat:isStreaming')!({}, 'chat-1')).toBe(true)
+    expect((await h.handlers.get('chat:pendingApprovals')!({}, 'chat-1'))[0].id).toBe(card.id)
+    await answer(card.id, 'allow-once')
+    expect((await pending).content).toBe('still here')
+  })
+
   it('Workspace without a usable sandbox asks before every command', async () => {
     const { resetSeatbeltProbeForTests } = await import('../src/main/agent/seatbelt')
     resetSeatbeltProbeForTests({ available: false, network: false })

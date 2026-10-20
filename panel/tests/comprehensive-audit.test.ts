@@ -3609,16 +3609,21 @@ describe("Issue #6: clearAllLocks must send server cancel for all active request
     const fs = require("fs");
     const source = fs.readFileSync("src/main/ipc/chat.ts", "utf-8");
 
-    // Find the clearAllLocks handler
+    // The clearAllLocks handler (and the stale-lock sweep on window load, and
+    // a confirmed Quit) go through abortAllChatRequests → cancelAndAbortEntry.
     const clearAllLocksIdx = source.indexOf('"chat:clearAllLocks"');
     expect(clearAllLocksIdx).toBeGreaterThan(-1);
+    const handlerEnd = source.indexOf('ipcMain.handle("chat:clearStaleLocks"', clearAllLocksIdx);
+    expect(source.substring(clearAllLocksIdx, handlerEnd)).toContain("abortAllChatRequests()");
+    const staleEnd = source.indexOf('ipcMain.handle("chat:set', handlerEnd);
+    expect(source.substring(handlerEnd, staleEnd)).toContain("cancelAndAbortEntry(chatId, entry)");
+    const abortAllIdx = source.indexOf("export function abortAllChatRequests");
+    expect(source.substring(abortAllIdx, source.indexOf("\n}\n", abortAllIdx))).toContain("cancelAndAbortEntry(chatId, entry)");
 
-    // Extract the handler body (up to next ipcMain.handle)
-    const handlerEnd = source.indexOf(
-      'ipcMain.handle("chat:set',
-      clearAllLocksIdx,
-    );
-    const handlerBody = source.substring(clearAllLocksIdx, handlerEnd);
+    // Extract the helper body
+    const helperIdx = source.indexOf("function cancelAndAbortEntry(");
+    expect(helperIdx).toBeGreaterThan(-1);
+    const handlerBody = source.substring(helperIdx, source.indexOf("\n}\n", helperIdx));
 
     // Must send server cancel (not just abort controller)
     expect(handlerBody).toContain("/cancel");

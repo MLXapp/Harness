@@ -2292,7 +2292,7 @@
         "failed": "問題が発生したため、何も変更していません。mlx.app から MLX Node をダウンロードできます。"
       },
       "quitAgentTitle": "MLX Studio を終了しますか?",
-      "quitAgentChats": "コーディングエージェントはまだ作業中です: {names}。",
+      "quitAgentChats": "まだ処理中のチャット: {names}。",
       "quitAgentProcesses": "エージェントが起動したバックグラウンドプロセス: {count}。",
       "quitAgentDetail": "終了するとこの作業は停止します。ウィンドウを閉じるだけなら作業は続きます。",
       "quitAgentQuit": "終了",
