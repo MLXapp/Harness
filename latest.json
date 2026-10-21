@@ -1,14 +1,14 @@
 {
-  "version": "0.2.0",
-  "url": "https://github.com/MLXapp/harness/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg",
-  "sha256": "7c4a1288459b196aa755f84d675575d02f9bf60c6486b4c9b3f00532511a49f5",
-  "size": 588596344,
-  "date": "2026-10-20",
+  "version": "0.2.1",
+  "url": "https://github.com/MLXapp/Harness/releases/download/v0.2.1/MLX-Harness-0.2.1-arm64.dmg",
+  "sha256": "b3c408660de179e50c2e0d869df65933c29ac954ce30500df323eb20faf93ebf",
+  "size": 587984891,
+  "date": "2026-10-21",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/harness/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg",
-      "sha256": "7c4a1288459b196aa755f84d675575d02f9bf60c6486b4c9b3f00532511a49f5"
+      "url": "https://github.com/MLXapp/Harness/releases/download/v0.2.1/MLX-Harness-0.2.1-arm64.dmg",
+      "sha256": "b3c408660de179e50c2e0d869df65933c29ac954ce30500df323eb20faf93ebf"
     }
   },
-  "notes": "MLX Harness 0.2.0: new name and icon, connect DeepSeek, Claude, OpenAI, Gemini or WaveSpeed AI in seconds, models picked for your Mac, a model switcher in the message box (⌘⇧M), Apple Dictation, and a safer agent."
+  "notes": "MLX Harness 0.2.1: everything now carries the MLX Harness name, including its home on GitHub (MLXapp/harness). Your chats, settings and keys stay as they are."
 }
