@@ -1,5 +1,5 @@
 {
-  "name": "mlx-studio",
+  "name": "mlx-harness",
   "productName": "MLX Harness",
   "version": "0.2.0",
   "description": "MLX Harness: run, chat with and serve AI models locally on Apple Silicon. Built on vMLX by JANGQ AI.",
@@ -9,7 +9,7 @@
   "homepage": "https://harness.mlx.app",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MLXapp/studio.git"
+    "url": "https://github.com/MLXapp/harness.git"
   },
   "scripts": {
     "dev": "electron-vite dev",
@@ -30,7 +30,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,json,md}\"",
     "icons": "node generate-icons.js",
     "package": "npm run dist",
-    "dist": "./scripts/build-studio-dmg.sh",
+    "dist": "./scripts/build-harness-dmg.sh",
     "postinstall": "electron-builder install-app-deps",
     "dist:upstream": "VMLX_RELEASE_SCOPE=production ./scripts/build-release-dmgs.sh all"
   },

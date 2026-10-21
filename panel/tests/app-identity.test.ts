@@ -1,4 +1,4 @@
-// MLX Studio → MLX Harness (0.2.0): a Mac updating from 0.1.x must keep its
+// A Mac updating from 0.1.x (legacy app name "MLX Studio") must keep its
 // userData folder (chats.db, settings, local storage) and its Keychain item
 // ("MLX Studio Safe Storage", which encrypts every saved API key).
 import { EventEmitter } from 'node:events'
@@ -123,7 +123,7 @@ describe('app identity (0.1.x compatibility)', () => {
 describe('packaging under the new name (0.2.0)', () => {
   const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
   const lock = JSON.parse(readFileSync(resolve(process.cwd(), 'package-lock.json'), 'utf8'))
-  const ci = readFileSync(resolve(process.cwd(), '../.github/workflows/studio.yml'), 'utf8')
+  const ci = readFileSync(resolve(process.cwd(), '../.github/workflows/harness.yml'), 'utf8')
 
   it('ships "MLX Harness.app" (CFBundleName/DisplayName come from productName) with the same bundle id', () => {
     expect(pkg.productName).toBe('MLX Harness')
@@ -144,13 +144,15 @@ describe('packaging under the new name (0.2.0)', () => {
     expect(lock.packages[''].version).toBe('0.2.0')
   })
 
-  it('publishes MLX-Harness DMGs under MLXapp/studio releases, a URL 0.1.x and mlx.app accept', () => {
+  it('publishes MLX-Harness DMGs under MLXapp/harness releases, a URL every installed copy accepts', async () => {
+    expect(ci).toMatch(/^name: MLX Harness$/m)
     expect(ci).toContain('dist/MLX-Harness-*.dmg')
     expect(ci).toContain('--title "MLX Harness $VERSION"')
     expect(ci).toContain('URL="https://github.com/$REPO/releases/download/$TAG/$DMG"')
-    expect(ci).not.toMatch(/MLX[ -]Studio/)
-    const url = 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg'
-    // mlx.app lib/studio-release.ts
-    expect(/^https:\/\/github\.com\/MLXapp\/studio\/releases\/download\/[^\s]+\.dmg$/.test(url)).toBe(true)
+    expect(ci).toContain('./scripts/build-harness-dmg.sh')
+    expect(ci).not.toMatch(/studio/i)
+    // 0.1.x and 0.2.0 check the host only (github.com or *.mlx.app), never the path.
+    const { isValidUpdateUrl } = await import('../src/main/update-manifest')
+    expect(isValidUpdateUrl('https://github.com/MLXapp/harness/releases/download/v0.2.1/MLX-Harness-0.2.1-arm64.dmg')).toBe(true)
   })
 })

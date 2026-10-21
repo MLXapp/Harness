@@ -164,7 +164,7 @@ export function messagesAfterCompaction<T extends { id: string }>(
  * from under this symbol. JSON.stringify ignores symbol keys, so the tag never
  * reaches the wire; object spread copies it, so merged copies keep it.
  */
-export const HISTORY_SOURCE_ID = Symbol.for('mlx.studio.historySourceId')
+export const HISTORY_SOURCE_ID = Symbol.for('mlx.harness.historySourceId')
 
 export function tagHistoryMessage<T extends object>(message: T, sourceId: string | undefined): T {
   if (sourceId) (message as any)[HISTORY_SOURCE_ID] = sourceId
@@ -339,7 +339,7 @@ function positiveInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
 }
 
-/** The smallest positive limit Studio knows about wins. */
+/** The smallest positive limit MLX Harness knows about wins. */
 export function resolveContextWindow(sources: ContextWindowSources): ResolvedContextWindow {
   const candidates: Array<[number | undefined, ResolvedContextWindow['source']]> = [
     [positiveInt(sources.engineMaxPromptTokens), 'engine'],

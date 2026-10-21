@@ -116,7 +116,7 @@ describe('MLX Node packaging', () => {
 
   it('keeps the staged copy out of git and fetches it in CI', () => {
     expect(readFileSync('../.gitignore', 'utf8')).toMatch(/^panel\/resources\/bundled-node\/$/m)
-    const ci = readFileSync('../.github/workflows/studio.yml', 'utf8')
+    const ci = readFileSync('../.github/workflows/harness.yml', 'utf8')
     expect(ci).toContain('./scripts/fetch-mlx-node.sh')
     expect(ci).toContain('refs/tags/v*')
     const fetch = readFileSync('scripts/fetch-mlx-node.sh', 'utf8')

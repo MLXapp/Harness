@@ -6,19 +6,34 @@ vMLX 1.6.80 (`jjang-ai/vmlx@aa098f6`); everything after it is ours.
 
 ## The name
 
-MLX Harness was called **MLX Studio** up to 0.1.x and was renamed in 0.2.0
+MLX Harness was formerly **MLX Studio** (up to 0.1.x) and was renamed in 0.2.0
 (20 Oct 2026): JANGQ AI's own vMLX app is called MLX Studio, so ours must never
-be called that anywhere a person sees it. The credit "Built on vMLX by JANGQ AI"
-stays. What did *not* change, on purpose (compatibility):
+be called that anywhere a person sees it. On 21 Oct 2026 the repository moved
+from `MLXapp/studio` to `MLXapp/harness` and our own internal "studio" names
+went with it (workflow `harness.yml`, `build-harness-dmg.sh`, npm package
+`mlx-harness`, `HARNESS_*` constants, `MLX_HARNESS_*` env vars, settings keys).
+The credit "Built on vMLX by JANGQ AI" stays.
+
+**Renamed, with compatibility:**
+
+| Now | Before | Compatibility |
+|---|---|---|
+| Feed `raw.githubusercontent.com/MLXapp/harness/main/latest.json` | `…/MLXapp/studio/main/latest.json` | `LATEST_MANIFEST_URLS` (update-manifest.ts) tries the new feed, then the old path. Installed 0.1.x/0.2.0 copies read the old path, which GitHub redirects; never create a new repo named `MLXapp/studio` (it would break that redirect) |
+| Release URLs `github.com/MLXapp/harness/releases/download/…` | `github.com/MLXapp/studio/…` | Every version's `isValidUpdateUrl` checks the host only (`github.com` or `*.mlx.app`), so 0.1.x and 0.2.0 accept the new URLs |
+| Env vars `MLX_HARNESS_SKIP_UPDATE_CHECK`, `MLX_HARNESS_FLAVOR`, `MLX_HARNESS_REUSE_PYTHON` | `MLX_STUDIO_*` | The old names are still read when the new ones are unset |
+| Settings key `harness_update_notified_version` | `studio_update_notified_version` | Read once, written under the new key, old key deleted (`app-updater.ts` `readNotifiedVersion`) |
+| localStorage `mlx-harness-theme` | `mlx-studio-theme` | Read once, moved to the new key (`ThemeProvider.tsx`) |
+| Ids in other tools' configs: tag `_mlxharness`, provider keys / API-key placeholder `mlxharness`, Codex `MLXHARNESS_*`, Codex block `MLX Harness managed Codex defaults` | `_mlxstudio`, `mlxstudio`, `MLXSTUDIO_*`, `MLX Studio managed Codex defaults` | Both recognised (`coding-tools.ts` `isOurs`): legacy entries are listed, taken over on the next add (Claude Code's parked values, OpenClaw/Hermes models and allowlist move across) and removed by remove (tests `coding-tools-legacy-ids.test.ts`) |
+
+**Kept on purpose** (each explained where it lives):
 
 | Kept | Why |
 |---|---|
-| Bundle id `app.mlx.studio`, team `CCKXS9W488`, the updater's designated requirement | The app's identity: Keychain ACLs, the updater's codesign checks and Gatekeeper all key on it |
-| Repo `MLXapp/studio`, feed `latest.json` on its `main`, release URLs `github.com/MLXapp/studio/releases/download/…` | 0.1.x copies read that feed and accept any `.dmg` there (so does mlx.app's `lib/studio-release.ts`) |
-| userData `~/Library/Application Support/MLX Studio` and Keychain item `MLX Studio Safe Storage` on Macs that ran 0.1.x | Chats, settings, local storage and every saved API key live there. Fresh installs use `MLX Harness` for both. `panel/src/shared/appIdentity.ts` + `panel/src/main/app-identity.ts` (first import of the main process; tests `panel/tests/app-identity.test.ts`) |
-| npm package name `mlx-studio`, file and identifier names (`build-studio-dmg.sh`, `studio.yml`, `STUDIO_*`, `MLX_STUDIO_*` env vars, settings keys like `studio_update_notified_version`, `mlx-studio-theme`) | Internal; renaming them buys nothing and breaks scripts or stored settings |
-| Ids written into other tools' configs: `_mlxstudio`, provider key `mlxstudio`, API-key placeholder `mlxstudio`, Codex `MLXSTUDIO_*` providers | Entries saved by 0.1.x must still be found and removed; their visible names now say "MLX Harness (<model>)". The managed Codex block is now marked `MLX Harness managed Codex defaults`; the 0.1.x marker is still recognised and replaced |
-| `~/.mlxstudio/models`, `mlxstudio#NN` references | Upstream's model folder and issue tracker (JANGQ AI's MLX Studio) |
+| Bundle id `app.mlx.studio`, team `CCKXS9W488`, the updater's designated requirement (`HARNESS_BUNDLE_ID`, `HARNESS_REQUIREMENT` in `shared/appUpdate.ts`; `appId` in `panel/package.json`; `setAppUserModelId` in `main/index.ts`) | The app's identity: macOS Keychain item access, TCC permissions and every installed copy's updater codesign check key on it; changing it would break updates for every installed copy and orphan saved keys |
+| Legacy names used only to migrate 0.1.x users: bundle name `MLX Studio.app` (`LEGACY_APP_NAMES`, renamed after quit), userData `~/Library/Application Support/MLX Studio` and Keychain item `MLX Studio Safe Storage` (`LEGACY_APP_NAME` in `shared/appIdentity.ts`, `main/app-identity.ts`, `main/secretStorage.ts`), leftovers `.MLX Studio.update.app` / `.MLX Studio.old-*` | Chats, settings, local storage and every saved API key live there. Fresh installs use `MLX Harness` for both (tests `app-identity.test.ts`, `app-update-rules.test.ts`, `app-updater-flow.test.ts`) |
+| The legacy ids above in other tools' configs, the legacy settings/theme keys, the `MLX_STUDIO_*` env fallbacks and the old feed URL | Read only, for the migrations listed in the first table |
+| Upstream JANGQ AI references: `mlxstudio#NN` issue numbers, `jjang-ai/mlxstudio`, `mlx.studio`, `~/.mlxstudio/models` (upstream's model folder, still where the app looks), `data-mlx-studio` in `App.tsx`, upstream docs (`docs/mlxstudio-releases-readme.md`, `docs/guides/*`, `docs/development/release-automation.md`, `CHANGELOG.md`), the engine (`vmlx_engine/`), Python tests and benches | They name JANGQ AI's own product MLX Studio, not ours; left as imported so upstream merges stay easy |
+| Third-party names: LM Studio (`lmstudio`, `lm-studio`), Google AI Studio, Mac Studio hosts (`macstudio`, `mac-studio.local`), the "dots" model family comment | Not ours |
 
 **Keychain detail.** Electron 44 names the safeStorage item `"<app.name> Safe
 Storage"` once, in `ElectronBrowserMainParts::PostCreateMainMessageLoop`, which
@@ -46,18 +61,18 @@ Most changes are in the desktop app (`panel/`). The Python engine
 
 | Area | Change | Files |
 |---|---|---|
-| Identity | Product "MLX Harness" ("MLX Studio" up to 0.1.x, see [The name](#the-name)), appId `app.mlx.studio`, package `mlx-studio`, version from 0.1.0 (0.2.0: the rename), homepage harness.mlx.app, notarisation team CCKXS9W488, DMG `MLX-Harness-<version>-arm64.dmg` | `panel/package.json`, `panel/package-lock.json` (name/version only) |
-| Build | `npm run dist` → `panel/scripts/build-studio-dmg.sh` (bundled Python, unsigned or Developer ID-signed DMG). Upstream's attested driver stays as `npm run dist:upstream` | `panel/scripts/build-studio-dmg.sh` |
+| Identity | Product "MLX Harness" (see [The name](#the-name)), appId `app.mlx.studio` (kept), package `mlx-harness`, version from 0.1.0 (0.2.0: the rename), homepage harness.mlx.app, notarisation team CCKXS9W488, DMG `MLX-Harness-<version>-arm64.dmg` | `panel/package.json`, `panel/package-lock.json` (name/version only) |
+| Build | `npm run dist` → `panel/scripts/build-harness-dmg.sh` (bundled Python, unsigned or Developer ID-signed DMG). Upstream's attested driver stays as `npm run dist:upstream` | `panel/scripts/build-harness-dmg.sh` |
 | Strings | "vMLX" → "MLX Harness" in user-facing text in all five locales, tray, dialogs, window title; credit "Built on vMLX by JANGQ AI"; wire identifiers kept (`X-vMLX-*` headers, gateway liveness text, `vmlx-worker`) | `panel/src/renderer/src/i18n/locales/*.json`, `panel/src/main/{tray,sessions,memory-enforcer,engine-manager,index}.ts`, `panel/src/renderer/index.html` |
 | Credits | About panel and Preferences credit vMLX and show "Powered by MTPLX" (required by MTPLX's NOTICE); root `NOTICE` | `panel/src/main/index.ts`, `panel/src/renderer/src/App.tsx`, `NOTICE` |
-| Updates | Feed is only `raw.githubusercontent.com/MLXapp/studio/main/latest.json`; a version without a download is ignored quietly; downloads must be HTTPS on github.com or *.mlx.app. Upstream's "open the DMG in the browser" banner is replaced by an in-app updater (see [Updates](#updates)) | `panel/src/main/app-updater.ts`, `panel/src/shared/appUpdate.ts`, `panel/src/main/update-checker.ts`, `panel/src/main/update-manifest.ts`, `UpdateBanner.tsx`, `latest.json` |
+| Updates | Feed is `raw.githubusercontent.com/MLXapp/harness/main/latest.json` (then the pre-rename path as a fallback); a version without a download is ignored quietly; downloads must be HTTPS on github.com or *.mlx.app. Upstream's "open the DMG in the browser" banner is replaced by an in-app updater (see [Updates](#updates)) | `panel/src/main/app-updater.ts`, `panel/src/shared/appUpdate.ts`, `panel/src/main/update-checker.ts`, `panel/src/main/update-manifest.ts`, `UpdateBanner.tsx`, `latest.json` |
 | Promos | Ko-fi, jangq.ai and upstream release links removed from the UI | `App.tsx`, `UpdateBanner.tsx`, `ApiDashboard.tsx`, `ImageGallery.tsx` |
 | Look | MLX tokens (mlx.app palette, light + dark following the system, Preferences → Appearance), SF Pro / SF Mono, rounded corners, orange primary buttons, liquid-glass cards; IBM Plex Mono and Google Fonts CSP entries removed | `panel/src/renderer/src/styles/console-tokens.css` (rewritten, same variable names), `index.css`, `tailwind.config.js`, `providers/ThemeProvider.tsx`, `main/csp.ts` |
 | Motion | Sidebar width animates and labels fade, selection slides, section tabs are a sliding segmented control, page changes fade in | `components/layout/{ConsoleSidebar,ConsoleSubnavigation,TitleBar}.tsx`, `App.tsx` |
 | Brand | MLX emblem components, new app icon and DMG background | `components/brand/Logo.tsx`, `panel/resources/{logo.svg,icon.png}`, `panel/build/dmg-background*`, `panel/src/renderer/public/*.png` |
 | Network page | New sidebar page: MLX Network totals, MLX Node status/install/open, wallet live mining, risk explainer | `components/network/NetworkView.tsx`, `main/ipc/network.ts`, `shared/mlxNetwork.ts`, `preload/index.ts`, `env.d.ts`, `types/app-state.ts`, `lib/consoleNavigation.ts`, `shared/nativeNavigation.ts`, `main/application-menu.ts` |
-| MLX Node | MLX Harness carries MLX Node (`app.mlx.mac`) and offers it once on first run; Network page and Preferences install or open it. See "MLX Node inside MLX Harness" below | `main/mlx-node.ts`, `shared/mlxNode.ts`, `components/network/{useMlxNode.ts,MlxNodePreference.tsx}`, `main/index.ts`, `scripts/fetch-mlx-node.sh`, `scripts/build-studio-dmg.sh`, `package.json` (`build`), `.github/workflows/studio.yml` |
-| CI | `.github/workflows/studio.yml` on macos-26: typecheck and vitest (`panel/scripts/vitest-ci.mjs` tolerates only `panel/tests/known-upstream-failures.json`), DMG on `v*` tags or manual runs, optional Developer ID signing and notarisation from `MAC_CERT_P12`, `MAC_CERT_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID`. Upstream's dev-build, release-candidate and publish-release workflows (jjang-ai repos, self-hosted runners) are removed; their contract tests in `tests/test_release_automation.py` skip when those files are absent | `.github/workflows/`, `panel/scripts/vitest-ci.mjs`, `tests/test_release_automation.py` |
+| MLX Node | MLX Harness carries MLX Node (`app.mlx.mac`) and offers it once on first run; Network page and Preferences install or open it. See "MLX Node inside MLX Harness" below | `main/mlx-node.ts`, `shared/mlxNode.ts`, `components/network/{useMlxNode.ts,MlxNodePreference.tsx}`, `main/index.ts`, `scripts/fetch-mlx-node.sh`, `scripts/build-harness-dmg.sh`, `package.json` (`build`), `.github/workflows/harness.yml` |
+| CI | `.github/workflows/harness.yml` (workflow "MLX Harness") on macos-26: typecheck and vitest (`panel/scripts/vitest-ci.mjs` tolerates only `panel/tests/known-upstream-failures.json`), DMG on `v*` tags or manual runs, optional Developer ID signing and notarisation from `MAC_CERT_P12`, `MAC_CERT_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID`. Upstream's dev-build, release-candidate and publish-release workflows (jjang-ai repos, self-hosted runners) are removed; their contract tests in `tests/test_release_automation.py` skip when those files are absent | `.github/workflows/`, `panel/scripts/vitest-ci.mjs`, `tests/test_release_automation.py` |
 | Model providers | Chats can use cloud models (15-provider catalog), any OpenAI- or Anthropic-compatible endpoint, and Ollama / LM Studio, next to MLX sessions. See "Model providers" below | `main/providers/*`, `main/ipc/providers.ts`, `main/ipc/chat.ts`, `shared/providers/*`, `components/settings/*`, `components/layout/ChatModeToolbar.tsx`, `App.tsx` |
 | Docs | README rewritten; this file | `README.md`, `docs/MLX-HARNESS.md`, `panel/LOGO-README.md` |
 
@@ -110,7 +125,7 @@ failure fails the build; manual runs warn and build without it.
 electron-builder ships the folder via `extraResources` to
 `Contents/Resources/bundled-node/` (excluded from `app.asar` in `files`), and
 `mac.signIgnore` (`/Contents/Resources/bundled-node/`, matched against absolute
-paths by @electron/osx-sign) keeps it from being re-signed. `build-studio-dmg.sh`
+paths by @electron/osx-sign) keeps it from being re-signed. `build-harness-dmg.sh`
 checks that the packaged zip matches the staged one and isn't signed; the CI step
 "Check MLX Node in the DMG" unzips it from the final DMG and verifies it again.
 
@@ -157,7 +172,7 @@ renderer asks for it on mount, so a reload or the setup screen loses nothing). I
 no MLX Harness window has focus, a macOS notification "MLX Harness x is available"
 (first line of `notes`; click brings the window forward) is shown once per
 version; the version is remembered in the settings store
-(`studio_update_notified_version`). `MLX_STUDIO_SKIP_UPDATE_CHECK=1` turns the
+(`harness_update_notified_version`). `MLX_HARNESS_SKIP_UPDATE_CHECK=1` turns the
 automatic checks off (the menu item still works).
 
 **Installing** (Update in the banner):

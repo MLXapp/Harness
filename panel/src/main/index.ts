@@ -460,6 +460,8 @@ app.whenReady().then(async () => {
   if (is.dev && process.platform === 'darwin') {
     app.dock?.setIcon(join(app.getAppPath(), 'resources/icon.png'))
   }
+  // The bundle id keeps its 0.1.x value on purpose (Keychain, TCC and the
+  // updater's signing requirement key on it): HARNESS_BUNDLE_ID in shared/appUpdate.ts.
   electronApp.setAppUserModelId('app.mlx.studio')
   // MLX Harness is a modified version of vMLX (Apache-2.0); the About panel
   // always carries the credit.

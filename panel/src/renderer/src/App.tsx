@@ -670,9 +670,9 @@ function ServerModeContent() {
               <AppVersion />
               <div className="flex flex-wrap gap-4 text-xs">
                 <a href="https://harness.mlx.app" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">harness.mlx.app</a>
-                <a href="https://github.com/MLXapp/studio" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">GitHub</a>
+                <a href="https://github.com/MLXapp/harness" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">GitHub</a>
                 <a href="https://github.com/jjang-ai/vmlx" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">vMLX</a>
-                <a href="https://github.com/MLXapp/studio/blob/main/NOTICE" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">{t('app.about.license')}</a>
+                <a href="https://github.com/MLXapp/harness/blob/main/NOTICE" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">{t('app.about.license')}</a>
               </div>
               {/* Required in-product attribution (MTPLX NOTICE, Apache-2.0 §4(d)). */}
               <p className="text-xs text-muted-foreground">

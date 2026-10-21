@@ -2686,7 +2686,7 @@
     "stateIdle": "No Mac mining right now",
     "unsettled": "Not settled yet: {amount} MLX",
     "howTitle": "How it fits together",
-    "howStudio": "MLX Harness runs AI models for you, privately, on this Mac.",
+    "howHarness": "MLX Harness runs AI models for you, privately, on this Mac.",
     "howMlx": "MLX Node lends your Mac's idle time to the MLX Network: AI jobs from the network run on it, and you earn MLX Tokens.",
     "howRisk": "MLX Tokens are a crypto asset. Their value can fall to zero, mined MLX is locked for a period before you can use it, and earnings are not guaranteed.",
     "risks": "Read the risks"

@@ -339,7 +339,7 @@ export function NetworkView() {
 
         <Card section="network-explainer" tint="tint-indigo" icon={<ShieldAlert className="h-4 w-4" />} title={t('network.howTitle')}>
           <ul className="space-y-2 text-sm">
-            <li>{t('network.howStudio')}</li>
+            <li>{t('network.howHarness')}</li>
             <li>{t('network.howMlx')}</li>
             <li className="text-muted-foreground">{t('network.howRisk')}</li>
           </ul>

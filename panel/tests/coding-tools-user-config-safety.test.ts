@@ -8,7 +8,7 @@
  *     config we merely failed to PARSE was replaced by our single entry. This
  *     needs no corruption to hit: openclaw.json is documented JSON5, where a
  *     comment or trailing comma is legal and JSON.parse rejects it.
- *  2. Claude's addEntry overwrote ANTHROPIC_API_KEY with 'mlxstudio' and
+ *  2. Claude's addEntry overwrote ANTHROPIC_API_KEY with our placeholder and
  *     removeEntry then DELETED it — a user with a real Anthropic key lost it
  *     by toggling vMLX on and off.
  *  3. OpenClaw replaced its whole provider per add, so a second model dropped
@@ -90,7 +90,7 @@ describe('coding tool config safety', () => {
     const path = join(home, '.openclaw', 'openclaw.json')
     expect(existsSync(path)).toBe(false)
     expect((await add()({}, 'openclaw', BASE, 'model-a', 8080))?.success).toBe(true)
-    expect(JSON.parse(readFileSync(path, 'utf8')).models.providers.mlxstudio).toBeTruthy()
+    expect(JSON.parse(readFileSync(path, 'utf8')).models.providers.mlxharness).toBeTruthy()
 
     // An empty file is "nothing to preserve", not "unreadable".
     const claudePath = join(home, '.claude', 'settings.json')
@@ -118,7 +118,7 @@ describe('coding tool config safety', () => {
     expect((await add()({}, 'claude-code', BASE, 'local-model', 8080))?.success).toBe(true)
     let cfg = JSON.parse(readFileSync(path, 'utf8'))
     expect(cfg.env.ANTHROPIC_BASE_URL).toBe(BASE)
-    expect(cfg.env.ANTHROPIC_API_KEY).toBe('mlxstudio')
+    expect(cfg.env.ANTHROPIC_API_KEY).toBe('mlxharness')
 
     // A second add (switching model) must NOT snapshot our own values.
     expect((await add()({}, 'claude-code', BASE, 'other-model', 8080))?.success).toBe(true)
@@ -129,8 +129,8 @@ describe('coding tool config safety', () => {
     expect(cfg.env.ANTHROPIC_MODEL).toBe('claude-opus-4')
     expect(cfg.env.ANTHROPIC_BASE_URL).toBeUndefined() // user had none
     expect(cfg.env.KEEP_ME).toBe('untouched')
-    expect(cfg.env._mlxstudio).toBeUndefined()
-    expect(cfg.env._mlxstudio_prev).toBeUndefined()
+    expect(cfg.env._mlxharness).toBeUndefined()
+    expect(cfg.env._mlxharness_prev).toBeUndefined()
     expect(cfg.otherSetting).toBe(true)
   })
 
@@ -149,15 +149,15 @@ describe('coding tool config safety', () => {
     expect((await add()({}, 'openclaw', BASE, 'model-b', 8080))?.success).toBe(true)
 
     const cfg = JSON.parse(readFileSync(path, 'utf8'))
-    const ids = cfg.models.providers.mlxstudio.models.map((m: any) => m.id).sort()
+    const ids = cfg.models.providers.mlxharness.models.map((m: any) => m.id).sort()
     expect(ids).toEqual(['model-a', 'model-b'])
 
     // Every allowlist entry must name a model the provider actually declares.
     const allow = Object.keys(cfg.agents.defaults.models)
     for (const key of allow) {
-      expect(ids).toContain(key.replace(/^mlxstudio\//, ''))
+      expect(ids).toContain(key.replace(/^mlxharness\//, ''))
     }
-    expect(allow.sort()).toEqual(['mlxstudio/model-a', 'mlxstudio/model-b'])
+    expect(allow.sort()).toEqual(['mlxharness/model-a', 'mlxharness/model-b'])
   })
 
   it('re-adding the same OpenClaw model updates it rather than duplicating', async () => {
@@ -165,7 +165,7 @@ describe('coding tool config safety', () => {
     await add()({}, 'openclaw', BASE, 'model-a', 8080)
     await add()({}, 'openclaw', BASE, 'model-a', 8080)
     const cfg = JSON.parse(readFileSync(path, 'utf8'))
-    expect(cfg.models.providers.mlxstudio.models).toHaveLength(1)
+    expect(cfg.models.providers.mlxharness.models).toHaveLength(1)
   })
 
   it('status reporting survives one tool having a malformed config', async () => {
@@ -219,12 +219,12 @@ describe('hermes agent config', () => {
   it('writes a providers MAP with base_url ending at /v1', async () => {
     expect((await add()({}, 'hermes', BASE, 'my-model', 8080))?.success).toBe(true)
     const doc = await readYaml()
-    const p = doc.providers.mlxstudio
+    const p = doc.providers.mlxharness
     // Hermes appends /chat/completions itself — a URL past /v1 would 404.
     expect(p.base_url).toBe(`${BASE}/v1`)
     expect(p.base_url.endsWith('/v1')).toBe(true)
     expect(Object.keys(p.models)).toEqual(['my-model'])
-    expect(p._mlxstudio).toBe(true)
+    expect(p._mlxharness).toBe(true)
   })
 
   it("preserves the user's unrelated hermes settings", async () => {
@@ -237,23 +237,23 @@ describe('hermes agent config', () => {
     const doc = await readYaml()
     expect(doc.auxiliary.compression.model).toBe('glm-4.7')
     expect(doc.providers.theirs.base_url).toBe('https://api.z.ai/v4')
-    expect(doc.providers.mlxstudio).toBeTruthy()
+    expect(doc.providers.mlxharness).toBeTruthy()
   })
 
   it('keeps both models, and removing one leaves the other', async () => {
     await add()({}, 'hermes', BASE, 'model-a', 8080)
     await add()({}, 'hermes', BASE, 'model-b', 8080)
-    expect(Object.keys((await readYaml()).providers.mlxstudio.models).sort()).toEqual([
+    expect(Object.keys((await readYaml()).providers.mlxharness.models).sort()).toEqual([
       'model-a', 'model-b',
     ])
 
     expect((await remove()({}, 'hermes', 'model-a'))?.success).toBe(true)
-    expect(Object.keys((await readYaml()).providers.mlxstudio.models)).toEqual(['model-b'])
+    expect(Object.keys((await readYaml()).providers.mlxharness.models)).toEqual(['model-b'])
 
     // Removing the last model drops the provider rather than leaving a shell.
     expect((await remove()({}, 'hermes', 'model-b'))?.success).toBe(true)
     const doc = await readYaml()
-    expect(doc?.providers?.mlxstudio).toBeUndefined()
+    expect(doc?.providers?.mlxharness).toBeUndefined()
   })
 
   it('REFUSES to overwrite malformed hermes yaml', async () => {

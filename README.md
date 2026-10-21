@@ -7,7 +7,7 @@
 <p align="center">
   Run, chat with and serve AI models locally on your Mac with Apple Silicon.<br>
   <a href="https://harness.mlx.app">harness.mlx.app</a> &bull;
-  <a href="https://github.com/MLXapp/studio/releases">Releases</a> &bull;
+  <a href="https://github.com/MLXapp/harness/releases">Releases</a> &bull;
   Built on <a href="https://github.com/jjang-ai/vmlx">vMLX</a> by JANGQ AI
 </p>
 
@@ -23,9 +23,11 @@ It is a modified version of [vMLX](https://github.com/jjang-ai/vmlx) by JANGQ AI
 published on PyPI as `vmlx`); MLX Harness changes the desktop app around it. See
 [NOTICE](NOTICE) and [docs/MLX-HARNESS.md](docs/MLX-HARNESS.md) for what changed.
 
-MLX Harness was called MLX Studio up to version 0.1.x. It is not JANGQ AI's own
-app of that name. Updating from 0.1.x keeps your chats, settings and saved API
-keys, and the app renames itself to MLX Harness in the Applications folder.
+## The name
+
+MLX Harness was formerly MLX Studio (up to version 0.1.x); it is not JANGQ AI's
+own app of that name. Updating from 0.1.x keeps your chats, settings and saved
+API keys, and the app renames itself to MLX Harness in the Applications folder.
 
 ## What it does
 
@@ -74,7 +76,7 @@ are a crypto asset; read the [risks](https://mlx.app/risks).
 
 ## Install
 
-Download the DMG from [Releases](https://github.com/MLXapp/studio/releases) when one
+Download the DMG from [Releases](https://github.com/MLXapp/harness/releases) when one
 is published (macOS 14.5 or newer, Apple Silicon) and drag MLX Harness to
 Applications.
 
@@ -92,7 +94,7 @@ per version, if MLX Harness isn't in front). Click **Update**: it downloads the 
 version with a progress bar, checks it (size, SHA-256, Developer ID signature from
 our team, Apple notarization, newer version), then shows **Restart to update**.
 MLX Harness quits, swaps in the new copy at the same place and opens again (a copy
-still called MLX Studio becomes MLX Harness). If you
+still carrying the 0.1.x name is renamed to MLX Harness). If you
 quit instead, the update is installed for the next launch. **Later** hides the
 banner until the next version or the next launch.
 
@@ -112,8 +114,8 @@ Requirements: a Mac with Apple Silicon, Node.js 20+, Python 3.12, and Homebrew's
 `node` (`brew install node`; the packaging hooks call `/opt/homebrew/bin/node`).
 
 ```bash
-git clone https://github.com/MLXapp/studio.git
-cd studio
+git clone https://github.com/MLXapp/harness.git
+cd harness
 
 # Python engine (for development)
 python3 -m venv .venv && source .venv/bin/activate
@@ -127,7 +129,7 @@ npm run typecheck      # TypeScript
 npx vitest run         # panel tests
 
 # DMG: panel/release/MLX-Harness-<version>-arm64.dmg
-npm run dist           # = scripts/build-studio-dmg.sh
+npm run dist           # = scripts/build-harness-dmg.sh
 ```
 
 `npm run dist` builds the bundled Python runtime (`scripts/bundle-python.sh`), then
@@ -136,7 +138,7 @@ it downloads the public build from mlx.app, verifies it and stages it in
 `panel/resources/bundled-node/` (not committed); without it the app offers the
 download instead. It signs with a Developer ID certificate when one is available and
 notarizes when `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` are set; otherwise the
-DMG is unsigned. `MLX_STUDIO_FLAVOR=tahoe` builds the macOS 26-only variant with
+DMG is unsigned. `MLX_HARNESS_FLAVOR=tahoe` builds the macOS 26-only variant with
 native MLX wheels. JANG tools are taken from `VMLX_JANG_TOOLS_SOURCE` (a checkout of
 [jjang-ai/jangq](https://github.com/jjang-ai/jangq)'s `jang-tools`), or from PyPI with
 `VMLX_ALLOW_PYPI_JANG=1`.

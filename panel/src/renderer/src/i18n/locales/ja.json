@@ -2686,7 +2686,7 @@
     "stateIdle": "現在マイニング中の Mac はありません",
     "unsettled": "未精算: {amount} MLX",
     "howTitle": "しくみ",
-    "howStudio": "MLX Harness は、この Mac 上であなたのために AI モデルをプライベートに動かします。",
+    "howHarness": "MLX Harness は、この Mac 上であなたのために AI モデルをプライベートに動かします。",
     "howMlx": "MLX Node は Mac の空き時間を MLX ネットワークに貸し出します。ネットワークの AI ジョブがその Mac で動き、MLX トークンを得られます。",
     "howRisk": "MLX トークンは暗号資産です。価値がゼロになる可能性があり、マイニングした MLX は使えるようになるまで一定期間ロックされ、収益は保証されません。",
     "risks": "リスクを読む"

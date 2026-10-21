@@ -122,7 +122,7 @@ assert_r20_pinned_tool SHASUM "$SHASUM_BIN"
 assert_r20_pinned_tool AWK "$AWK_BIN"
 assert_r20_pinned_tool FIND "$FIND_BIN"
 assert_r20_pinned_tool NODE "$NODE_BIN"
-# MLX Studio: the app version (package.json, 0.x) is independent of the
+# MLX Harness: the app version (package.json, 0.x) is independent of the
 # vMLX engine version, so the bundled engine must match the engine source it
 # was built from: the [project] version in the repository's pyproject.toml.
 # (Upstream vMLX keeps both equal, so this is the same check there.)

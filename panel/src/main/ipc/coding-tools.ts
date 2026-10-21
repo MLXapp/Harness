@@ -8,12 +8,23 @@ import { join } from 'path'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dump as dumpYAML, load as loadYAML } from 'js-yaml'
 
-// Tag to identify our entries. Machine identifiers written into other tools'
-// configs ('_mlxstudio', the 'mlxstudio' provider keys and API-key
-// placeholder, 'MLXSTUDIO_*' Codex providers) keep their 0.1.x spelling so
-// entries saved before the MLX Harness rename are still found and removed;
-// only names people read say MLX Harness.
-const MLXSTUDIO_TAG = '_mlxstudio'
+// Tag to identify our entries in other tools' configs. New entries are written
+// as '_mlxharness' (provider keys 'mlxharness', API-key placeholder
+// 'mlxharness', Codex providers 'MLXHARNESS_*'). Up to 0.2.x they were written
+// as '_mlxstudio' / 'mlxstudio' / 'MLXSTUDIO_*' (upstream vMLX's spelling):
+// those legacy ids are kept on purpose so entries saved by earlier versions are
+// still found, migrated on the next write and removed. Both are recognised.
+const HARNESS_TAG = '_mlxharness'
+const LEGACY_TAG = '_mlxstudio'
+const HARNESS_ID = 'mlxharness'
+const LEGACY_ID = 'mlxstudio'
+/** Non-empty API key the local server ignores. */
+const API_KEY_PLACEHOLDER = HARNESS_ID
+
+/** An entry we wrote (current or legacy tag). */
+function isOurs(entry: any): boolean {
+  return !!(entry?.[HARNESS_TAG] || entry?.[LEGACY_TAG])
+}
 
 interface ToolConfig {
   detect: () => boolean
@@ -222,7 +233,9 @@ const CLAUDE_MANAGED_ENV_KEYS = [
   'ANTHROPIC_API_KEY',
 ] as const
 /** Where the user's pre-vMLX values are parked so remove can restore them. */
-const CLAUDE_PREV_KEY = `${MLXSTUDIO_TAG}_prev`
+const CLAUDE_PREV_KEY = `${HARNESS_TAG}_prev`
+/** The same, as written up to 0.2.x (legacy). */
+const CLAUDE_LEGACY_PREV_KEY = `${LEGACY_TAG}_prev`
 const claudeCode: ToolConfig = {
   detect: () => commandExists('claude'),
   installCmd: 'npm',
@@ -230,17 +243,25 @@ const claudeCode: ToolConfig = {
   configPath: CLAUDE_SETTINGS,
   getEntries: () => {
     const cfg = readJSONForDisplay(CLAUDE_SETTINGS)
-    if (!cfg?.env?.ANTHROPIC_BASE_URL || !cfg?.env?.[MLXSTUDIO_TAG]) return []
+    if (!cfg?.env?.ANTHROPIC_BASE_URL || !isOurs(cfg?.env)) return []
     return [{ label: cfg.env.ANTHROPIC_MODEL || 'default', baseUrl: cfg.env.ANTHROPIC_BASE_URL }]
   },
   addEntry: (baseUrl, modelName) => {
     const cfg = safeReadJSON(CLAUDE_SETTINGS) || {}
     if (!cfg.env) cfg.env = {}
 
+    // A snapshot saved up to 0.2.x moves to the current key (it holds the
+    // user's originals, which a new snapshot would otherwise overwrite).
+    if (cfg.env[CLAUDE_PREV_KEY] === undefined && cfg.env[CLAUDE_LEGACY_PREV_KEY] !== undefined) {
+      cfg.env[CLAUDE_PREV_KEY] = cfg.env[CLAUDE_LEGACY_PREV_KEY]
+    }
+    delete cfg.env[CLAUDE_LEGACY_PREV_KEY]
+    delete cfg.env[LEGACY_TAG]
+
     // Snapshot whatever the user already had, ONCE, before we clobber it.
     // Without this, a user with a real ANTHROPIC_API_KEY (or their own
     // BASE_URL/MODEL) lost it permanently: addEntry overwrote the key with
-    // 'mlxstudio' and removeEntry then DELETED it. Toggling vMLX on and off
+    // the placeholder and removeEntry then DELETED it. Toggling vMLX on and off
     // must leave the user exactly where they started.
     //
     // Guarded by absence so a second add (e.g. switching model) does not
@@ -258,15 +279,15 @@ const claudeCode: ToolConfig = {
     // Claude Code appends /v1/messages itself — base URL should NOT include /v1
     cfg.env.ANTHROPIC_BASE_URL = baseUrl
     cfg.env.ANTHROPIC_MODEL = modelName
-    cfg.env.ANTHROPIC_API_KEY = 'mlxstudio'  // Required non-empty value
-    cfg.env[MLXSTUDIO_TAG] = 'true'
+    cfg.env.ANTHROPIC_API_KEY = API_KEY_PLACEHOLDER  // Required non-empty value
+    cfg.env[HARNESS_TAG] = 'true'
     safeWriteJSON(CLAUDE_SETTINGS, cfg)
   },
   removeEntry: () => {
     const cfg = safeReadJSON(CLAUDE_SETTINGS)
     if (!cfg?.env) return
 
-    const prev = cfg.env[CLAUDE_PREV_KEY]
+    const prev = cfg.env[CLAUDE_PREV_KEY] ?? cfg.env[CLAUDE_LEGACY_PREV_KEY]
     if (prev && typeof prev === 'object') {
       // Restore the user's originals rather than deleting blindly.
       for (const key of CLAUDE_MANAGED_ENV_KEYS) {
@@ -275,6 +296,7 @@ const claudeCode: ToolConfig = {
         else cfg.env[key] = value
       }
       delete cfg.env[CLAUDE_PREV_KEY]
+      delete cfg.env[CLAUDE_LEGACY_PREV_KEY]
     } else {
       // No snapshot (config predates this fix): fall back to the old
       // delete-only behaviour, which is still correct when the user had
@@ -282,7 +304,8 @@ const claudeCode: ToolConfig = {
       for (const key of CLAUDE_MANAGED_ENV_KEYS) delete cfg.env[key]
     }
 
-    delete cfg.env[MLXSTUDIO_TAG]
+    delete cfg.env[HARNESS_TAG]
+    delete cfg.env[LEGACY_TAG]
     // Clean up empty env object
     if (Object.keys(cfg.env).length === 0) delete cfg.env
     safeWriteJSON(CLAUDE_SETTINGS, cfg)
@@ -294,13 +317,17 @@ const claudeCode: ToolConfig = {
 const CODEX_TOML = join(homedir(), '.codex', 'config.toml')
 const CODEX_DEFAULTS_BEGIN = '# >>> MLX Harness managed Codex defaults'
 const CODEX_DEFAULTS_END = '# <<< MLX Harness managed Codex defaults'
-/** The same block as written by 0.1.x (MLX Studio): still recognised, replaced on the next write. */
+/** The same block as written by 0.1.x (legacy marker): still recognised, replaced on the next write. */
 const CODEX_LEGACY_DEFAULTS_BEGIN = '# >>> MLX Studio managed Codex defaults'
 const CODEX_LEGACY_DEFAULTS_END = '# <<< MLX Studio managed Codex defaults'
 const CODEX_PREVIOUS_DEFAULTS = '# previous-defaults-base64: '
 
-function codexProviderKey(modelName: string): string {
-  return `MLXSTUDIO_${modelName.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase()}`
+const CODEX_PROVIDER_PREFIX = 'MLXHARNESS_'
+/** Prefix of the providers written up to 0.2.x (legacy): still listed and removed. */
+const CODEX_LEGACY_PROVIDER_PREFIX = 'MLXSTUDIO_'
+
+function codexProviderKey(modelName: string, prefix = CODEX_PROVIDER_PREFIX): string {
+  return `${prefix}${modelName.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase()}`
 }
 
 function tomlString(value: string): string {
@@ -388,13 +415,13 @@ const codexCli: ToolConfig = {
   getEntries: () => {
     const toml = safeReadTOML(CODEX_TOML)
     if (!toml) return []
-    // Parse TOML: find [model_providers.MLXSTUDIO_*] sections with _mlxstudio marker
+    // Parse TOML: find our [model_providers.MLXHARNESS_*] (or legacy MLXSTUDIO_*) sections
     const entries: Array<{ label: string; baseUrl: string }> = []
     const sectionRegex = /\[model_providers\.([^\]]+)\]/g
     let match
     while ((match = sectionRegex.exec(toml)) !== null) {
       const name = match[1]
-      if (!name.startsWith('MLXSTUDIO_')) continue
+      if (!name.startsWith(CODEX_PROVIDER_PREFIX) && !name.startsWith(CODEX_LEGACY_PROVIDER_PREFIX)) continue
       // Extract base_url from this section
       const sectionStart = match.index + match[0].length
       const nextSection = toml.indexOf('\n[', sectionStart)
@@ -412,9 +439,12 @@ const codexCli: ToolConfig = {
       ? { toml: managed.toml, previousDefaults: managed.previousDefaults }
       : extractCodexTopLevelDefaults(managed.toml)
     toml = extracted.toml
-    // Remove existing section if present
-    const sectionPattern = new RegExp(`\\[model_providers\\.${providerKey}\\][\\s\\S]*?(?=\\n\\[|$)`, 'g')
-    toml = toml.replace(sectionPattern, '').replace(/\n{3,}/g, '\n\n').trim()
+    // Remove existing section if present (and the same model's legacy one)
+    for (const key of [providerKey, codexProviderKey(modelName, CODEX_LEGACY_PROVIDER_PREFIX)]) {
+      const sectionPattern = new RegExp(`\\[model_providers\\.${key}\\][\\s\\S]*?(?=\\n\\[|$)`, 'g')
+      toml = toml.replace(sectionPattern, '')
+    }
+    toml = toml.replace(/\n{3,}/g, '\n\n').trim()
     // Codex requires model/model_provider/model_context_window at top level.
     // The old integration wrote an unsupported max_context inside the
     // provider table and never selected the provider, so a healthy vMLX curl
@@ -443,7 +473,7 @@ const codexCli: ToolConfig = {
 }
 
 // ═══ OpenCode ═══
-// Config: ~/.config/opencode/opencode.json — we add provider entries tagged with MLXSTUDIO_TAG
+// Config: ~/.config/opencode/opencode.json — we add provider entries tagged with HARNESS_TAG
 const openCode: ToolConfig = {
   detect: () => commandExists('opencode'),
   installCmd: 'npm',
@@ -453,14 +483,18 @@ const openCode: ToolConfig = {
     const cfg = readJSONForDisplay(join(homedir(), '.config', 'opencode', 'opencode.json'))
     if (!cfg?.provider) return []
     return Object.entries(cfg.provider)
-      .filter(([_, v]: any) => v?.[MLXSTUDIO_TAG])
+      .filter(([_, v]: any) => isOurs(v))
       .map(([k, v]: any) => ({ label: k, baseUrl: (v as any)?.options?.baseURL || '' }))
   },
   addEntry: (baseUrl, modelName, _port, limits) => {
     const path = join(homedir(), '.config', 'opencode', 'opencode.json')
     const cfg = safeReadJSON(path) || { '$schema': 'https://opencode.ai/config.json' }
     if (!cfg.provider) cfg.provider = {}
-    const key = `mlxstudio-${modelName.replace(/[^a-zA-Z0-9-]/g, '-')}`
+    const slug = modelName.replace(/[^a-zA-Z0-9-]/g, '-')
+    const key = `${HARNESS_ID}-${slug}`
+    // The same model's entry as written up to 0.2.x is replaced by this one.
+    const legacyKey = `${LEGACY_ID}-${slug}`
+    if (isOurs(cfg.provider[legacyKey])) delete cfg.provider[legacyKey]
     cfg.provider[key] = {
       npm: '@ai-sdk/openai-compatible',
       name: `MLX Harness (${modelName})`,
@@ -472,7 +506,7 @@ const openCode: ToolConfig = {
           modalities: { input: ['text'], output: ['text'] },
         },
       },
-      [MLXSTUDIO_TAG]: true,
+      [HARNESS_TAG]: true,
     }
     safeWriteJSON(path, cfg)
   },
@@ -500,7 +534,7 @@ const openClaw: ToolConfig = {
     const entries: Array<{ label: string; baseUrl: string }> = []
     for (const [name, provider] of Object.entries(cfg.models.providers)) {
       const p = provider as any
-      if (!p?.[MLXSTUDIO_TAG]) continue
+      if (!isOurs(p)) continue
       entries.push({ label: name, baseUrl: p.baseUrl || '' })
     }
     return entries
@@ -513,8 +547,27 @@ const openClaw: ToolConfig = {
     if (!cfg.agents) cfg.agents = {}
     if (!cfg.agents.defaults) cfg.agents.defaults = {}
     if (!cfg.agents.defaults.models) cfg.agents.defaults.models = {}
-    const providerKey = `mlxstudio`
+    const providerKey = HARNESS_ID
     const fqModel = `${providerKey}/${modelName}`
+    // Move a provider written up to 0.2.x ('mlxstudio') into ours, keeping its
+    // models and their allowlist entries.
+    const legacy = cfg.models.providers[LEGACY_ID]
+    if (isOurs(legacy)) {
+      const current = cfg.models.providers[providerKey]
+      const merged: any[] = Array.isArray(current?.models) ? [...current.models] : []
+      for (const m of Array.isArray(legacy.models) ? legacy.models : []) {
+        if (!merged.some(x => x?.id === m?.id)) merged.push(m)
+      }
+      cfg.models.providers[providerKey] = { ...legacy, ...(current || {}), models: merged }
+      delete cfg.models.providers[providerKey][LEGACY_TAG]
+      delete cfg.models.providers[LEGACY_ID]
+      for (const k of Object.keys(cfg.agents.defaults.models)) {
+        if (!k.startsWith(`${LEGACY_ID}/`)) continue
+        const moved = `${providerKey}/${k.slice(LEGACY_ID.length + 1)}`
+        if (cfg.agents.defaults.models[moved] === undefined) cfg.agents.defaults.models[moved] = cfg.agents.defaults.models[k]
+        delete cfg.agents.defaults.models[k]
+      }
+    }
     const model = {
       id: modelName,
       name: modelName,
@@ -538,10 +591,10 @@ const openClaw: ToolConfig = {
 
     cfg.models.providers[providerKey] = {
       baseUrl: `${baseUrl}/v1`,
-      apiKey: 'mlxstudio',
+      apiKey: API_KEY_PLACEHOLDER,
       api: 'openai-completions',
       models,
-      [MLXSTUDIO_TAG]: true,
+      [HARNESS_TAG]: true,
     }
     cfg.agents.defaults.models[fqModel] = { alias: modelName }
     safeWriteJSON(OPENCLAW_JSON, cfg)
@@ -549,11 +602,13 @@ const openClaw: ToolConfig = {
   removeEntry: () => {
     const cfg = safeReadJSON(OPENCLAW_JSON)
     if (!cfg) return
-    if (cfg.models?.providers?.mlxstudio) delete cfg.models.providers.mlxstudio
-    // Remove all mlxstudio/ entries from allowlist
+    for (const id of [HARNESS_ID, LEGACY_ID]) {
+      if (cfg.models?.providers?.[id]) delete cfg.models.providers[id]
+    }
+    // Remove all mlxharness/ (and legacy mlxstudio/) entries from allowlist
     if (cfg.agents?.defaults?.models) {
       for (const key of Object.keys(cfg.agents.defaults.models)) {
-        if (key.startsWith('mlxstudio/')) delete cfg.agents.defaults.models[key]
+        if (key.startsWith(`${HARNESS_ID}/`) || key.startsWith(`${LEGACY_ID}/`)) delete cfg.agents.defaults.models[key]
       }
     }
     safeWriteJSON(OPENCLAW_JSON, cfg)
@@ -576,7 +631,9 @@ const openClaw: ToolConfig = {
 // user and may hold arbitrary unrelated settings, and the regex-edited TOML
 // path in this same module is exactly the fragility worth not repeating.
 const HERMES_YAML = join(homedir(), '.hermes', 'config.yaml')
-const HERMES_PROVIDER_KEY = 'mlxstudio'
+const HERMES_PROVIDER_KEY = HARNESS_ID
+/** The provider as written up to 0.2.x (legacy): still listed, merged on add, removed. */
+const HERMES_LEGACY_PROVIDER_KEY = LEGACY_ID
 
 function readHermesConfig(path: string, forDisplay: boolean): any {
   if (!existsSync(path)) return null
@@ -622,15 +679,19 @@ const hermesAgent: ToolConfig = {
   configPath: HERMES_YAML,
   getEntries: () => {
     const doc = readHermesConfig(HERMES_YAML, true)
-    const provider = doc?.providers?.[HERMES_PROVIDER_KEY]
-    if (!provider?.[MLXSTUDIO_TAG]) return []
-    const models = provider.models && typeof provider.models === 'object'
-      ? Object.keys(provider.models)
-      : []
-    const baseUrl = typeof provider.base_url === 'string' ? provider.base_url : ''
-    return models.length
-      ? models.map(m => ({ label: m, baseUrl }))
-      : [{ label: HERMES_PROVIDER_KEY, baseUrl }]
+    const entries: Array<{ label: string; baseUrl: string }> = []
+    for (const key of [HERMES_PROVIDER_KEY, HERMES_LEGACY_PROVIDER_KEY]) {
+      const provider = doc?.providers?.[key]
+      if (!isOurs(provider)) continue
+      const models = provider.models && typeof provider.models === 'object'
+        ? Object.keys(provider.models)
+        : []
+      const baseUrl = typeof provider.base_url === 'string' ? provider.base_url : ''
+      for (const e of models.length ? models.map(m => ({ label: m, baseUrl })) : [{ label: key, baseUrl }]) {
+        if (!entries.some(x => x.label === e.label)) entries.push(e)
+      }
+    }
+    return entries
   },
   addEntry: (baseUrl, modelName) => {
     const doc = readHermesConfig(HERMES_YAML, false) || {}
@@ -638,36 +699,46 @@ const hermesAgent: ToolConfig = {
       doc.providers = {}
     }
     const existing = doc.providers[HERMES_PROVIDER_KEY]
+    const legacy = doc.providers[HERMES_LEGACY_PROVIDER_KEY]
+    const modelsOf = (p: any) =>
+      p?.models && typeof p.models === 'object' && !Array.isArray(p.models) ? p.models : {}
     // Keep sibling models: like OpenClaw, one provider holds many models, so
-    // adding a second must not silently drop the first.
-    const models =
-      existing?.models && typeof existing.models === 'object' && !Array.isArray(existing.models)
-        ? { ...existing.models }
-        : {}
+    // adding a second must not silently drop the first. A provider written
+    // up to 0.2.x is merged into ours and removed.
+    const models = { ...(isOurs(legacy) ? modelsOf(legacy) : {}), ...modelsOf(existing) }
+    if (isOurs(legacy)) delete doc.providers[HERMES_LEGACY_PROVIDER_KEY]
     models[modelName] = { ...(models[modelName] || {}) }
     doc.providers[HERMES_PROVIDER_KEY] = {
       ...(existing && typeof existing === 'object' ? existing : {}),
       // Hermes appends /chat/completions — end at /v1.
       base_url: `${baseUrl}/v1`,
-      api_key: 'mlxstudio',
+      api_key: API_KEY_PLACEHOLDER,
       models,
-      [MLXSTUDIO_TAG]: true,
+      [HARNESS_TAG]: true,
     }
+    delete doc.providers[HERMES_PROVIDER_KEY][LEGACY_TAG]
     writeHermesConfig(HERMES_YAML, doc)
   },
   removeEntry: (label) => {
     const doc = readHermesConfig(HERMES_YAML, false)
-    const provider = doc?.providers?.[HERMES_PROVIDER_KEY]
-    if (!provider) return
-    // Drop just this model when others remain; drop the provider when it was
-    // the last one, so no empty shell is left referencing our endpoint.
-    if (provider.models && typeof provider.models === 'object' && label in provider.models) {
-      delete provider.models[label]
+    let changed = false
+    for (const key of [HERMES_PROVIDER_KEY, HERMES_LEGACY_PROVIDER_KEY]) {
+      const provider = doc?.providers?.[key]
+      if (!provider) continue
+      // The legacy key is only ours when it carries our tag.
+      if (key === HERMES_LEGACY_PROVIDER_KEY && !isOurs(provider)) continue
+      changed = true
+      // Drop just this model when others remain; drop the provider when it was
+      // the last one, so no empty shell is left referencing our endpoint.
+      if (provider.models && typeof provider.models === 'object' && label in provider.models) {
+        delete provider.models[label]
+      }
+      if (!provider.models || Object.keys(provider.models).length === 0) {
+        delete doc.providers[key]
+      }
     }
-    if (!provider.models || Object.keys(provider.models).length === 0) {
-      delete doc.providers[HERMES_PROVIDER_KEY]
-      if (Object.keys(doc.providers).length === 0) delete doc.providers
-    }
+    if (!changed) return
+    if (doc.providers && Object.keys(doc.providers).length === 0) delete doc.providers
     writeHermesConfig(HERMES_YAML, doc)
   },
 }
@@ -749,7 +820,7 @@ export function registerCodingToolHandlers(): void {
           env: {
             ANTHROPIC_BASE_URL: baseUrl,
             ANTHROPIC_MODEL: modelName,
-            ANTHROPIC_API_KEY: 'mlxstudio',
+            ANTHROPIC_API_KEY: API_KEY_PLACEHOLDER,
           }
         }, null, 2),
         notes: 'Claude Code appends /v1/messages automatically. Merge the "env" key into your existing settings.json — do not replace the whole file. Verify: claude --version && claude /status',
@@ -768,7 +839,7 @@ export function registerCodingToolHandlers(): void {
         language: 'json',
         snippet: JSON.stringify({
           provider: {
-            [`mlxstudio-${modelName.replace(/[^a-zA-Z0-9-]/g, '-')}`]: {
+            [`${HARNESS_ID}-${modelName.replace(/[^a-zA-Z0-9-]/g, '-')}`]: {
               npm: '@ai-sdk/openai-compatible',
               name: `MLX Harness (${modelName})`,
               options: { baseURL: `${baseUrl}/v1` },
@@ -791,10 +862,10 @@ export function registerCodingToolHandlers(): void {
           'providers:',
           `  ${HERMES_PROVIDER_KEY}:`,
           `    base_url: ${baseUrl}/v1`,
-          '    api_key: mlxstudio',
+          `    api_key: ${API_KEY_PLACEHOLDER}`,
           '    models:',
           `      ${modelName}: {}`,
-          `    ${MLXSTUDIO_TAG}: true`,
+          `    ${HARNESS_TAG}: true`,
         ].join('\n'),
         notes: 'Merge the provider under your existing "providers" mapping in ~/.hermes/config.yaml (do not replace the file). Hermes appends /chat/completions, so base_url must end at /v1. Select the model in Hermes with: hermes --model ' + modelName,
       },
@@ -805,9 +876,9 @@ export function registerCodingToolHandlers(): void {
           models: {
             mode: 'merge',
             providers: {
-              mlxstudio: {
+              [HARNESS_ID]: {
                 baseUrl: `${baseUrl}/v1`,
-                apiKey: 'mlxstudio',
+                apiKey: API_KEY_PLACEHOLDER,
                 api: 'openai-completions',
                 models: [{
                   id: modelName,
@@ -824,7 +895,7 @@ export function registerCodingToolHandlers(): void {
           agents: {
             defaults: {
               models: {
-                [`mlxstudio/${modelName}`]: { alias: modelName },
+                [`${HARNESS_ID}/${modelName}`]: { alias: modelName },
               },
             },
           },

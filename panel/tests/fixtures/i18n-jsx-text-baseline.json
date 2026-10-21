@@ -1,6 +1,5 @@
 [
   "App.tsx: Ko-fi",
-  "components/api/ApiDashboard.tsx: MLX Studio by Jinho Jang &middot; mlx.studio",
   "components/chat/InlineToolCall.tsx: added",
   "components/chat/InlineToolCall.tsx: args",
   "components/chat/InlineToolCall.tsx: removed",

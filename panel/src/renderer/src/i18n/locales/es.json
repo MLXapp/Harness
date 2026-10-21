@@ -2686,7 +2686,7 @@
     "stateIdle": "Ningún Mac minando ahora",
     "unsettled": "Aún sin liquidar: {amount} MLX",
     "howTitle": "Cómo encaja todo",
-    "howStudio": "MLX Harness ejecuta modelos de IA para ti, en privado, en este Mac.",
+    "howHarness": "MLX Harness ejecuta modelos de IA para ti, en privado, en este Mac.",
     "howMlx": "MLX Node presta el tiempo libre de tu Mac a la Red MLX: los trabajos de IA de la red se ejecutan en él y ganas MLX Tokens.",
     "howRisk": "Los MLX Tokens son un criptoactivo. Su valor puede caer a cero, el MLX minado queda bloqueado un tiempo antes de poder usarlo y las ganancias no están garantizadas.",
     "risks": "Lee los riesgos"

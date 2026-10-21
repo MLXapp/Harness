@@ -1,9 +1,8 @@
 /**
  * The app's name, and the 0.1.x name it must stay compatible with.
  *
- * MLX Harness was called "MLX Studio" up to 0.1.x (renamed in 0.2.0: JANGQ
- * AI's own vMLX app is called MLX Studio). Everything a person sees says
- * MLX Harness. Two things on disk were named after the old app name and
+ * Up to 0.1.x the app's name was "MLX Studio" (legacy; kept here only for the
+ * migration below). Everything a person sees says MLX Harness. Two things on disk were named after the old app name and
  * must keep working for people who update from 0.1.x:
  *
  * - userData: Electron puts it at <appData>/<app name>

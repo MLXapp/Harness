@@ -2686,7 +2686,7 @@
     "stateIdle": "지금 채굴 중인 Mac 없음",
     "unsettled": "미정산: {amount} MLX",
     "howTitle": "두 앱의 관계",
-    "howStudio": "MLX Harness는 이 Mac에서 AI 모델을 비공개로 실행합니다.",
+    "howHarness": "MLX Harness는 이 Mac에서 AI 모델을 비공개로 실행합니다.",
     "howMlx": "MLX Node는 Mac의 유휴 시간을 MLX 네트워크에 제공합니다. 네트워크의 AI 작업이 Mac에서 실행되고 MLX 토큰을 받습니다.",
     "howRisk": "MLX 토큰은 암호화폐 자산입니다. 가치가 0이 될 수 있고, 채굴한 MLX는 사용하기 전 일정 기간 잠기며, 수익은 보장되지 않습니다.",
     "risks": "위험 안내 읽기"
