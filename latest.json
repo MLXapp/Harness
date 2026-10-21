@@ -1,12 +1,12 @@
 {
   "version": "0.2.0",
-  "url": "https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg",
+  "url": "https://github.com/MLXapp/harness/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg",
   "sha256": "7c4a1288459b196aa755f84d675575d02f9bf60c6486b4c9b3f00532511a49f5",
   "size": 588596344,
   "date": "2026-10-20",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg",
+      "url": "https://github.com/MLXapp/harness/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg",
       "sha256": "7c4a1288459b196aa755f84d675575d02f9bf60c6486b4c9b3f00532511a49f5"
     }
   },
