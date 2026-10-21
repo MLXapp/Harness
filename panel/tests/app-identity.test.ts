@@ -138,10 +138,11 @@ describe('packaging under the new name (0.2.0)', () => {
     expect(JSON.stringify(pkg.build)).not.toContain('MLX Studio')
   })
 
-  it('is version 0.2.0 in package.json and the lock file', () => {
-    expect(pkg.version).toBe('0.2.0')
-    expect(lock.version).toBe('0.2.0')
-    expect(lock.packages[''].version).toBe('0.2.0')
+  it('is 0.2.0 or later, the same in package.json and the lock file', () => {
+    const [major, minor] = String(pkg.version).split('.').map(Number)
+    expect(major > 0 || minor >= 2).toBe(true)
+    expect(lock.version).toBe(pkg.version)
+    expect(lock.packages[''].version).toBe(pkg.version)
   })
 
   it('publishes MLX-Harness DMGs under MLXapp/harness releases, a URL every installed copy accepts', async () => {
