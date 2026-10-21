@@ -1,8 +1,7 @@
 MLX Harness
 Copyright 2026 Flex UK Limited (MLX Network)
 
-MLX Harness (called MLX Studio up to version 0.1.x; not JANGQ AI's app of
-that name) is a modified version of vMLX
+MLX Harness is a modified version of vMLX
 (https://github.com/jjang-ai/vmlx, imported at commit aa098f6, version 1.6.80).
 vMLX is Copyright 2026 JANGQ AI and is licensed under the Apache License,
 Version 2.0. The modifications in this repository are Copyright 2026 Flex UK

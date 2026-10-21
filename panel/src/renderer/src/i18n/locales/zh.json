@@ -2686,7 +2686,7 @@
     "stateIdle": "目前没有 Mac 在挖矿",
     "unsettled": "尚未结算：{amount} MLX",
     "howTitle": "它们如何配合",
-    "howStudio": "MLX Harness 在这台 Mac 上为你私密地运行 AI 模型。",
+    "howHarness": "MLX Harness 在这台 Mac 上为你私密地运行 AI 模型。",
     "howMlx": "MLX Node 把你的 Mac 的空闲时间提供给 MLX 网络：网络中的 AI 任务在它上面运行，你赚取 MLX 代币。",
     "howRisk": "MLX 代币是一种加密资产。其价值可能跌至零，挖到的 MLX 在可使用前会锁定一段时间，收益也不能保证。",
     "risks": "阅读风险说明"

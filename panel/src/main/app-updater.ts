@@ -19,15 +19,16 @@ import { dirname, join } from 'path'
 import { db } from './database'
 import { t } from './i18n'
 import { setUpdateCheckHandler } from './application-menu'
-import { decideUpdate, LATEST_MANIFEST_URL, parseLatestRelease, type LatestRelease } from './update-manifest'
+import { decideUpdate, LATEST_MANIFEST_URLS, parseLatestRelease, type LatestRelease } from './update-manifest'
 import {
   LEGACY_APP_NAMES,
-  STUDIO_APP_NAME,
-  STUDIO_BUNDLE_ID,
-  STUDIO_LATEST_RELEASE_PAGE,
+  HARNESS_APP_NAME,
+  HARNESS_BUNDLE_ID,
+  HARNESS_LATEST_RELEASE_PAGE,
   UPDATE_CHECK_DELAY_MS,
   UPDATE_CHECK_INTERVAL_MS,
   UPDATE_NOTIFIED_SETTING,
+  LEGACY_UPDATE_NOTIFIED_SETTING,
   appBundlePath,
   backupPathFor,
   checkCandidate,
@@ -171,15 +172,20 @@ function cleanUpLeftovers(): void {
 // ---------------------------------------------------------------------------
 // Checking
 
+/** The first feed in LATEST_MANIFEST_URLS that answers with a manifest. */
 async function fetchManifest(): Promise<LatestRelease | null> {
-  try {
-    const res = await net.fetch(LATEST_MANIFEST_URL, { method: 'GET', cache: 'no-store' })
-    if (!res.ok) { log(`${LATEST_MANIFEST_URL}: HTTP ${res.status}`); return null }
-    return parseLatestRelease(await res.json())
-  } catch (e) {
-    log(`${LATEST_MANIFEST_URL}: ${(e as Error).message}`)
-    return null
+  for (const url of LATEST_MANIFEST_URLS) {
+    try {
+      const res = await net.fetch(url, { method: 'GET', cache: 'no-store' })
+      if (!res.ok) { log(`${url}: HTTP ${res.status}`); continue }
+      const manifest = parseLatestRelease(await res.json())
+      if (manifest) return manifest
+      log(`${url}: not a manifest`)
+    } catch (e) {
+      log(`${url}: ${(e as Error).message}`)
+    }
   }
+  return null
 }
 
 function check(manual: boolean): Promise<CheckOutcome> {
@@ -222,9 +228,25 @@ async function doCheck(manual: boolean): Promise<CheckOutcome> {
   return { kind: 'available', version: r.version }
 }
 
+/**
+ * The last version a notification was shown for. Up to 0.2.x it was stored
+ * under LEGACY_UPDATE_NOTIFIED_SETTING: read once, written under the new key,
+ * the old key removed.
+ */
+function readNotifiedVersion(): string | undefined {
+  const current = db.getSetting(UPDATE_NOTIFIED_SETTING)
+  if (current !== undefined) return current
+  const legacy = db.getSetting(LEGACY_UPDATE_NOTIFIED_SETTING)
+  if (legacy !== undefined) {
+    db.setSetting(UPDATE_NOTIFIED_SETTING, legacy)
+    try { db.deleteSetting(LEGACY_UPDATE_NOTIFIED_SETTING) } catch { /* harmless leftover */ }
+  }
+  return legacy
+}
+
 function maybeNotify(r: LatestRelease): void {
   let notified: string | undefined
-  try { notified = db.getSetting(UPDATE_NOTIFIED_SETTING) } catch { /* settings unavailable */ }
+  try { notified = readNotifiedVersion() } catch { /* settings unavailable */ }
   const focused = BrowserWindow.getAllWindows().some(w => !w.isDestroyed() && w.isFocused())
   if (!shouldNotify({ version: r.version, notifiedVersion: notified, windowFocused: focused, supported: Notification.isSupported() })) return
   try { db.setSetting(UPDATE_NOTIFIED_SETTING, r.version) } catch { /* still notify this time */ }
@@ -290,7 +312,7 @@ async function download(url: string, dmg: string, expectedSize: number | undefin
 /** The running copy is our signed app (so replacing it is ours to do). Not deep: only the bundle's own seal. */
 async function verifyRunningApp(appPath: string): Promise<boolean> {
   const info = await readBundleInfo(appPath)
-  if (info?.CFBundleIdentifier !== STUDIO_BUNDLE_ID) return false
+  if (info?.CFBundleIdentifier !== HARNESS_BUNDLE_ID) return false
   return (await run('/usr/bin/codesign', codesignVerifyArgs(appPath, false), 180_000)).ok
 }
 
@@ -299,9 +321,9 @@ async function verifyRunningApp(appPath: string): Promise<boolean> {
  * "MLX Harness.app" (or a 0.1.x "MLX Studio.app") when present (its bundle id
  * is checked next), otherwise the one other .app carrying our bundle id.
  */
-async function findStudioApp(mount: string): Promise<string | null> {
+async function findHarnessApp(mount: string): Promise<string | null> {
   const isDir = (p: string) => { try { return lstatSync(p).isDirectory() } catch { return false } }
-  for (const name of [STUDIO_APP_NAME, ...LEGACY_APP_NAMES]) {
+  for (const name of [HARNESS_APP_NAME, ...LEGACY_APP_NAMES]) {
     const named = join(mount, name)
     if (isDir(named)) return named
   }
@@ -309,7 +331,7 @@ async function findStudioApp(mount: string): Promise<string | null> {
   try { entries = readdirSync(mount) } catch { return null }
   for (const n of entries.filter(e => e.endsWith('.app'))) {
     const p = join(mount, n)
-    if (isDir(p) && (await readBundleInfo(p))?.CFBundleIdentifier === STUDIO_BUNDLE_ID) return p
+    if (isDir(p) && (await readBundleInfo(p))?.CFBundleIdentifier === HARNESS_BUNDLE_ID) return p
   }
   return null
 }
@@ -363,7 +385,7 @@ async function doInstall(r: LatestRelease, p: Extract<InstallPlan, { ok: true }>
     mount = mkdtempSync(join(tmpdir(), 'mlx-harness-update-'))
     const attach = await run('/usr/bin/hdiutil', hdiutilAttachArgs(dmg, mount), 180_000)
     if (!attach.ok) throw new UpdateFail('mount', attach.out)
-    const candidate = await findStudioApp(mount)
+    const candidate = await findHarnessApp(mount)
     if (!candidate) throw new UpdateFail('notFound')
     const info = await readBundleInfo(candidate)
     const wrong = checkCandidate({ bundleId: info?.CFBundleIdentifier, version: info?.CFBundleShortVersionString, runningVersion: currentVersion })
@@ -405,7 +427,7 @@ async function doInstall(r: LatestRelease, p: Extract<InstallPlan, { ok: true }>
 
 function openManualDownload(): void {
   // The DMG for a copy that can't replace itself; the release page after a failed install.
-  const url = state.phase === 'error' || !release?.url ? STUDIO_LATEST_RELEASE_PAGE : release.url
+  const url = state.phase === 'error' || !release?.url ? HARNESS_LATEST_RELEASE_PAGE : release.url
   void shell.openExternal(url)
 }
 

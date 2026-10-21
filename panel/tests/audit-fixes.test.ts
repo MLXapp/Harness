@@ -34,8 +34,8 @@ describe('update URL validation', () => {
     expect(isValidUpdateUrl('https://releases.github.com/download/v1.0.0')).toBe(true)
   })
 
-  it('accepts trusted studio.mlx.app updater URL', () => {
-    expect(isValidUpdateUrl('https://studio.mlx.app/update/latest.json')).toBe(true)
+  it('accepts trusted harness.mlx.app updater URL', () => {
+    expect(isValidUpdateUrl('https://harness.mlx.app/update/latest.json')).toBe(true)
   })
 
   it('rejects evilgithub.com (lookalike)', () => {

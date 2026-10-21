@@ -6,8 +6,8 @@ import { join } from 'node:path'
 import {
   LEGACY_APP_NAMES,
   RENAME_SCRIPT,
-  STUDIO_APP_NAME,
-  STUDIO_REQUIREMENT,
+  HARNESS_APP_NAME,
+  HARNESS_REQUIREMENT,
   SWAP_SCRIPT,
   appBundlePath,
   backupPathFor,
@@ -65,7 +65,7 @@ describe('where the running app lives', () => {
   it('finds the bundle around the executable', () => {
     expect(appBundlePath('/Applications/MLX Harness.app/Contents/MacOS/MLX Harness')).toBe(APP)
     expect(appBundlePath('/Users/a/Downloads/MLX Harness 2.app/Contents/MacOS/MLX Harness')).toBe('/Users/a/Downloads/MLX Harness 2.app')
-    expect(appBundlePath('/Users/a/dev/studio/panel/node_modules/electron/dist/electron')).toBeNull()
+    expect(appBundlePath('/Users/a/dev/harness/panel/node_modules/electron/dist/electron')).toBeNull()
     expect(appBundlePath('')).toBeNull()
   })
   it('recognises translocated and disk-image copies, but not Applications on another disk', () => {
@@ -85,7 +85,7 @@ describe('where the running app lives', () => {
 
 describe('the rename from MLX Studio (0.1.x) to MLX Harness', () => {
   it('names the bundle MLX Harness.app and knows the 0.1.x name', () => {
-    expect(STUDIO_APP_NAME).toBe('MLX Harness.app')
+    expect(HARNESS_APP_NAME).toBe('MLX Harness.app')
     expect(LEGACY_APP_NAMES).toEqual(['MLX Studio.app'])
   })
   it('moves only a copy with the 0.1.x name, next to itself', () => {
@@ -147,13 +147,13 @@ describe('in-place install decision', () => {
 
 describe('verification rules', () => {
   it('requires a Developer ID signature from our team for our bundle id', () => {
-    expect(STUDIO_REQUIREMENT).toContain('anchor apple generic')
-    expect(STUDIO_REQUIREMENT).toContain('certificate leaf[subject.OU] = "CCKXS9W488"')
-    expect(STUDIO_REQUIREMENT).toContain('identifier "app.mlx.studio"')
-    expect(STUDIO_REQUIREMENT).toContain('certificate 1[field.1.2.840.113635.100.6.2.6] exists') // Developer ID CA
-    expect(STUDIO_REQUIREMENT).toContain('certificate leaf[field.1.2.840.113635.100.6.1.13] exists') // Developer ID Application
-    expect(codesignVerifyArgs('/tmp/m/MLX Harness.app')).toEqual(['--verify', '--deep', '--strict', '-R', `=${STUDIO_REQUIREMENT}`, '/tmp/m/MLX Harness.app'])
-    expect(codesignVerifyArgs(APP, false)).toEqual(['--verify', '--strict', '-R', `=${STUDIO_REQUIREMENT}`, APP])
+    expect(HARNESS_REQUIREMENT).toContain('anchor apple generic')
+    expect(HARNESS_REQUIREMENT).toContain('certificate leaf[subject.OU] = "CCKXS9W488"')
+    expect(HARNESS_REQUIREMENT).toContain('identifier "app.mlx.studio"')
+    expect(HARNESS_REQUIREMENT).toContain('certificate 1[field.1.2.840.113635.100.6.2.6] exists') // Developer ID CA
+    expect(HARNESS_REQUIREMENT).toContain('certificate leaf[field.1.2.840.113635.100.6.1.13] exists') // Developer ID Application
+    expect(codesignVerifyArgs('/tmp/m/MLX Harness.app')).toEqual(['--verify', '--deep', '--strict', '-R', `=${HARNESS_REQUIREMENT}`, '/tmp/m/MLX Harness.app'])
+    expect(codesignVerifyArgs(APP, false)).toEqual(['--verify', '--strict', '-R', `=${HARNESS_REQUIREMENT}`, APP])
   })
   it('accepts only a notarized Developer ID app in Gatekeeper', () => {
     expect(spctlArgs(APP)).toEqual(['-a', '-t', 'exec', '-vv', APP])

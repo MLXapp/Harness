@@ -5,8 +5,17 @@ export interface ReleaseAsset {
 }
 
 /** Where MLX Harness releases are published (the updater feed lives in that repo). */
-export const RELEASES_PAGE = 'https://github.com/MLXapp/studio/releases'
-export const LATEST_MANIFEST_URL = 'https://raw.githubusercontent.com/MLXapp/studio/main/latest.json'
+export const RELEASES_PAGE = 'https://github.com/MLXapp/harness/releases'
+/**
+ * The update feed, tried in order until one answers with a manifest. The repo
+ * was renamed from MLXapp/studio to MLXapp/harness; GitHub redirects the old
+ * path, but the second entry (legacy, kept on purpose) means a copy still
+ * finds updates if that redirect ever stops.
+ */
+export const LATEST_MANIFEST_URLS: readonly string[] = [
+  'https://raw.githubusercontent.com/MLXapp/harness/main/latest.json',
+  'https://raw.githubusercontent.com/MLXapp/studio/main/latest.json',
+]
 
 export interface LatestRelease {
   version: string
@@ -47,6 +56,11 @@ export function compareVersions(current: string, latest: string): boolean {
   return versionCompare(latest, current) > 0
 }
 
+/**
+ * Downloads must be HTTPS on github.com or (*.)mlx.app. The check is by host
+ * only (no path), which is why 0.1.x and 0.2.0 copies accept release URLs
+ * under github.com/MLXapp/harness/… as well as the old MLXapp/studio ones.
+ */
 export function isValidUpdateUrl(url: string): boolean {
   try {
     const parsed = new URL(url)

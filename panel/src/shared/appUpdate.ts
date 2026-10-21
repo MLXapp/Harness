@@ -21,12 +21,15 @@
  * unchanged (they are the identity; the folder name is not).
  */
 
-// Internal identifiers: unchanged by the rename (compatibility with 0.1.x).
-export const STUDIO_BUNDLE_ID = 'app.mlx.studio'
-export const STUDIO_TEAM_ID = 'CCKXS9W488'
+// The bundle id keeps its 0.1.x value on purpose: it is the app's identity.
+// macOS Keychain item access, TCC permissions and the designated requirement
+// below (which every installed copy's updater checks) all key on it; changing
+// it would break updates for every installed copy and orphan saved keys.
+export const HARNESS_BUNDLE_ID = 'app.mlx.studio'
+export const HARNESS_TEAM_ID = 'CCKXS9W488'
 /** The app's bundle name: in the DMG, and where an installed copy should live. */
-export const STUDIO_APP_NAME = 'MLX Harness.app'
-/** Bundle names of earlier versions that are renamed to STUDIO_APP_NAME. */
+export const HARNESS_APP_NAME = 'MLX Harness.app'
+/** Bundle names of earlier versions (0.1.x) that are renamed to HARNESS_APP_NAME. Legacy, kept for that migration. */
 export const LEGACY_APP_NAMES: readonly string[] = ['MLX Studio.app']
 
 /**
@@ -34,17 +37,19 @@ export const LEGACY_APP_NAMES: readonly string[] = ['MLX Studio.app']
  * chain, a Developer ID Application certificate (the two Apple OIDs: Developer
  * ID intermediate and Developer ID leaf), our team, our bundle id.
  */
-export const STUDIO_REQUIREMENT =
+export const HARNESS_REQUIREMENT =
   `anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists ` +
   `and certificate leaf[field.1.2.840.113635.100.6.1.13] exists ` +
-  `and certificate leaf[subject.OU] = "${STUDIO_TEAM_ID}" and identifier "${STUDIO_BUNDLE_ID}"`
+  `and certificate leaf[subject.OU] = "${HARNESS_TEAM_ID}" and identifier "${HARNESS_BUNDLE_ID}"`
 
 export const UPDATE_CHECK_DELAY_MS = 5_000
 export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 /** Settings-store key: the last version a macOS notification was shown for. */
-export const UPDATE_NOTIFIED_SETTING = 'studio_update_notified_version'
+export const UPDATE_NOTIFIED_SETTING = 'harness_update_notified_version'
+/** The same key as written up to 0.2.x; read once, moved to UPDATE_NOTIFIED_SETTING. Legacy, kept for that migration. */
+export const LEGACY_UPDATE_NOTIFIED_SETTING = 'studio_update_notified_version'
 /** Where people download by hand when the app can't update itself. */
-export const STUDIO_LATEST_RELEASE_PAGE = 'https://github.com/MLXapp/studio/releases/latest'
+export const HARNESS_LATEST_RELEASE_PAGE = 'https://github.com/MLXapp/harness/releases/latest'
 
 /** Why this copy can't replace itself (the banner then offers the DMG instead). */
 export type InstallBlock =
@@ -153,13 +158,13 @@ function join(dir: string, name: string): string {
 }
 
 /**
- * Where this copy should live: next to itself under STUDIO_APP_NAME when it
+ * Where this copy should live: next to itself under HARNESS_APP_NAME when it
  * still carries a 0.1.x name ("/Applications/MLX Studio.app" →
  * "/Applications/MLX Harness.app"), otherwise where it is (a name the user
  * chose is kept).
  */
 export function preferredAppPath(appPath: string): string {
-  return LEGACY_APP_NAMES.includes(basename(appPath)) ? join(dirname(appPath), STUDIO_APP_NAME) : appPath
+  return LEGACY_APP_NAMES.includes(basename(appPath)) ? join(dirname(appPath), HARNESS_APP_NAME) : appPath
 }
 
 /**
@@ -187,7 +192,7 @@ export function leftoverNames(appPath: string): { staging: string[]; oldPrefixes
   const stems = new Set<string>([
     basename(appPath),
     basename(preferredAppPath(appPath)),
-    STUDIO_APP_NAME,
+    HARNESS_APP_NAME,
     ...LEGACY_APP_NAMES,
   ].map(n => n.replace(/\.app$/, '')))
   return {
@@ -281,7 +286,7 @@ export function checkCandidate(x: {
   version: unknown
   runningVersion: string
 }): 'notOurs' | 'notNewer' | null {
-  if (x.bundleId !== STUDIO_BUNDLE_ID) return 'notOurs'
+  if (x.bundleId !== HARNESS_BUNDLE_ID) return 'notOurs'
   if (typeof x.version !== 'string' || !isNewerVersion(x.version, x.runningVersion)) return 'notNewer'
   return null
 }
@@ -296,7 +301,7 @@ export function hdiutilDetachArgs(mountPoint: string, force = false): string[] {
 
 /** codesign check: deep + strict, against our designated requirement. */
 export function codesignVerifyArgs(appPath: string, deep = true): string[] {
-  return ['--verify', ...(deep ? ['--deep'] : []), '--strict', '-R', `=${STUDIO_REQUIREMENT}`, appPath]
+  return ['--verify', ...(deep ? ['--deep'] : []), '--strict', '-R', `=${HARNESS_REQUIREMENT}`, appPath]
 }
 
 export function spctlArgs(appPath: string): string[] {

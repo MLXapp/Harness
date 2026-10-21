@@ -10,11 +10,21 @@ import { createContext, useContext, useEffect, useLayoutEffect, useState, type R
  * paint is right without a script.
  */
 export type ThemePreference = 'system' | 'light' | 'dark'
-const STORAGE_KEY = 'mlx-studio-theme'
+const THEME_STORAGE_KEY = 'mlx-harness-theme'
+/** The key used up to 0.2.x. Legacy, kept only for the one-time move below. */
+const LEGACY_THEME_STORAGE_KEY = 'mlx-studio-theme'
 
 function readPreference(): ThemePreference {
   try {
-    const v = localStorage.getItem(STORAGE_KEY)
+    let v = localStorage.getItem(THEME_STORAGE_KEY)
+    if (v === null) {
+      // One-time migration: keep the choice saved under the 0.2.x key.
+      v = localStorage.getItem(LEGACY_THEME_STORAGE_KEY)
+      if (v !== null) {
+        localStorage.setItem(THEME_STORAGE_KEY, v)
+        localStorage.removeItem(LEGACY_THEME_STORAGE_KEY)
+      }
+    }
     if (v === 'light' || v === 'dark' || v === 'system') return v
   } catch { /* restricted storage */ }
   return 'system'
@@ -58,7 +68,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setPreference = (p: ThemePreference) => {
     setPreferenceState(p)
-    try { localStorage.setItem(STORAGE_KEY, p) } catch { /* restricted storage */ }
+    try { localStorage.setItem(THEME_STORAGE_KEY, p) } catch { /* restricted storage */ }
   }
 
   return (

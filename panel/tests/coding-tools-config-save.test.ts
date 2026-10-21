@@ -84,54 +84,54 @@ describe('coding tool config saving', () => {
     const claude = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'))
     expect(claude.env.ANTHROPIC_BASE_URL).toBe(baseUrl)
     expect(claude.env.ANTHROPIC_MODEL).toBe(model)
-    expect(claude.env._mlxstudio).toBe('true')
+    expect(claude.env._mlxharness).toBe('true')
     expect(statMode(join(home, '.claude', 'settings.json'))).toBe(0o600)
 
     const codex = readFileSync(join(home, '.codex', 'config.toml'), 'utf8')
-    expect(codex).toContain('[model_providers.MLXSTUDIO_JANGQ_QWEN3_6_27B_MXFP8_MTP]')
+    expect(codex).toContain('[model_providers.MLXHARNESS_JANGQ_QWEN3_6_27B_MXFP8_MTP]')
     expect(codex).toContain(`base_url = "${baseUrl}/v1"`)
     expect(codex).toContain('wire_api = "responses"')
     expect(codex).toContain(`model = "${model}"`)
-    expect(codex).toContain('model_provider = "MLXSTUDIO_JANGQ_QWEN3_6_27B_MXFP8_MTP"')
+    expect(codex).toContain('model_provider = "MLXHARNESS_JANGQ_QWEN3_6_27B_MXFP8_MTP"')
     expect(codex).toContain('model_context_window = 24576')
     expect(codex).not.toContain('max_context =')
     expect(existsSync(join(home, '.codex', 'config.toml.bak'))).toBe(true)
     expect(statMode(join(home, '.codex', 'config.toml'))).toBe(0o600)
 
     const opencode = JSON.parse(readFileSync(join(home, '.config', 'opencode', 'opencode.json'), 'utf8'))
-    const opencodeKey = 'mlxstudio-JANGQ-Qwen3-6-27B-MXFP8-MTP'
+    const opencodeKey = 'mlxharness-JANGQ-Qwen3-6-27B-MXFP8-MTP'
     expect(opencode.provider[opencodeKey].options.baseURL).toBe(`${baseUrl}/v1`)
     expect(opencode.provider[opencodeKey].models[model].name).toBe(model)
     expect(opencode.provider[opencodeKey].models[model].limit).toEqual({ context: 24576, output: 6144 })
-    expect(opencode.provider[opencodeKey]._mlxstudio).toBe(true)
+    expect(opencode.provider[opencodeKey]._mlxharness).toBe(true)
 
     const openclaw = JSON.parse(readFileSync(join(home, '.openclaw', 'openclaw.json'), 'utf8'))
-    expect(openclaw.models.providers.mlxstudio.baseUrl).toBe(`${baseUrl}/v1`)
-    expect(openclaw.models.providers.mlxstudio.api).toBe('openai-completions')
-    expect(openclaw.models.providers.mlxstudio.models[0].id).toBe(model)
-    expect(openclaw.models.providers.mlxstudio.models[0].contextWindow).toBe(24576)
-    expect(openclaw.models.providers.mlxstudio.models[0].maxTokens).toBe(6144)
-    expect(openclaw.agents.defaults.models[`mlxstudio/${model}`].alias).toBe(model)
+    expect(openclaw.models.providers.mlxharness.baseUrl).toBe(`${baseUrl}/v1`)
+    expect(openclaw.models.providers.mlxharness.api).toBe('openai-completions')
+    expect(openclaw.models.providers.mlxharness.models[0].id).toBe(model)
+    expect(openclaw.models.providers.mlxharness.models[0].contextWindow).toBe(24576)
+    expect(openclaw.models.providers.mlxharness.models[0].maxTokens).toBe(6144)
+    expect(openclaw.agents.defaults.models[`mlxharness/${model}`].alias).toBe(model)
 
     const snippetResult = await snippets!({}, baseUrl, model, 8080)
     expect(snippetResult.codex.snippet).toContain('wire_api = "responses"')
     expect(snippetResult.codex.snippet).toContain(`model = "${model}"`)
-    expect(snippetResult.codex.snippet).toContain('model_provider = "MLXSTUDIO_JANGQ_QWEN3_6_27B_MXFP8_MTP"')
+    expect(snippetResult.codex.snippet).toContain('model_provider = "MLXHARNESS_JANGQ_QWEN3_6_27B_MXFP8_MTP"')
     expect(snippetResult.codex.snippet).toContain('model_context_window = 24576')
     expect(snippetResult.codex.snippet).not.toContain('max_context =')
     expect(snippetResult['claude-code'].snippet).toContain(model)
     expect(snippetResult.opencode.snippet).toContain('"output": 6144')
-    expect(snippetResult.openclaw.snippet).toContain(`mlxstudio/${model}`)
+    expect(snippetResult.openclaw.snippet).toContain(`mlxharness/${model}`)
     expect(snippetResult.openclaw.snippet).toContain('"maxTokens": 6144')
 
     const remove = electronMock.handlers.get('tools:removeCodingToolConfig')
-    const removed = await remove!({}, 'codex', 'MLXSTUDIO_JANGQ_QWEN3_6_27B_MXFP8_MTP')
+    const removed = await remove!({}, 'codex', 'MLXHARNESS_JANGQ_QWEN3_6_27B_MXFP8_MTP')
     expect(removed).toEqual({ success: true })
     const restoredCodex = readFileSync(join(home, '.codex', 'config.toml'), 'utf8')
     expect(restoredCodex).toContain('model = "gpt-existing"')
     expect(restoredCodex).toContain('model_provider = "openai-existing"')
     expect(restoredCodex).toContain('model_context_window = 12345')
-    expect(restoredCodex).not.toContain('[model_providers.MLXSTUDIO_')
+    expect(restoredCodex).not.toContain('[model_providers.MLXHARNESS_')
   })
 
   it('coding tool configs keep output limit separate from context fallback', async () => {
@@ -172,15 +172,15 @@ describe('coding tool config saving', () => {
     }
 
     const opencode = JSON.parse(readFileSync(join(home, '.config', 'opencode', 'opencode.json'), 'utf8'))
-    const opencodeKey = 'mlxstudio-JANGQ-DeepSeek-V4-Flash-JANG'
+    const opencodeKey = 'mlxharness-JANGQ-DeepSeek-V4-Flash-JANG'
     expect(opencode.provider[opencodeKey].models[model].limit).toEqual({
       context: 262144,
       output: 4096,
     })
 
     const openclaw = JSON.parse(readFileSync(join(home, '.openclaw', 'openclaw.json'), 'utf8'))
-    expect(openclaw.models.providers.mlxstudio.models[0].contextWindow).toBe(262144)
-    expect(openclaw.models.providers.mlxstudio.models[0].maxTokens).toBe(4096)
+    expect(openclaw.models.providers.mlxharness.models[0].contextWindow).toBe(262144)
+    expect(openclaw.models.providers.mlxharness.models[0].maxTokens).toBe(4096)
 
     const snippetResult = await snippets!({}, baseUrl, model, 8080)
     expect(snippetResult.opencode.snippet).toContain('"context": 262144')
@@ -190,17 +190,18 @@ describe('coding tool config saving', () => {
     expect(snippetResult.openclaw.snippet).not.toContain('"maxTokens": 262144')
   })
 
-  it('repairs the legacy provider-only Codex config emitted by MLX Studio', async () => {
+  it('repairs the legacy provider-only Codex config emitted by earlier versions', async () => {
     const add = electronMock.handlers.get('tools:addCodingToolConfig')
     expect(add).toBeTruthy()
 
     const baseUrl = 'http://localhost:8080'
     const model = 'JANGQ-AI/Qwen3.8-Flash-Next-JANG_4M'
-    const provider = 'MLXSTUDIO_JANGQ_AI_QWEN3_8_FLASH_NEXT_JANG_4M'
+    const legacyProvider = 'MLXSTUDIO_JANGQ_AI_QWEN3_8_FLASH_NEXT_JANG_4M'
+    const provider = 'MLXHARNESS_JANGQ_AI_QWEN3_8_FLASH_NEXT_JANG_4M'
     mkdirSync(join(home, '.codex'), { recursive: true })
     writeFileSync(
       join(home, '.codex', 'config.toml'),
-      `[model_providers.${provider}]\n` +
+      `[model_providers.${legacyProvider}]\n` +
         `name = "MLX Studio (${model})"\n` +
         `base_url = "${baseUrl}/v1"\n` +
         'wire_api = "responses"\n' +
@@ -216,14 +217,16 @@ describe('coding tool config saving', () => {
     expect(repaired).toContain('model_context_window = 24576')
     expect(repaired).not.toContain('max_context =')
     expect(repaired.match(new RegExp(`\\[model_providers\\.${provider}\\]`, 'g'))).toHaveLength(1)
+    expect(repaired).not.toContain(legacyProvider)
   })
 
-  it('takes over the managed Codex block written by 0.1.x (MLX Studio) and names itself MLX Harness', async () => {
+  it('takes over the managed Codex block written by 0.1.x (legacy names) and names itself MLX Harness', async () => {
     const add = electronMock.handlers.get('tools:addCodingToolConfig')!
     const remove = electronMock.handlers.get('tools:removeCodingToolConfig')!
     const baseUrl = 'http://localhost:8080'
     const model = 'mlx-community/Qwen3-4B-4bit'
-    const provider = 'MLXSTUDIO_MLX_COMMUNITY_QWEN3_4B_4BIT'
+    const legacyProvider = 'MLXSTUDIO_MLX_COMMUNITY_QWEN3_4B_4BIT'
+    const provider = 'MLXHARNESS_MLX_COMMUNITY_QWEN3_4B_4BIT'
     const previous = 'model = "gpt-5"\nmodel_provider = "openai"'
     mkdirSync(join(home, '.codex'), { recursive: true })
     writeFileSync(
@@ -231,10 +234,10 @@ describe('coding tool config saving', () => {
       '# >>> MLX Studio managed Codex defaults\n' +
         `# previous-defaults-base64: ${Buffer.from(previous, 'utf8').toString('base64')}\n` +
         `model = "${model}"\n` +
-        `model_provider = "${provider}"\n` +
+        `model_provider = "${legacyProvider}"\n` +
         'model_context_window = 32768\n' +
         '# <<< MLX Studio managed Codex defaults\n\n' +
-        `[model_providers.${provider}]\n` +
+        `[model_providers.${legacyProvider}]\n` +
         `name = "MLX Studio (${model})"\n` +
         `base_url = "${baseUrl}/v1"\n` +
         'wire_api = "responses"\n',
@@ -242,7 +245,8 @@ describe('coding tool config saving', () => {
 
     expect(await add({}, 'codex', baseUrl, model, 8080)).toEqual({ success: true })
     const updated = readFileSync(join(home, '.codex', 'config.toml'), 'utf8')
-    expect(updated).not.toContain('Studio')
+    expect(updated).not.toMatch(/studio/i)
+    expect(updated).toContain(`model_provider = "${provider}"`)
     expect(updated).toContain('# >>> MLX Harness managed Codex defaults')
     expect(updated).toContain(`name = "MLX Harness (${model})"`)
     expect(updated.match(/^model\s*=/gm)).toHaveLength(1) // the user's own defaults stay parked, not duplicated

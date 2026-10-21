@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { app, Menu } = vi.hoisted(() => ({
-  app: { name: 'MLX Studio', emit: vi.fn() },
+  app: { name: 'MLX Studio', emit: vi.fn() }, // the legacy 0.1.x name app.name holds briefly on a migrated Mac
   Menu: { buildFromTemplate: vi.fn(x => x), setApplicationMenu: vi.fn() },
 }))
 vi.mock('electron', () => ({ app, Menu }))

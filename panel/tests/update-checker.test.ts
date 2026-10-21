@@ -117,8 +117,8 @@ describe('update URL validation', () => {
     expect(isValidUpdateUrl('https://github.com/jjang-ai/mlxstudio/releases/tag/v1.0.0')).toBe(true)
   })
 
-  it('accepts trusted studio.mlx.app updater URL', () => {
-    expect(isValidUpdateUrl('https://studio.mlx.app/update/latest.json')).toBe(true)
+  it('accepts trusted harness.mlx.app updater URL', () => {
+    expect(isValidUpdateUrl('https://harness.mlx.app/update/latest.json')).toBe(true)
   })
 
   it('rejects githubusercontent.com (not github.com)', () => {
@@ -226,15 +226,18 @@ describe('multi-source update manifests', () => {
   })
 })
 
-describe('MLX Harness update feed (repo MLXapp/studio)', () => {
-  it('reads latest.json from MLXapp/studio and trusts studio.mlx.app downloads', async () => {
-    const { LATEST_MANIFEST_URL, RELEASES_PAGE } = await import('../src/main/update-manifest')
-    expect(LATEST_MANIFEST_URL).toBe('https://raw.githubusercontent.com/MLXapp/studio/main/latest.json')
-    expect(RELEASES_PAGE).toBe('https://github.com/MLXapp/studio/releases')
-    expect(isValidUpdateUrlFromSource('https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Studio-0.2.0-arm64.dmg')).toBe(true)
-    expect(isValidUpdateUrlFromSource('https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg')).toBe(true)
+describe('MLX Harness update feed (repo MLXapp/harness)', () => {
+  it('reads latest.json from MLXapp/harness, then the pre-rename path, and trusts harness.mlx.app downloads', async () => {
+    const { LATEST_MANIFEST_URLS, RELEASES_PAGE } = await import('../src/main/update-manifest')
+    expect(LATEST_MANIFEST_URLS).toEqual([
+      'https://raw.githubusercontent.com/MLXapp/harness/main/latest.json',
+      // legacy fallback (repo path before the rename)
+      'https://raw.githubusercontent.com/MLXapp/studio/main/latest.json',
+    ])
+    expect(RELEASES_PAGE).toBe('https://github.com/MLXapp/harness/releases')
+    expect(isValidUpdateUrlFromSource('https://github.com/MLXapp/harness/releases/download/v0.2.1/MLX-Harness-0.2.1-arm64.dmg')).toBe(true)
     expect(isValidUpdateUrlFromSource('https://harness.mlx.app/download')).toBe(true)
-    expect(isValidUpdateUrlFromSource('https://studio.mlx.app/download')).toBe(true)
+    // upstream JANGQ AI's site is not ours
     expect(isValidUpdateUrlFromSource('https://mlx.studio/update/latest.json')).toBe(false)
     expect(isValidUpdateUrlFromSource('https://evilmlx.app/x.dmg')).toBe(false)
   })
@@ -257,7 +260,7 @@ describe('MLX Harness update feed (repo MLXapp/studio)', () => {
 
   it('announces a newer release only with a trusted download', async () => {
     const { decideUpdate } = await import('../src/main/update-manifest')
-    const url = 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg'
+    const url = 'https://github.com/MLXapp/harness/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg'
     const ok = decideUpdate({ version: '0.2.0', url }, '0.1.0', '15.6.0')
     expect(ok.kind).toBe('available')
     expect(ok.kind === 'available' && ok.release.url).toBe(url)
@@ -282,11 +285,11 @@ describe('latest.json carries what the in-app updater needs', () => {
 
   it('keeps the size with the asset it belongs to', async () => {
     const { selectDownloadForMacOS } = await import('../src/main/update-manifest')
-    const url = 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Studio-0.2.0-arm64.dmg'
+    const url = 'https://github.com/MLXapp/harness/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg'
     const sha = 'a'.repeat(64)
     const m = { version: '0.2.0', url, sha256: sha, size: 123, downloads: { sequoia: { url, sha256: sha } } }
     expect(selectDownloadForMacOS(m, '15.6.0')).toMatchObject({ url, sha256: sha, size: 123 })
-    const other = 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Studio-0.2.0-other.dmg'
+    const other = 'https://github.com/MLXapp/harness/releases/download/v0.2.0/MLX-Harness-0.2.0-other.dmg'
     const split = { ...m, downloads: { sequoia: { url: other } } }
     // another file: neither the top-level size nor its checksum may be borrowed
     expect(selectDownloadForMacOS(split, '15.6.0')).toMatchObject({ url: other, sha256: undefined, size: undefined })

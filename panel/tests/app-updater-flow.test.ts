@@ -27,6 +27,8 @@ const h = vi.hoisted(() => ({
   ok: { runningSig: true, candidateSig: true, stagedSig: true, spctl: true, attach: true },
   mounts: new Set<string>(),
   dmgAppName: 'MLX Harness.app',
+  fetched: [] as string[],
+  feedDown: new Set<string>(),
 }))
 
 vi.mock('electron', () => {
@@ -53,9 +55,11 @@ vi.mock('electron', () => {
     dialog: { showMessageBox: async () => ({ response: 1 }) },
     ipcMain: { handle: (ch: string, fn: any) => h.handlers.set(ch, fn) },
     net: {
-      fetch: async (url: string) => url.endsWith('latest.json')
-        ? new Response(JSON.stringify(h.manifest))
-        : new Response(h.dmg, { headers: { 'content-length': String(h.dmg.length) } }),
+      fetch: async (url: string) => {
+        if (!url.endsWith('latest.json')) return new Response(h.dmg, { headers: { 'content-length': String(h.dmg.length) } })
+        h.fetched.push(url)
+        return h.feedDown.has(url) ? new Response('Not Found', { status: 404 }) : new Response(JSON.stringify(h.manifest))
+      },
     },
     Notification,
     shell: { openExternal: async (u: string) => { h.opened.push(u) } },
@@ -100,7 +104,11 @@ vi.mock('child_process', () => ({
 }))
 
 vi.mock('../src/main/database', () => ({
-  db: { getSetting: (k: string) => h.settings.get(k), setSetting: (k: string, v: string) => { h.settings.set(k, v) } },
+  db: {
+    getSetting: (k: string) => h.settings.get(k),
+    setSetting: (k: string, v: string) => { h.settings.set(k, v) },
+    deleteSetting: (k: string) => { h.settings.delete(k) },
+  },
 }))
 
 const realPlatform = process.platform
@@ -132,7 +140,7 @@ beforeAll(() => { Object.defineProperty(process, 'platform', { value: 'darwin' }
 afterAll(() => { Object.defineProperty(process, 'platform', { value: realPlatform }) })
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'studio-updater-'))
+  root = mkdtempSync(join(tmpdir(), 'harness-updater-'))
   appPath = join(root, 'Applications', 'MLX Harness.app')
   makeApp(appPath, { CFBundleIdentifier: 'app.mlx.studio', CFBundleShortVersionString: '0.1.0' })
   h.paths = { exe: join(appPath, 'Contents', 'MacOS', 'MLX Harness'), userData: join(root, 'userData') }
@@ -141,14 +149,14 @@ beforeEach(() => {
   h.dmgInfo = { CFBundleIdentifier: 'app.mlx.studio', CFBundleShortVersionString: '0.2.0' }
   h.manifest = {
     version: '0.2.0',
-    url: 'https://github.com/MLXapp/studio/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg',
+    url: 'https://github.com/MLXapp/harness/releases/download/v0.2.0/MLX-Harness-0.2.0-arm64.dmg',
     sha256: createHash('sha256').update(h.dmg).digest('hex'),
     size: h.dmg.length,
     notes: 'Faster model loading.',
   }
   h.ok = { runningSig: true, candidateSig: true, stagedSig: true, spctl: true, attach: true }
   h.sent.length = 0; h.notifications.length = 0; h.opened.length = 0; h.spawned.length = 0; h.calls.length = 0
-  h.settings.clear(); h.mounts.clear(); h.quit = 0; h.packaged = true; h.focused = false
+  h.settings.clear(); h.mounts.clear(); h.fetched.length = 0; h.feedDown.clear(); h.quit = 0; h.packaged = true; h.focused = false
 })
 
 describe('in-app updater flow', () => {
@@ -218,7 +226,7 @@ describe('in-app updater flow', () => {
     mod.runPendingUpdateSwap()
     expect(h.spawned).toHaveLength(0) // nothing unverified is ever swapped in
     await h.handlers.get('app:updateOpenDownload')!()
-    expect(h.opened).toEqual(['https://github.com/MLXapp/studio/releases/latest'])
+    expect(h.opened).toEqual(['https://github.com/MLXapp/harness/releases/latest'])
     expect(readFileSync(join(appPath, 'Contents', 'Info.plist'), 'utf8')).toContain('0.1.0') // running app untouched
   })
 
@@ -267,13 +275,40 @@ describe('in-app updater flow', () => {
     await mod.checkNow()
     expect(h.notifications).toHaveLength(1)
     expect(h.notifications[0]).toMatchObject({ title: 'MLX Harness 0.2.0 is available', body: 'Faster model loading.' })
-    expect(h.settings.get('studio_update_notified_version')).toBe('0.2.0')
+    expect(h.settings.get('harness_update_notified_version')).toBe('0.2.0')
     mod = await freshUpdater() // next launch
     await mod.checkNow()
     expect(h.notifications).toHaveLength(1)
     h.manifest.version = '0.3.0'
     await mod.checkNow()
     expect(h.notifications).toHaveLength(2)
+  })
+
+  it('keeps the notified version saved under the 0.2.x settings key (moved once to the new key)', async () => {
+    h.settings.set('studio_update_notified_version', '0.2.0')
+    const mod = await freshUpdater()
+    await mod.checkNow()
+    expect(h.notifications).toHaveLength(0)
+    expect(h.settings.get('harness_update_notified_version')).toBe('0.2.0')
+    expect(h.settings.has('studio_update_notified_version')).toBe(false)
+  })
+
+  it('reads the MLXapp/harness feed first and falls back to the pre-rename path', async () => {
+    const harnessFeed = 'https://raw.githubusercontent.com/MLXapp/harness/main/latest.json'
+    const legacyFeed = 'https://raw.githubusercontent.com/MLXapp/studio/main/latest.json'
+    let mod = await freshUpdater()
+    expect(await mod.checkNow()).toEqual({ kind: 'available', version: '0.2.0' })
+    expect(h.fetched).toEqual([harnessFeed])
+    h.fetched.length = 0
+    h.feedDown.add(harnessFeed)
+    mod = await freshUpdater()
+    expect(await mod.checkNow()).toEqual({ kind: 'available', version: '0.2.0' })
+    expect(h.fetched).toEqual([harnessFeed, legacyFeed])
+    h.fetched.length = 0
+    h.feedDown.add(legacyFeed)
+    mod = await freshUpdater()
+    expect(await mod.checkNow()).toEqual({ kind: 'error' })
+    expect(h.fetched).toEqual([harnessFeed, legacyFeed])
   })
 
   it('Later hides this version for this launch; a newer version shows again', async () => {

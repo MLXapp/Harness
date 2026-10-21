@@ -48,7 +48,7 @@ declare global {
   }
 }
 
-const THEME_KEY = 'mlx-studio-theme' // src/renderer/src/providers/ThemeProvider.tsx
+const THEME_KEY = 'mlx-harness-theme' // src/renderer/src/providers/ThemeProvider.tsx
 const LOCALE_KEY = 'vmlx-locale' // src/renderer/src/i18n/I18nProvider.tsx
 
 function storageSet(key: string, value: string | null) {

@@ -3,9 +3,11 @@
 #   panel/release/MLX-Harness-<version>-arm64.dmg
 #
 # Flavours (same source, different MLX wheels — see upstream vmlx#169):
-#   MLX_STUDIO_FLAVOR=sequoia (default)  macosx_14 wheels, macOS 14.5 and newer
-#   MLX_STUDIO_FLAVOR=tahoe              native macosx_26 wheels, macOS 26 only
-#                                        (file name gets a -tahoe suffix)
+#   MLX_HARNESS_FLAVOR=sequoia (default)  macosx_14 wheels, macOS 14.5 and newer
+#   MLX_HARNESS_FLAVOR=tahoe              native macosx_26 wheels, macOS 26 only
+#                                         (file name gets a -tahoe suffix)
+# (MLX_STUDIO_FLAVOR / MLX_STUDIO_REUSE_PYTHON, the names up to 0.2.x, are
+# still read when the new ones are unset.)
 #
 # Signing: when a Developer ID Application identity is available (CSC_LINK +
 # CSC_KEY_PASSWORD, or one in the login keychain) electron-builder signs with
@@ -14,7 +16,7 @@
 # are set; electron-builder skips it silently otherwise.
 #
 # Python: the relocatable engine runtime is built by bundle-python.sh into
-# panel/bundled-python. Set MLX_STUDIO_REUSE_PYTHON=1 to reuse an existing one.
+# panel/bundled-python. Set MLX_HARNESS_REUSE_PYTHON=1 to reuse an existing one.
 # JANG tools come from VMLX_JANG_TOOLS_SOURCE (a jjang-ai/jangq checkout's
 # jang-tools dir); set VMLX_ALLOW_PYPI_JANG=1 to fall back to PyPI.
 #
@@ -32,11 +34,11 @@ SCRIPT_DIR="$(cd -P "$(dirname "$0")" && pwd -P)"
 PANEL_DIR="$(cd -P "$SCRIPT_DIR/.." && pwd -P)"
 cd "$PANEL_DIR"
 
-FLAVOR="${MLX_STUDIO_FLAVOR:-sequoia}"
+FLAVOR="${MLX_HARNESS_FLAVOR:-${MLX_STUDIO_FLAVOR:-sequoia}}"
 case "$FLAVOR" in
   sequoia) PLATFORM="macosx_14_0_arm64"; MIN_SYSTEM="14.5.0"; SUFFIX="" ;;
   tahoe)   PLATFORM="macosx_26_0_arm64"; MIN_SYSTEM="26.0.0"; SUFFIX="-tahoe" ;;
-  *) echo "ERROR: MLX_STUDIO_FLAVOR must be sequoia or tahoe (got: $FLAVOR)" >&2; exit 1 ;;
+  *) echo "ERROR: MLX_HARNESS_FLAVOR must be sequoia or tahoe (got: $FLAVOR)" >&2; exit 1 ;;
 esac
 
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
@@ -55,7 +57,7 @@ done
 VERSION="$(/opt/homebrew/bin/node -p "require('./package.json').version")"
 echo "==> MLX Harness $VERSION ($FLAVOR, $PLATFORM, macOS $MIN_SYSTEM+)"
 
-if [[ "${MLX_STUDIO_REUSE_PYTHON:-0}" == "1" && -x bundled-python/python/bin/python3 ]]; then
+if [[ "${MLX_HARNESS_REUSE_PYTHON:-${MLX_STUDIO_REUSE_PYTHON:-0}}" == "1" && -x bundled-python/python/bin/python3 ]]; then
   echo "==> Reusing panel/bundled-python"
 else
   echo "==> Building the bundled Python runtime"
