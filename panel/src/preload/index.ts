@@ -216,6 +216,8 @@ const api = {
     setOverrides: (chatId: string, overrides: any) =>
       ipcRenderer.invoke('chat:setOverrides', chatId, overrides),
     getOverrides: (chatId: string) => ipcRenderer.invoke('chat:getOverrides', chatId),
+    setPlanMode: (chatId: string, on: boolean): Promise<boolean> => ipcRenderer.invoke('chat:setPlanMode', chatId, on),
+    getPlanMode: (chatId: string): Promise<boolean> => ipcRenderer.invoke('chat:getPlanMode', chatId),
     clearOverrides: (chatId: string) => ipcRenderer.invoke('chat:clearOverrides', chatId),
 
     // Profiles (named presets for chat settings)

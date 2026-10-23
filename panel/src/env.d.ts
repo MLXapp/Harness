@@ -288,6 +288,8 @@ declare global {
           overrides: any,
         ) => Promise<{ success: boolean }>;
         getOverrides: (chatId: string) => Promise<any>;
+        setPlanMode: (chatId: string, on: boolean) => Promise<boolean>;
+        getPlanMode: (chatId: string) => Promise<boolean>;
         clearOverrides: (chatId: string) => Promise<{ success: boolean }>;
         pickImages: () => Promise<Array<{ dataUrl: string; name: string }>>;
         openDirectory: () => Promise<{

@@ -21,6 +21,28 @@ describe('repeat-call reminder', () => {
     expect(canonicalArguments({ b: 1, a: { d: 1, c: 2 } })).toBe('{"a":{"c":2,"d":1},"b":1}')
   })
 
+  it('vetoes the 5th identical call and pauses tools after 3 vetoes in a turn', () => {
+    const tracker = new RepeatCallTracker()
+    const args = { command: 'npm test' }
+    const run = () => {
+      const v = tracker.veto('s', 'run_command', args)
+      if (!v) tracker.record('s', 'run_command', args)
+      return v
+    }
+    const first = Array.from({ length: 4 }, run)
+    expect(first.every(v => v === null)).toBe(true)
+    const v5 = run()
+    expect(v5?.text).toContain('Not run: this would be call #5')
+    expect(v5?.stopTools).toBe(false)
+    expect(run()?.stopTools).toBe(false)
+    const v7 = run()
+    expect(v7?.stopTools).toBe(true)
+    expect(v7?.text).toContain('answer the user now')
+    tracker.newTurn('s')
+    expect(run()?.stopTools).toBe(false)
+    expect(tracker.veto('s', 'run_command', { command: 'npm run build' })).toBeNull()
+  })
+
   it('appends the note after the result', () => {
     expect(appendReminder('result', '[note]')).toBe('result\n\n[note]')
     expect(appendReminder('result', null)).toBe('result')

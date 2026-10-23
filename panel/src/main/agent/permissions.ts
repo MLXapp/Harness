@@ -64,6 +64,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   'apply_regex',
   'create_directory',
   'delete_file',
+  'restore_file',
   'move_file',
   'copy_file',
   'clipboard_write',
@@ -178,6 +179,24 @@ export interface PermissionInput {
   alwaysAllowed?: ReadonlySet<string>
   /** Escalations the user already refused in this turn (keys from alwaysAllowKey). */
   refusedEscalations?: ReadonlySet<string>
+  /** Plan mode: only reading tools run; everything else is refused, never asked. */
+  plan?: boolean
+}
+
+/** The tool result for a call Plan mode refused. */
+export const PLAN_MODE_REFUSAL =
+  'Not run: Plan mode is on, so nothing may be changed or run yet. Keep reading what you need, then reply with a short numbered plan (files to change, commands to run, how to check). The user switches to Auto to carry it out.'
+
+/** Appended to the user's message for a Plan mode turn (request only, never saved). */
+export const PLAN_MODE_NOTE =
+  '[Plan mode: read and search as much as you need, but do not change files or run commands; those tools are refused. Finish with a short numbered plan: what you would change and where, what you would run, and how to check it worked. Note open questions.]'
+
+/** A call Plan mode lets through: reading built-ins, read-only git, read-named MCP tools. */
+export function planModeAllows(toolName: string, args: Record<string, unknown>, isBuiltin: boolean): boolean {
+  if (!isBuiltin) return looksReadOnlyToolName(toolName)
+  if (READ_TOOLS.has(toolName)) return true
+  if (toolName === 'git') return classifyGitCommand(String(args.command ?? '')) === 'read'
+  return false
 }
 
 export function alwaysAllowKey(toolName: string, command: unknown): string {
@@ -206,6 +225,26 @@ export function readEscalation(args: Record<string, unknown>):
   return { requested: true, justification: just.trim().split('\n')[0].trim().slice(0, 300) }
 }
 
+const READ_VERBS = new Set(['get', 'list', 'search', 'read', 'fetch', 'find', 'query', 'describe', 'show', 'view', 'lookup', 'count', 'retrieve', 'browse', 'check', 'status', 'info', 'stat', 'inspect'])
+const WRITE_WORDS = /^(create|update|delete|remove|send|post|write|edit|set|put|patch|insert|upload|move|rename|add|archive|publish|reply|forward|execute|run|exec|invoke|trigger|merge|close|cancel|approve|pay|transfer|book|purchase|order|install|kill|drop|reset|modify|push|commit|share|invite|subscribe|unsubscribe|mark|star|label|assign)(s|d|ed|ing)?$/
+
+/**
+ * An MCP tool whose name starts with a read verb ("get_issue",
+ * "github__list_repos", "searchFiles") and contains no write word. Anything
+ * else counts as possibly changing something.
+ */
+export function looksReadOnlyToolName(name: string): boolean {
+  const words = name
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+  if (words.length === 0) return false
+  if (words.some(w => WRITE_WORDS.test(w) && !READ_VERBS.has(w))) return false
+  // The verb is the first word, or the first after a server prefix.
+  return READ_VERBS.has(words[0]) || (words.length > 1 && READ_VERBS.has(words[1]))
+}
+
 /**
  * Decide what one tool call needs before it runs. "allow" carries whether to
  * run the shell inside the Seatbelt sandbox; "ask" means show an approval
@@ -216,6 +255,11 @@ export function decideToolPermission(input: PermissionInput): PermissionDecision
   const preset = normalizePermissionPreset(input.preset)
   const { toolName, args } = input
   const subject = describeToolSubject(toolName, args)
+  if (input.plan) {
+    return planModeAllows(toolName, args, input.isBuiltin)
+      ? { action: 'allow', sandbox: false }
+      : { action: 'deny', message: PLAN_MODE_REFUSAL }
+  }
   if (preset === 'full') return { action: 'allow', sandbox: false }
 
   const ask = (kind: ApprovalKind, why: string, extra: Partial<{ allowAlways: boolean; justification: string }> = {}): PermissionDecision => ({
@@ -228,7 +272,13 @@ export function decideToolPermission(input: PermissionInput): PermissionDecision
   })
 
   if (!input.isBuiltin) {
-    return preset === 'read-only' ? ask('mcp', 'read-only') : { action: 'allow', sandbox: false }
+    if (preset === 'read-only') return ask('mcp', 'read-only')
+    // Workspace: an MCP tool acts outside the sandbox (mail, files, the web),
+    // so only tools whose name says they read run without asking. "Always
+    // allow" remembers the tool for this chat.
+    if (looksReadOnlyToolName(toolName)) return { action: 'allow', sandbox: false }
+    if (input.alwaysAllowed?.has(alwaysAllowKey(toolName, args.command))) return { action: 'allow', sandbox: false }
+    return ask('mcp', 'mcp-write', { allowAlways: true })
   }
   if (READ_TOOLS.has(toolName)) return { action: 'allow', sandbox: false }
 

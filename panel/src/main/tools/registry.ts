@@ -200,7 +200,7 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'delete_file',
-      description: 'Delete a file or empty directory. Use with caution — this cannot be undone.',
+      description: 'Move a file or folder to the Trash (the user can put it back from Finder). Only delete what the task needs.',
       parameters: {
         type: 'object',
         properties: {
@@ -210,6 +210,27 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
           }
         },
         required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'restore_file',
+      description: 'Undo a file change. Files you edit, overwrite or delete are copied aside first. Without arguments: list the saved copies. With path: put back the newest copy of that file. With id: put back that copy.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'File to restore, relative to working directory'
+          },
+          id: {
+            type: 'string',
+            description: 'A copy id from the list'
+          }
+        },
+        required: []
       }
     }
   },
@@ -695,7 +716,7 @@ export function isBuiltinTool(toolName: string): boolean {
  */
 export const AGENTIC_SYSTEM_PROMPT = `You are an expert software engineer with direct access to the project's file system, terminal, and the web.
 
-You have tools available for file I/O (read, write, edit, patch, copy, move, delete, create directories, read images), search and navigation (list directories, project tree, search file contents, find files by name, diff files, diagnostics), terminal commands (run commands, spawn background processes), git operations, web search, and utility functions (token counting, clipboard, asking the user questions), and a todo list for planning.
+You have tools available for file I/O (read, write, edit, patch, copy, move, delete to the Trash, restore an earlier version, create directories, read images), search and navigation (list directories, project tree, search file contents, find files by name, diff files, diagnostics), terminal commands (run commands, spawn background processes), git operations, web search, and utility functions (token counting, clipboard, asking the user questions), and a todo list for planning.
 
 Use the provided tools to complete tasks. Chain multiple tool calls as needed — don't stop after a single tool call if more work is required.
 

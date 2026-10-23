@@ -74,6 +74,7 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
   const on = (channel: string) => (cb: Listener) => events.on(channel, cb)
   const settings = new Map<string, string>(Object.entries(fx.settings))
   const overrides = new Map<string, any>()
+  const planChats = new Set<string>()
   // ?code=sample makes the most recent chat a Code session on a sample project.
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('code') === 'sample') {
     const latest = [...fx.chats].sort((a, b) => b.updatedAt - a.updatedAt)[0]
@@ -293,6 +294,8 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       openDirectory: async () => ({ canceled: false, filePaths: ['/Users/alex/Projects/harness-site'] }),
       setOverrides: async (chatId: string, value: any) => { overrides.set(chatId, value); return { success: true } },
       getOverrides: async (chatId: string) => overrides.get(chatId) ?? null,
+      setPlanMode: async (chatId: string, on: boolean) => { if (on) planChats.add(chatId); else planChats.delete(chatId); return on },
+      getPlanMode: async (chatId: string) => planChats.has(chatId),
       clearOverrides: async (chatId: string) => { overrides.delete(chatId); return { success: true } },
       saveProfile: async (name: string, value: any, isDefault?: boolean) => {
         const profile = { id: newId('profile'), name, overrides: value, isDefault: !!isDefault, createdAt: Date.now() }

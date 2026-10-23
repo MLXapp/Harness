@@ -34,6 +34,7 @@ import { ModelConverter } from './components/tools/ModelConverter'
 import { ApiDashboard } from './components/api/ApiDashboard'
 import { ImageWorkspace } from './components/media/ImageWorkspace'
 import { CodeWorkspace, type AccessMode, type CodeStart } from './components/code/CodeWorkspace'
+import { accessOf, modeOf, type AgentMode } from './components/code/AgentMode'
 import { MediaWorkspace } from './components/media/MediaWorkspace'
 import { NetworkView } from './components/network/NetworkView'
 import { isImageSession, sessionMatchesModelPath } from '../../shared/sessionUtils'
@@ -55,7 +56,7 @@ function App() {
   // Code sessions: a start request waiting for its chat to exist, and the
   // open chat's project folder + access level (null = not a Code session).
   const pendingCode = useRef<CodeStart | null>(null)
-  const [codeInfo, setCodeInfo] = useState<{ chatId: string; dir: string | null; access: AccessMode } | null>(null)
+  const [codeInfo, setCodeInfo] = useState<{ chatId: string; dir: string | null; access: AccessMode; plan: boolean } | null>(null)
 
   // For chat mode, exclude image sessions — they belong in the Image tab
   const sessions = useMemo(() => allSessions.filter(s => !isImageSession(s)), [allSessions])
@@ -227,9 +228,10 @@ function App() {
       const o = await window.api.chat.getOverrides(chatId)
       const dir = o?.builtinToolsEnabled && o?.workingDirectory ? String(o.workingDirectory) : null
       const access: AccessMode = o?.permissionPreset === 'read-only' || o?.permissionPreset === 'full' ? o.permissionPreset : 'workspace'
-      setCodeInfo({ chatId, dir, access })
+      const plan = dir ? await window.api.chat.getPlanMode(chatId).catch(() => false) : false
+      setCodeInfo({ chatId, dir, access, plan })
     } catch {
-      setCodeInfo({ chatId, dir: null, access: 'workspace' })
+      setCodeInfo({ chatId, dir: null, access: 'workspace', plan: false })
     }
   }, [])
   useEffect(() => { void readCodeInfo(state.activeChatId) }, [state.activeChatId, readCodeInfo])
@@ -254,13 +256,28 @@ function App() {
     window.dispatchEvent(new CustomEvent('vmlx:chats-changed'))
   }, [readCodeInfo, setMode])
 
-  const changeCodeAccess = useCallback(async (access: AccessMode) => {
+  /** The composer's mode chip: Ask first / Plan / Auto / Full access. */
+  const changeCodeMode = useCallback(async (next: AgentMode) => {
     const chatId = state.activeChatId
     if (!chatId) return
-    const current = (await window.api.chat.getOverrides(chatId).catch(() => null)) || {}
-    await window.api.chat.setOverrides(chatId, { ...current, chatId, permissionPreset: access })
+    // Optimistic: the chip moves at once; the stored state is read back after.
+    setCodeInfo(info => info && info.chatId === chatId
+      ? { ...info, plan: next === 'plan', access: next === 'plan' ? info.access : accessOf(next) }
+      : info)
+    await window.api.chat.setPlanMode(chatId, next === 'plan').catch(() => undefined)
+    if (next !== 'plan') {
+      const current = (await window.api.chat.getOverrides(chatId).catch(() => null)) || {}
+      const stored = current.permissionPreset === 'read-only' || current.permissionPreset === 'full' ? current.permissionPreset : 'workspace'
+      if (stored !== accessOf(next)) {
+        await window.api.chat.setOverrides(chatId, { ...current, chatId, permissionPreset: accessOf(next) })
+      }
+    }
     await readCodeInfo(chatId)
   }, [state.activeChatId, readCodeInfo])
+  const codeMode = useMemo(() => ({
+    mode: modeOf(codeInfo?.access ?? 'workspace', !!codeInfo?.plan),
+    setMode: changeCodeMode,
+  }), [codeInfo?.access, codeInfo?.plan, changeCodeMode])
 
   /** A new chat bound to one provider model; false when it could not be created. */
   const createChatOnProvider = useCallback(async (
@@ -478,9 +495,8 @@ function App() {
             {state.mode === 'code' && (
               <CodeWorkspace
                 codeDirectory={codeInfo && codeInfo.chatId === state.activeChatId ? codeInfo.dir : null}
-                access={codeInfo?.access ?? 'workspace'}
-                onStart={startCodeSession}
-                onAccessChange={(mode) => void changeCodeAccess(mode)}>
+                mode={codeMode}
+                onStart={startCodeSession}>
                 <ChatModeContent
                   activeChatId={state.activeChatId}
                   sessionEndpoint={sessionEndpoint}

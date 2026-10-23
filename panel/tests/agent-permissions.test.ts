@@ -7,6 +7,7 @@ import {
   decideToolPermission,
   isProtectedGitPath,
   normalizePermissionPreset,
+  PLAN_MODE_REFUSAL,
   readEscalation,
   sandboxEscalationMarker,
   type PermissionInput,
@@ -55,7 +56,13 @@ describe('permission preset resolution', () => {
     expect(decide({ toolName: 'git', args: { command: 'config core.hooksPath h' } })).toMatchObject({ action: 'ask', why: 'outside' })
     expect(decide({ toolName: 'git', args: { command: 'push origin main' } })).toMatchObject({ action: 'ask', why: 'network' })
     expect(decide({ toolName: 'git', args: { command: '-C /etc status' } })).toMatchObject({ action: 'ask', why: 'outside' })
-    expect(decide({ toolName: 'mcp_tool', isBuiltin: false }).action).toBe('allow')
+    expect(decide({ toolName: 'github__list_repos', isBuiltin: false }).action).toBe('allow')
+    expect(decide({ toolName: 'searchFiles', isBuiltin: false }).action).toBe('allow')
+    expect(decide({ toolName: 'get_settings', isBuiltin: false }).action).toBe('allow')
+    expect(decide({ toolName: 'mcp_tool', isBuiltin: false })).toMatchObject({ action: 'ask', kind: 'mcp', why: 'mcp-write', allowAlways: true })
+    expect(decide({ toolName: 'gmail_send_email', isBuiltin: false })).toMatchObject({ action: 'ask', kind: 'mcp' })
+    expect(decide({ toolName: 'get_and_delete_item', isBuiltin: false })).toMatchObject({ action: 'ask', kind: 'mcp' })
+    expect(decide({ toolName: 'gmail_send_email', isBuiltin: false, alwaysAllowed: new Set(['gmail_send_email\u0000']) }).action).toBe('allow')
     expect(decide({ toolName: 'unknown_builtin' })).toMatchObject({ action: 'ask', kind: 'tool' })
   })
 
@@ -159,3 +166,26 @@ describe('tool catalog under Workspace', () => {
     }
   })
 })
+
+describe('Plan mode', () => {
+  const plan = (toolName: string, args: Record<string, unknown> = {}, isBuiltin = true) =>
+    decideToolPermission({ preset: 'full', toolName, args, isBuiltin, sandboxAvailable: true, plan: true })
+  it('lets reading tools run under any preset', () => {
+    expect(plan('read_file', { path: 'a' })).toEqual({ action: 'allow', sandbox: false })
+    expect(plan('search_files', { pattern: 'x' })).toEqual({ action: 'allow', sandbox: false })
+    expect(plan('git', { command: 'log --oneline' })).toEqual({ action: 'allow', sandbox: false })
+    expect(plan('github__list_issues', {}, false)).toEqual({ action: 'allow', sandbox: false })
+  })
+  it('refuses every change without asking, even with Full access', () => {
+    for (const [tool, args] of [
+      ['write_file', { path: 'a' }], ['edit_file', { path: 'a' }], ['delete_file', { path: 'a' }],
+      ['run_command', { command: 'ls' }], ['git', { command: 'commit -m x' }], ['run_applescript', { script: 'beep' }],
+    ] as const) {
+      const d = plan(tool, args as Record<string, unknown>)
+      expect(d.action).toBe('deny')
+      if (d.action === 'deny') expect(d.message).toBe(PLAN_MODE_REFUSAL)
+    }
+    expect(plan('gmail_send_email', {}, false).action).toBe('deny')
+  })
+})
+

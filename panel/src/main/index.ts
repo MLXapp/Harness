@@ -34,6 +34,7 @@ import { offerMlxNodeOnFirstRun } from './mlx-node'
 import { sessionManager } from './sessions'
 import { apiGateway } from './api-gateway'
 import { buildContentSecurityPolicy } from './csp'
+import { rendererSettingValue } from './settingsAccess'
 import { db } from './database'
 import { checkEngineVersion, installEngineStreaming } from './engine-manager'
 import { checkForUpdates } from './update-checker'
@@ -360,9 +361,7 @@ function createWindow(): void {
     ipcMain.handle('clipboard:readText', () => clipboard.readText())
 
     // App-level settings (API keys, preferences)
-    ipcMain.handle('settings:get', (_e, key: string) => {
-      return db.getSetting(key) ?? null
-    })
+    ipcMain.handle('settings:get', (_e, key: string) => rendererSettingValue(key, k => db.getSetting(k)))
     ipcMain.handle('settings:has', (_e, key: string) => {
       return db.hasSetting(key)
     })

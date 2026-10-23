@@ -51,6 +51,7 @@ import {
   approvalRefusalMessage,
   decideToolPermission,
   normalizePermissionPreset,
+  PLAN_MODE_NOTE,
   sandboxEscalationMarker,
 } from "../agent/permissions";
 import { ApprovalBroker, type ApprovalCard } from "../agent/approvals";
@@ -704,6 +705,22 @@ function tokenCalibratorFor(chatId: string): TokenCalibrator {
  * chat" for (in memory: the grant lasts until MLX Harness quits).
  */
 const alwaysAllowedCommands = new Map<string, Set<string>>();
+/** Code sessions in Plan mode (reading tools only), until switched off. */
+const planModeChats = new Set<string>();
+
+/** Add the Plan mode note to the end of this turn's user message (request only). */
+function withPlanModeNote(messages: any[]): void {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.role !== "user") continue;
+    if (typeof m.content === "string") {
+      messages[i] = { ...m, content: `${m.content}\n\n${PLAN_MODE_NOTE}` };
+    } else if (Array.isArray(m.content)) {
+      messages[i] = { ...m, content: [...m.content, { type: "text", text: PLAN_MODE_NOTE }] };
+    }
+    return;
+  }
+}
 
 /** Approval cards between the agent loop and the chat window (set up in registerChatHandlers). */
 let approvalBroker: ApprovalBroker | null = null;
@@ -756,6 +773,7 @@ const FILE_TOOLS = new Set([
   "copy_file",
   "move_file",
   "delete_file",
+  "restore_file",
   "create_directory",
   "list_directory",
   "insert_text",
@@ -1602,6 +1620,7 @@ export function registerChatHandlers(
       // guard. Arming it at entry made load/wake queue waiting consume the
       // generation timeout — exactly the premature timeout the user hit. It
       // is armed immediately before the inference fetch below.
+      repeatCallTracker.newTurn(chatId);
       activeRequests.set(chatId, {
         controller: abortController,
         startedAt: Date.now(),
@@ -2072,6 +2091,8 @@ export function registerChatHandlers(
       const completedExactlyOnceTools = new Set<string>();
       // Permission preset (Read only / Workspace / Full access) for this turn.
       const permissionPreset = normalizePermissionPreset(overrides?.permissionPreset);
+      // Plan mode (Code sessions): reading tools only, and a note asking for a plan.
+      const planMode = planModeChats.has(chatId) && overrides?.builtinToolsEnabled === true;
       // Escalations the user refused this turn: the same one is not asked twice.
       const refusedEscalations = new Set<string>();
       /**
@@ -2097,6 +2118,7 @@ export function registerChatHandlers(
           sandboxAvailable: seatbeltSupport().available,
           alwaysAllowed: alwaysAllowedCommands.get(chatId),
           refusedEscalations,
+          plan: planMode,
         });
         if (decision.action === "deny") return { ok: false, message: decision.message };
         if (decision.action === "allow") {
@@ -2516,6 +2538,7 @@ export function registerChatHandlers(
       }
       requestMessages.length = 0;
       requestMessages.push(...mergedMessages);
+      if (planMode && mode === "send") withPlanModeNote(requestMessages);
       // History replay is now fully assembled (system + all prior turns + current
       // user message). Everything pushed after this point is THIS turn's fresh
       // tool exchange (the agentic tool loop). Harvest only from here.
@@ -4788,6 +4811,21 @@ export function registerChatHandlers(
               );
               continue;
             }
+            // Loop guard: the 5th identical call is not run (small local
+            // models otherwise burn the tool budget retrying one failure).
+            const repeatVeto = repeatCallTracker.veto(chatId, tc.function.name, tc.function.arguments);
+            if (repeatVeto) {
+              lastReplaySafeToolResultKey = null;
+              resultText = repeatVeto.text;
+              emitToolStatus("calling", tc.function.name, tc.function.arguments, toolIteration, tc.id);
+              emitToolStatus("error", tc.function.name, resultText, toolIteration, tc.id);
+              requestMessages.push(
+                useResponsesApi
+                  ? { type: "function_call_output", call_id: tc.id, output: resultText }
+                  : { role: "tool", tool_call_id: tc.id, content: resultText },
+              );
+              continue;
+            }
             // A parsed stream item is still speculative until the complete
             // pass reaches loop control. Emit the concrete card only when this
             // call is actually handed to execution/validation. That lets a
@@ -6409,6 +6447,13 @@ export function registerChatHandlers(
     return parseStoredTodos(db.getChatAgentState(chatId).todosJson);
   });
 
+  ipcMain.handle("chat:setPlanMode", (_, chatId: string, on: boolean) => {
+    if (typeof chatId !== "string" || !chatId) return false;
+    if (on) planModeChats.add(chatId);
+    else planModeChats.delete(chatId);
+    return planModeChats.has(chatId);
+  });
+  ipcMain.handle("chat:getPlanMode", (_, chatId: string) => planModeChats.has(chatId));
   ipcMain.handle("chat:getOverrides", async (_, chatId: string) => {
     return sanitizeChatOverrides({
       ...(db.getChatOverrides(chatId) || {}),
