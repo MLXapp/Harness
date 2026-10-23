@@ -5,7 +5,7 @@
  */
 
 import type { ToolDefinition } from '../tools/registry'
-import { BROWSER_ACTIONS, type BrowserArgs } from './agentBrowser'
+import { BROWSER_ACTIONS, truthy, type BrowserArgs } from './agentBrowser'
 import { describeTarget, normalizeDirection } from './snapshot'
 
 export const BROWSER_TOOL_NAME = 'browser'
@@ -83,7 +83,7 @@ export function describeBrowserAction(args: unknown, snapshotText = ''): string 
       const t = target()
       const text = String(a.text ?? '')
       const shown = /type=password/.test(t) ? '•'.repeat(Math.min(text.length, 12)) || '""' : quoted(text)
-      const enter = a.submit === true || /^(true|yes|1)$/i.test(String(a.submit ?? '')) ? ' and press Enter' : ''
+      const enter = truthy(a.submit) ? ' and press Enter' : ''
       return `Type ${shown} into ${t}${enter}`
     }
     case 'select': return `Choose ${quoted(String(a.value ?? a.text ?? ''))} in ${target()}`
@@ -94,3 +94,4 @@ export function describeBrowserAction(args: unknown, snapshotText = ''): string 
     default: return `Browser: ${action || 'unknown action'}`
   }
 }
+

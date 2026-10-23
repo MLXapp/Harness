@@ -15,6 +15,7 @@ import { findLoose, nearestFragment, spliceLines } from '../agent/editMatch'
 import { FileBackups, ago, shownPath } from '../agent/fileBackups'
 import { discoverSkills, loadSkill } from '../agent/skills'
 import { tmpdir } from 'os'
+import { AsyncLocalStorage } from 'async_hooks'
 
 /** An Electron export, or undefined outside Electron (a mocked module throws on missing exports). */
 function electronPart<T>(name: string): T | undefined {
@@ -37,7 +38,18 @@ function backupRoot(): string {
 export const fileBackups = new FileBackups(backupRoot)
 
 function backup(fullPath: string, workingDir: string, tool: string): void {
+  noteChange(fullPath)
   fileBackups.save(fullPath, workingDir, tool)
+}
+
+/**
+ * The Changes review: the chat loop runs each tool call inside
+ * `beforeChange` (ExecuteToolOptions), and every file tool reports here
+ * before it changes, creates, moves or deletes a file.
+ */
+const changeHook = new AsyncLocalStorage<((fullPath: string) => void) | null>()
+function noteChange(fullPath: string): void {
+  try { changeHook.getStore()?.(fullPath) } catch { /* a checkpoint never blocks a tool */ }
 }
 
 // ─── Spawned Process Tracking ────────────────────────────────────────────────
@@ -218,6 +230,8 @@ export interface ExecuteToolOptions {
    * `/usr/bin/sandbox-exec -p <profile>` (Workspace permissions).
    */
   sandboxProfile?: string | null
+  /** Called before a file tool changes a file (the turn's Changes checkpoint). */
+  beforeChange?: (fullPath: string) => void
 }
 
 /** The program + argv prefix for a shell command, sandboxed when a profile is given. */
@@ -250,6 +264,16 @@ export async function executeBuiltinTool(
   workingDir: string,
   maxResultChars?: number,
   options: ExecuteToolOptions = {}
+): Promise<ToolResult> {
+  return changeHook.run(options.beforeChange ?? null, () => executeBuiltinToolInner(toolName, args, workingDir, maxResultChars, options))
+}
+
+async function executeBuiltinToolInner(
+  toolName: string,
+  args: Record<string, any>,
+  workingDir: string,
+  maxResultChars: number | undefined,
+  options: ExecuteToolOptions
 ): Promise<ToolResult> {
   const sandboxProfile = options.sandboxProfile || null
   if (!WORKING_DIR_INDEPENDENT_TOOLS.has(toolName)) {
@@ -405,6 +429,7 @@ function writeFile(path: string, content: string, workingDir: string): ToolResul
   if (content === undefined || content === null) return { content: 'Missing required parameter: content', is_error: true }
   const fullPath = resolvePath(workingDir, path)
   const existed = existsSync(fullPath)
+  noteChange(fullPath)
   const saved = existed ? fileBackups.save(fullPath, workingDir, 'write_file') : null
   mkdirSync(dirname(fullPath), { recursive: true })
   writeFileSync(fullPath, content, 'utf-8')
@@ -703,6 +728,7 @@ async function deleteFile(path: string, workingDir: string): Promise<ToolResult>
     }
     return { content: `Deleted directory: ${path}`, is_error: false }
   }
+  noteChange(fullPath)
   const saved = fileBackups.save(fullPath, workingDir, 'delete_file')
   if (!('saved' in saved) && saved.skipped !== 'created') {
     return { content: `Not deleted: ${path} could not be moved to the Trash or copied aside first (${saved.skipped}). Ask the user to delete it.`, is_error: true }
@@ -725,6 +751,7 @@ function moveFile(source: string, destination: string, workingDir: string): Tool
     return { content: `Destination already exists: ${destination}. Moves never overwrite; choose another name, or delete the destination first.`, is_error: true }
   }
   mkdirSync(dirname(dstPath), { recursive: true })
+  if (statSync(srcPath).isFile()) { noteChange(srcPath); noteChange(dstPath) }
   renameSync(srcPath, dstPath)
   return { content: `Moved ${source} → ${destination}`, is_error: false }
 }
@@ -758,6 +785,7 @@ function restoreFile(path: string | undefined, id: string | undefined, workingDi
       return { content: 'Not restored: git hooks and git config are not restored by the agent.', is_error: true }
     }
   }
+  if (target) noteChange(target.path)
   const result = fileBackups.restore(workingDir, { id, fullPath })
   if (!result.ok) {
     return { content: `${result.error} Call restore_file without arguments to list the saved copies.`, is_error: true }
@@ -781,6 +809,7 @@ function copyFile(source: string, destination: string, workingDir: string): Tool
   }
   const existed = existsSync(dstPath)
   if (existed) backup(dstPath, workingDir, 'copy_file')
+  else noteChange(dstPath)
   mkdirSync(dirname(dstPath), { recursive: true })
   copyFileSync(srcPath, dstPath)
   if (!existed) fileBackups.noteCreated(dstPath)

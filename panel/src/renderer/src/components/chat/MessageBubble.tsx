@@ -11,6 +11,7 @@ import { useElapsedSeconds } from './useElapsedSeconds'
 import { isTypewriterAppend } from './typewriter'
 import { TTSPlayer } from './VoiceChat'
 import { formatTimestamp, parseContentArray, getMetricsItems, type MessageMetrics } from './chat-utils'
+import { TurnChangesPill } from './ChangesReview'
 import { useRelativeTime } from '../ui/use-relative-time'
 import { renderChatMarkdownHtml } from './mathMarkdown'
 import { reasoningSegmentsForDisplay as getReasoningSegmentsForDisplay } from '../../../../shared/interleavedReasoning'
@@ -149,7 +150,7 @@ function stripStructuredToolMarkup(content: string): string {
 }
 
 /** Prose classes for rendered markdown */
-const proseClasses = 'prose prose-invert max-w-none break-words overflow-x-auto [&_pre]:overflow-x-auto [&_code]:break-all [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_pre]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/30 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground [&_table]:text-sm [&_th]:text-left [&_th]:font-medium [&_th]:px-3 [&_th]:py-1.5 [&_td]:px-3 [&_td]:py-1.5'
+const proseClasses = 'prose prose-invert max-w-none prose-code:before:content-none prose-code:after:content-none break-words overflow-x-auto [&_pre]:overflow-x-auto [&_code]:break-all [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_pre]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/30 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground [&_table]:text-sm [&_th]:text-left [&_th]:font-medium [&_th]:px-3 [&_th]:py-1.5 [&_td]:px-3 [&_td]:py-1.5'
 
 /** rAF-based typewriter for smooth streaming — reveals characters gradually instead of
  *  showing 3-5 tokens at once (caused by TCP batching + React 18 state coalescing). */
@@ -719,6 +720,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
           </div>
         )}
 
+        {!isStreaming && <TurnChangesPill messageId={message.id} />}
         {renderMetrics()}
       </div>
     </div>

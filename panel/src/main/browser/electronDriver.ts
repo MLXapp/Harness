@@ -110,6 +110,7 @@ export function createElectronDriver(
     events.push(line)
     if (events.length > 20) events = events.slice(-20)
   }
+  let closedByItself: (() => void) | null = null
   const closeWindow = () => {
     if (idle) clearTimeout(idle)
     idle = null
@@ -124,7 +125,7 @@ export function createElectronDriver(
   /** Each use pushes the idle close back. */
   const touch = () => {
     if (idle) clearTimeout(idle)
-    idle = setTimeout(closeWindow, AGENT_BROWSER_IDLE_MS)
+    idle = setTimeout(() => { closeWindow(); closedByItself?.() }, AGENT_BROWSER_IDLE_MS)
     ;(idle as any).unref?.()
   }
 
@@ -264,6 +265,22 @@ export function createElectronDriver(
     close(): void {
       closeWindow()
       events = []
+    },
+
+    onClosedByItself(cb: () => void): void {
+      closedByItself = cb
+    },
+
+    dispose(): void {
+      closeWindow()
+      events = []
+      closers.delete(closeWindow)
+      closedByItself = null
+      // The in-memory session can't be destroyed in Electron; empty it.
+      if (prepared) {
+        try { void electronSession.fromPartition(partition).clearStorageData() } catch { /* gone */ }
+        try { void electronSession.fromPartition(partition).clearCache() } catch { /* gone */ }
+      }
     },
 
     window(): BrowserWindow | null {

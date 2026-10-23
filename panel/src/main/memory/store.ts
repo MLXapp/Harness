@@ -115,10 +115,14 @@ export class MemoryStore {
     if (this.fts) {
       try {
         const ids = (this.db.prepare('SELECT id FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?').all(q, limit) as Array<{ id: string }>).map(r => r.id)
-        return ids.map(id => this.get(id)).filter((e): e is MemoryEntry => !!e)
+        const found = ids.map(id => this.get(id)).filter((e): e is MemoryEntry => !!e)
+        // Whole words only: Chinese, Japanese and Korean text has no spaces,
+        // and part of a word ("editor" in "Lieblingseditor") is no match, so
+        // nothing found falls back to substring search.
+        if (found.length > 0) return found
       } catch { /* fall through */ }
     }
-    const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 1)
+    const words = (query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(w => w.length > 1 || /[^\x00-\x7f]/.test(w))
     return this.list()
       .map(e => ({ e, score: words.filter(w => e.text.toLowerCase().includes(w)).length }))
       .filter(x => x.score > 0)

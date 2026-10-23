@@ -400,9 +400,25 @@ export class AppsService {
     if (isError) return { ok: false, opened: 0, message: text.slice(0, 300) }
     const links = connectionLinks(json)
     for (const l of links.slice(0, 1)) await this.deps.openExternal(l.url)
-    // Remember it for direct tools (small local models).
-    const known = new Set(this.connectedApps())
-    if (!known.has(toolkit)) this.deps.storage.writeConnected?.([...known, toolkit])
+    // Only an app Composio reports as connected (no sign-in link left) counts
+    // as connected; an opened sign-in page is pending until checkApp() sees it done.
+    if (links.length === 0) this.markConnected(toolkit, true)
     return { ok: true, opened: Math.min(1, links.length), message: links.length ? undefined : 'Already connected.' }
+  }
+
+  /** After a sign-in in the browser: is the app connected now? Opens nothing. */
+  async checkApp(toolkit: string): Promise<{ ok: boolean; connected: boolean; message?: string }> {
+    const { json, text, isError } = await this.call('COMPOSIO_MANAGE_CONNECTIONS', { toolkits: [toolkit] })
+    if (isError) return { ok: false, connected: false, message: text.slice(0, 300) }
+    const connected = connectionLinks(json).length === 0
+    this.markConnected(toolkit, connected)
+    return { ok: true, connected }
+  }
+
+  private markConnected(toolkit: string, on: boolean): void {
+    const known = new Set(this.connectedApps())
+    if (on === known.has(toolkit)) return
+    if (on) known.add(toolkit); else known.delete(toolkit)
+    this.deps.storage.writeConnected?.([...known])
   }
 }

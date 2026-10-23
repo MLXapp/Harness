@@ -4,7 +4,7 @@
  *   event tasks:changed
  * Each task has its own chat; a finished run notifies (click opens the chat).
  */
-import { BrowserWindow, Notification, ipcMain, powerMonitor } from 'electron'
+import { Notification, ipcMain, powerMonitor } from 'electron'
 import { randomUUID } from 'crypto'
 import { db } from '../database'
 import { runChatTurnFromMain } from './chat'
@@ -12,13 +12,14 @@ import { TaskScheduler } from '../tasks/scheduler'
 import { parseSchedule, type ScheduledTask } from '../../shared/schedule'
 import { t } from '../i18n'
 import { appWindows } from '../browser/electronDriver'
+import { revealMainWindow } from '../mainWindowRef'
 
 let scheduler: TaskScheduler | null = null
 export const MAX_TASKS = 50
 
-/** The app's own windows (not the agent's hidden browser windows). */
-function mainWindow(): BrowserWindow | undefined {
-  return appWindows()[0]
+const hhmm = (ms?: number) => (ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')
+function noteParams(task: ScheduledTask): Record<string, string> {
+  return { ran: hhmm(task.note?.ran), due: hhmm(task.note?.due) }
 }
 
 function broadcast(): void {
@@ -34,16 +35,12 @@ export function taskScheduler(): TaskScheduler {
     onFinished: (task: ScheduledTask) => {
       try {
         if (!Notification.isSupported()) return
+        const reason = task.lastStatus === 'ok' ? '' : task.note ? t(`tasks.note.${task.note.code}`, noteParams(task)) : (task.lastNote ?? '')
         const n = new Notification({
           title: task.lastStatus === 'ok' ? t('main.notify.taskDone') : t('main.notify.taskFailed'),
-          body: task.lastStatus === 'ok' ? task.title : `${task.title} · ${task.lastNote ?? ''}`.slice(0, 200),
+          body: (reason ? `${task.title} · ${reason}` : task.title).slice(0, 200),
         })
-        n.on('click', () => {
-          const win = mainWindow()
-          if (!win || win.isDestroyed()) return
-          win.show(); win.focus()
-          win.webContents.send('chat:openFromNotification', { chatId: task.chatId })
-        })
+        n.on('click', () => revealMainWindow('chat:openFromNotification', { chatId: task.chatId }))
         n.show()
       } catch { /* notifications unavailable */ }
     },
@@ -53,17 +50,17 @@ export function taskScheduler(): TaskScheduler {
 
 /** Create a task with its own chat on the given chat's model (and settings). */
 export function createTaskFromChat(sourceChatId: string, input: { title: string; prompt: string; schedule: unknown }):
-  { ok: true; task: ScheduledTask } | { ok: false; error: string } {
+  { ok: true; task: ScheduledTask } | { ok: false; error: string; code?: string } {
   const parsed = parseSchedule(input.schedule)
-  if (!parsed.ok) return parsed
-  if (parsed.schedule.kind === 'once' && parsed.schedule.at <= Date.now()) return { ok: false, error: 'That time has already passed.' }
+  if (!parsed.ok) return { ...parsed, code: 'schedule' }
+  if (parsed.schedule.kind === 'once' && parsed.schedule.at <= Date.now()) return { ok: false, code: 'past', error: 'That time has already passed.' }
   const all = db.tasks.list()
-  if (all.length >= MAX_TASKS) return { ok: false, error: `There are already ${MAX_TASKS} tasks. Delete some in Preferences → Tasks first.` }
+  if (all.length >= MAX_TASKS) return { ok: false, code: 'max', error: `There are already ${MAX_TASKS} tasks. Delete some in Preferences → Tasks first.` }
   // A task's own run never makes more tasks.
-  if (all.some(t => t.chatId === sourceChatId)) return { ok: false, error: 'A scheduled task cannot schedule more tasks.' }
-  if (!input.prompt?.trim()) return { ok: false, error: 'The task needs a prompt.' }
+  if (all.some(t => t.chatId === sourceChatId)) return { ok: false, code: 'nested', error: 'A scheduled task cannot schedule more tasks.' }
+  if (!input.prompt?.trim()) return { ok: false, code: 'no-prompt', error: 'The task needs a prompt.' }
   const source = db.getChat(sourceChatId)
-  if (!source) return { ok: false, error: 'Open a chat with the model the task should use first.' }
+  if (!source) return { ok: false, code: 'no-chat', error: 'Open a chat with the model the task should use first.' }
   const now = Date.now()
   const chat = { id: randomUUID(), title: (input.title || input.prompt).replace(/\s+/g, ' ').trim().slice(0, 60), createdAt: now, updatedAt: now, modelId: source.modelId, modelPath: source.modelPath }
   db.createChat(chat)

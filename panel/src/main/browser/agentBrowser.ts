@@ -32,6 +32,10 @@ export interface PageDriver {
   isLoading?(): boolean
   /** Optional: things the page did on its own since the last call (dialogs, blocked downloads…), one line each. */
   takeEvents?(): string[]
+  /** Optional: called when the driver closed the page on its own (idle). */
+  onClosedByItself?(cb: () => void): void
+  /** Optional: free everything for good (the browser won't be used again). */
+  dispose?(): void
 }
 
 export interface BrowserResult {
@@ -218,7 +222,8 @@ function message(e: unknown): string {
   return s.replace(/^Error invoking remote method '[^']+': /, '').slice(0, 300)
 }
 
-function truthy(v: unknown): boolean {
+/** How the browser reads yes/no arguments (the approval card uses the same rule). */
+export function truthy(v: unknown): boolean {
   if (typeof v === 'string') return /^(true|yes|1|on)$/i.test(v.trim())
   return !!v
 }
@@ -236,10 +241,26 @@ export class AgentBrowser {
   private readonly maxChars: number
   private queue: Promise<unknown> = Promise.resolve()
 
+  /** The page was closed after idling: the next action says so. */
+  private idleClosed = false
+
   constructor(private readonly driver: PageDriver, private readonly opts: AgentBrowserOptions = {}) {
     this.settleMs = opts.settleMs ?? 8000
     this.loadTimeoutMs = opts.loadTimeoutMs ?? 30_000
     this.maxChars = opts.maxChars ?? SNAPSHOT_MAX_CHARS
+    driver.onClosedByItself?.(() => {
+      if (!this.opened) return
+      this.opened = false
+      this.last = null
+      this.idleClosed = true
+    })
+  }
+
+  /** Free the page and its session for good. */
+  dispose(): void {
+    this.opened = false
+    this.last = null
+    try { this.driver.dispose?.() } catch { /* already gone */ }
   }
 
   /** The latest snapshot text ('' before the first), for approval cards. */
@@ -294,6 +315,7 @@ export class AgentBrowser {
         }
       }
       this.opened = true
+      this.idleClosed = false
       return this.after(`Opened ${check.url}${note}.`)
     })
   }
@@ -439,6 +461,9 @@ export class AgentBrowser {
 
   private needsPage(): BrowserResult | null {
     if (this.opened) return null
+    if (this.idleClosed) {
+      return { text: 'The browser closed after 10 idle minutes. Open the page again with action "open" (sign-ins are kept).', isError: true }
+    }
     return { text: 'No page is open. Use action "open" with a url first.', isError: true }
   }
 

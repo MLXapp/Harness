@@ -95,13 +95,15 @@ export function ApprovalCards({ chatId }: { chatId: string }) {
   useEffect(() => {
     const first = shown.find(s => s.open && !s.busy)
     if (!first) return
+    // Capture phase, and the event stops here: the composer must never also
+    // send its text on the same ⌘↩ (or stop the reply on ⌘.).
     const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || e.altKey || e.ctrlKey) return
-      if (e.key === 'Enter') { e.preventDefault(); respond(first.card.id, 'allow-once') }
-      else if (e.key === '.') { e.preventDefault(); respond(first.card.id, 'deny') }
+      if (!e.metaKey || e.altKey || e.ctrlKey || e.isComposing) return
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); respond(first.card.id, 'allow-once') }
+      else if (e.key === '.') { e.preventDefault(); e.stopPropagation(); respond(first.card.id, 'deny') }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [shown]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (shown.length === 0) return null

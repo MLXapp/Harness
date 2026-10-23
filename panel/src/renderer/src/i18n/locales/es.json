@@ -3129,9 +3129,9 @@
         "audio": "voz",
         "music": "música"
       },
-      "runsHere": "Tu {chip} con {gb} GB crea {what} aquí mismo: privado y gratis",
-      "soon": "Tu {chip} con {gb} GB podrá crear {what} en este Mac cuando llegue la versión local. Mientras tanto, en la nube",
-      "cloudOnly": "La {what} local necesita {need} GB o más; este {chip} tiene {gb} GB, así que la nube da mejores resultados"
+      "runsHere": "Tu {chip} con {gb} GB crea {what} aquí mismo: privado y gratis.",
+      "soon": "Tu {chip} con {gb} GB creará {what} en este Mac cuando llegue la {what} local. Mientras tanto se crea en la nube.",
+      "cloudOnly": "La {what} local necesita {need} GB o más; este {chip} tiene {gb} GB, así que la nube da mejores resultados."
     }
   },
   "code": {
@@ -3210,7 +3210,9 @@
     "offTitle": "Activar apps (Gmail, Calendar, Slack…) en este chat",
     "setupTitle": "Conectar apps (Gmail, Calendar, Slack…)",
     "connectedApp": "Conectada",
-    "directNote": "Los modelos de este Mac reciben directamente las acciones principales de las apps que conectaste aquí (más fácil para modelos pequeños); los modelos en la nube buscan en todo Composio."
+    "directNote": "Los modelos de este Mac reciben directamente las acciones principales de las apps que conectaste aquí (más fácil para modelos pequeños); los modelos en la nube buscan en todo Composio.",
+    "nowConnected": "Conectada. Sus acciones ya están listas.",
+    "checkAgain": "Comprobar de nuevo"
   },
   "skills": {
     "intro": "Las habilidades son carpetas con un SKILL.md: instrucciones (y a veces scripts) para un tipo de trabajo, en el mismo formato que Claude Code. El agente ve el nombre y la descripción y solo lee las instrucciones cuando una tarea las necesita. Los scripts se ejecutan con las herramientas normales, así que preguntan como cualquier comando.",
@@ -3267,7 +3269,28 @@
       "weekly": "{days} a las {time}",
       "hours": "Cada {n} h",
       "minutes": "Cada {n} min"
-    }
+    },
+    "note": {
+      "late": "Se ejecutó a las {ran} en lugar de a las {due}: el Mac estaba en reposo o MLX Harness estaba cerrado.",
+      "retrying": "Su modelo no estaba en marcha. Se reintenta cada 5 minutos durante una hora.",
+      "retries-out": "Su modelo no se inició en una hora. Inicia el modelo o cambia el chat de la tarea a un modelo en la nube.",
+      "interrupted": "Interrumpida: MLX Harness se cerró durante la ejecución.",
+      "past": "Su hora ya pasó. Crea una tarea nueva con otra hora.",
+      "chat-deleted": "Se eliminó su chat.",
+      "no-model": "Su chat no tiene modelo.",
+      "cloud-lost": "Su chat perdió el modelo en la nube. Abre el chat y elige un modelo.",
+      "model-not-running": "Su modelo no estaba en marcha.",
+      "failed": "La ejecución falló. Abre el chat para ver por qué."
+    },
+    "error": {
+      "past": "Esa hora ya pasó.",
+      "max": "Ya hay 50 tareas. Elimina alguna primero.",
+      "nested": "El chat de una tarea programada no puede crear más tareas. Abre otro chat.",
+      "no-prompt": "La tarea necesita una instrucción.",
+      "no-chat": "Primero abre un chat con el modelo que debe usar la tarea."
+    },
+    "deleteConfirm": "¿Eliminar esta tarea? Su chat se queda en tu historial.",
+    "deleteYes": "Eliminar tarea"
   },
   "browser": {
     "bigger": "Más grande",
@@ -3281,5 +3304,44 @@
       "help": "Mientras haya un modelo cargado en MLX Harness, MLX Node detiene sus trabajos de red y libera su memoria, y continúa a los pocos minutos de parar el modelo.",
       "update": "Necesita MLX Node 0.9.6 o posterior (este Mac tiene la {version})."
     }
+  },
+  "changes": {
+    "title": "Cambios",
+    "files": "{n} archivos cambiados",
+    "filesOne": "1 archivo cambiado",
+    "review": "Revisar",
+    "allReverted": "revertidos",
+    "someReverted": "{n} revertidos",
+    "revertAll": "Revertir todo",
+    "revertFile": "Revertir archivo",
+    "reverted": "Revertido",
+    "revertedN": "Se devolvieron {n} archivos a como estaban antes de esta respuesta.",
+    "revertedNOne": "Se devolvió el archivo a como estaba antes de esta respuesta.",
+    "failed": "No se pudieron restaurar {n} archivos.",
+    "failedOne": "No se pudo restaurar el archivo.",
+    "conflict": "{n} archivos cambiaron después de esta respuesta. Revertirlos borra esas ediciones posteriores.",
+    "conflictOne": "Este archivo cambió después de esta respuesta. Revertirlo borra esas ediciones posteriores.",
+    "revertAnyway": "Revertir de todos modos",
+    "reveal": "Mostrar en el Finder",
+    "cantRevert": "No se guardó su versión anterior (más de 5 MB).",
+    "opaque": "Este archivo no es de texto (o supera 5 MB), así que no se muestran sus líneas.",
+    "noLines": "Sin cambios de líneas (solo cambiaron los metadatos del archivo).",
+    "changedSince": "Este archivo cambió después de la respuesta: la diferencia lo muestra como está ahora.",
+    "comment": "Comentar esta línea",
+    "commentPlaceholder": "¿Qué debería cambiar aquí?",
+    "addComment": "Añadir",
+    "removeComment": "Quitar",
+    "commentsHint": "Tus comentarios llegan al agente como un solo mensaje.",
+    "discard": "Descartar",
+    "send": "Enviar {n} comentarios",
+    "sendOne": "Enviar comentario",
+    "commentsIntro": "Comentarios de revisión sobre tus cambios. Atiende cada uno:",
+    "kind": {
+      "added": "Archivo nuevo",
+      "modified": "Modificado",
+      "deleted": "Eliminado"
+    },
+    "atLine": "Línea {n}",
+    "editComment": "Editar"
   }
 }

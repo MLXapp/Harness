@@ -458,6 +458,17 @@ const api = {
       return () => { ipcRenderer.removeListener('tasks:changed', listener) }
     },
   },
+  changes: {
+    list: (chatId: string): Promise<import('../shared/changes').TurnChangeSet[]> => ipcRenderer.invoke('changes:list', chatId),
+    file: (chatId: string, messageId: string, path: string): Promise<import('../shared/changes').FileTexts | null> => ipcRenderer.invoke('changes:file', chatId, messageId, path),
+    revert: (chatId: string, messageId: string, paths: string[], force?: boolean): Promise<import('../shared/changes').RevertResult> => ipcRenderer.invoke('changes:revert', chatId, messageId, paths, !!force),
+    reveal: (chatId: string, messageId: string, path: string): Promise<boolean> => ipcRenderer.invoke('changes:reveal', chatId, messageId, path),
+    onTurn: (callback: (set: import('../shared/changes').TurnChangeSet) => void) => {
+      const listener = (_e: unknown, set: import('../shared/changes').TurnChangeSet) => callback(set)
+      ipcRenderer.on('changes:turn', listener)
+      return () => { ipcRenderer.removeListener('changes:turn', listener) }
+    },
+  },
   memory: {
     list: (): Promise<Array<{ id: string; text: string; createdAt: number; updatedAt: number; sourceChatId?: string }>> => ipcRenderer.invoke('memory:list'),
     enabled: (): Promise<boolean> => ipcRenderer.invoke('memory:enabled'),
@@ -484,6 +495,7 @@ const api = {
     cancel: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:cancel'),
     disconnect: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:disconnect'),
     connectApp: (toolkit: string): Promise<{ ok: boolean; opened: number; message?: string }> => ipcRenderer.invoke('apps:connectApp', toolkit),
+    checkApp: (toolkit: string): Promise<{ ok: boolean; connected: boolean; message?: string }> => ipcRenderer.invoke('apps:checkApp', toolkit),
     rules: (): Promise<Record<string, import('../shared/apps').AppRule>> => ipcRenderer.invoke('apps:rules'),
     setRule: (toolkit: string, rule: import('../shared/apps').AppRule): Promise<Record<string, import('../shared/apps').AppRule>> => ipcRenderer.invoke('apps:setRule', toolkit, rule),
     chatEnabled: (chatId: string): Promise<boolean> => ipcRenderer.invoke('apps:chatEnabled', chatId),

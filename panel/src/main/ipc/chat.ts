@@ -60,10 +60,13 @@ import { appsInCall, decideAppCall, wrapUntrusted } from "../apps/composioPolicy
 import { discoverSkills, renderSkillIndex } from "../agent/skills";
 import { looksSecret, renderMemoryBlock } from "../memory/store";
 import { joinSteer } from "../agent/steer";
+import { forgetChatMemoryBlock, frozenMemoryBlock, thawMemoryBlocks } from "../memory/freeze";
 import { createTaskFromChat } from "./tasks";
 import { describeSchedule, parseSchedule } from "../../shared/schedule";
 import { AgentBrowser } from "../browser/agentBrowser";
 import { appWindows, createElectronDriver } from "../browser/electronDriver";
+import { revealMainWindow } from "../mainWindowRef";
+import { turnChanges } from "./changes";
 import { BROWSER_TOOL_NAME, describeBrowserAction } from "../browser/toolDefinition";
 import { t as tMain } from "../i18n";
 import {
@@ -736,7 +739,7 @@ function agentBrowser(chatId: string): AgentBrowser {
   while (agentBrowsers.size > MAX_AGENT_BROWSERS) {
     const [oldest, ob] = agentBrowsers.entries().next().value as [string, AgentBrowser];
     agentBrowsers.delete(oldest);
-    void ob.close();
+    void ob.close().then(() => ob.dispose());
   }
   return b;
 }
@@ -755,13 +758,13 @@ const STEER_NOTE = "[The user added this while you were working. Take it into ac
 const STEER_ADDED_PREFIX = "\u2063[Added while working]";
 
 /** Steers a turn never picked up go back to the renderer's queue for that chat. */
-function returnUnusedSteers(chatId: string, getWindow: () => BrowserWindow | null): void {
+function returnUnusedSteers(chatId: string, _getWindow?: () => BrowserWindow | null): void {
   const unused = steerQueues.get(chatId);
   steerQueues.delete(chatId);
-  if (!unused || unused.length === 0) return;
+  const items = unused ?? [];
+  // Always sent (also when empty): the renderer clears its "Joining…" chips.
   try {
-    const win = getWindow();
-    if (win && !win.isDestroyed()) win.webContents.send("chat:steerUnused", { chatId, items: unused });
+    for (const w of appWindows()) w.webContents.send("chat:steerUnused", { chatId, items });
   } catch (_) {}
 }
 
@@ -809,6 +812,18 @@ function clearChatAgentRuntime(chatId: string): void {
   fileReadTracker.clear(chatId);
   repeatCallTracker.clear(chatId);
   tokenCalibrators.delete(chatId);
+  // Everything else this app run keeps per chat.
+  steerQueues.delete(chatId);
+  planModeChats.delete(chatId);
+  chatsWithAppData.delete(chatId);
+  chatsWithExternalData.delete(chatId);
+  forgetChatMemoryBlock(chatId);
+  turnChanges.forget(chatId);
+  const browser = agentBrowsers.get(chatId);
+  if (browser) {
+    agentBrowsers.delete(chatId);
+    void browser.close().then(() => browser.dispose());
+  }
   if (typeof chatId !== "string" || !/^[A-Za-z0-9_-]+$/.test(chatId)) return;
   try {
     rmSync(join(agentSpillRoot(), chatId), { recursive: true, force: true });
@@ -874,26 +889,6 @@ function memoryEnabled(): boolean {
 }
 
 /** remember / recall / forget against the app's memory store. */
-/**
- * The memory block a chat sees stays the same while the chat is in use, so a
- * note saved elsewhere does not invalidate its cached prompt mid-session. It
- * catches up after 10 idle minutes (the cache is cold by then anyway); the
- * chat's own remember/forget calls show in their tool results.
- */
-const memoryBlockByChat = new Map<string, { block: string | null; lastTurn: number }>();
-const MEMORY_REFRESH_IDLE_MS = 10 * 60_000;
-function frozenMemoryBlock(chatId: string, current: string | null): string | null {
-  const now = Date.now();
-  const seen = memoryBlockByChat.get(chatId);
-  if (seen && (seen.block === current || now - seen.lastTurn < MEMORY_REFRESH_IDLE_MS)) {
-    seen.lastTurn = now;
-    return seen.block;
-  }
-  memoryBlockByChat.set(chatId, { block: current, lastTurn: now });
-  if (memoryBlockByChat.size > 200) memoryBlockByChat.delete(memoryBlockByChat.keys().next().value as string);
-  return current;
-}
-
 function runMemoryTool(name: string, args: Record<string, any>, chatId: string): { text: string; isError: boolean } {
   if (!memoryEnabled()) return { text: "Memory is off in Preferences → Memory.", isError: true };
   const store = db.memory;
@@ -917,6 +912,7 @@ function runMemoryTool(name: string, args: Record<string, any>, chatId: string):
     const entry = store.get(id);
     if (!entry) return { text: `No memory with id ${id}. Use recall to find it.`, isError: true };
     store.delete(id);
+    thawMemoryBlocks();
     notify();
     return { text: `Forgot [${id}]: ${entry.text}`, isError: false };
   } catch (err: any) {
@@ -976,7 +972,10 @@ const activeRequests = new Map<
   string,
   {
     controller: AbortController;
+    /** Last activity (reset by every streamed chunk: the stale-lock clock). */
     startedAt: number;
+    /** When the turn began (for "the reply finished" notifications). */
+    turnStartedAt?: number;
     timeoutMs: number;
     responseId?: string;
     endpoint?: { host: string; port: number };
@@ -1067,6 +1066,7 @@ export function abortByEndpoint(host: string, port: number): number {
         entry.controller.abort();
       } catch (_) {}
       activeRequests.delete(chatId);
+      returnUnusedSteers(chatId);
       count++;
     }
   }
@@ -1117,12 +1117,14 @@ async function resolveServerEndpoint(
  * registerChatHandlers. A local model must be running: a task never falls
  * back to whatever other model happens to be up.
  */
-export let runChatTurnFromMain: (chatId: string, prompt: string) => Promise<{ ok: boolean; error?: string }> =
+export let runChatTurnFromMain: (chatId: string, prompt: string) => Promise<{ ok: boolean; error?: string; retry?: boolean; code?: string }> =
   async () => ({ ok: false, error: "Chat is not ready yet." });
 
 /** Successful turns shorter than this never notify (the user was probably watching). */
 const TURN_NOTIFY_MIN_SECONDS = 20;
 let notifyTurnEnded: (chatId: string, outcome: "done" | "failed", startedAt?: number) => void = () => {};
+/** Chats whose current turn was started by a scheduled task. */
+const unattendedTurns = new Set<string>();
 
 export function registerChatHandlers(
   getWindow: () => BrowserWindow | null,
@@ -1176,11 +1178,15 @@ export function registerChatHandlers(
   // that the user likely switched away; a failed turn always says so.
   notifyTurnEnded = (chatId: string, outcome: "done" | "failed", startedAt?: number) => {
     try {
+      // Scheduled tasks notify on their own (once per run).
+      if (unattendedTurns.has(chatId)) return;
+      // A closed window (the turn keeps running) still gets the notice.
       const win = getWindow();
-      if (!win || win.isDestroyed()) return;
-      const visible = typeof win.isVisible === "function" ? win.isVisible() : true;
-      const focused = typeof win.isFocused === "function" ? win.isFocused() : true;
-      if (visible && focused) return;
+      if (win && !win.isDestroyed()) {
+        const visible = typeof win.isVisible === "function" ? win.isVisible() : true;
+        const focused = typeof win.isFocused === "function" ? win.isFocused() : true;
+        if (visible && focused) return;
+      }
       const seconds = startedAt ? (Date.now() - startedAt) / 1000 : 0;
       if (outcome === "done" && seconds < TURN_NOTIFY_MIN_SECONDS) return;
       if (typeof Notification !== "function" || !Notification.isSupported()) return;
@@ -1190,14 +1196,7 @@ export function registerChatHandlers(
         body: title.length > 120 ? `${title.slice(0, 119)}…` : title,
         silent: outcome === "done",
       });
-      note.on("click", () => {
-        const w = getWindow();
-        if (!w || w.isDestroyed()) return;
-        if (w.isMinimized()) w.restore();
-        w.show();
-        w.focus();
-        w.webContents.send("chat:openFromNotification", { chatId });
-      });
+      note.on("click", () => revealMainWindow("chat:openFromNotification", { chatId }));
       note.show();
     } catch (_) {
       /* notifications are a convenience */
@@ -1750,9 +1749,12 @@ export function registerChatHandlers(
       repeatCallTracker.newTurn(chatId);
       // Left over from a turn that was cleared as stale: back to the queue.
       returnUnusedSteers(chatId, getWindow);
+      /** Set when this turn checkpoints files for the Changes review. */
+      let turnChangeMessageId: string | null = null;
       activeRequests.set(chatId, {
         controller: abortController,
         startedAt: Date.now(),
+        turnStartedAt: Date.now(),
         timeoutMs: fetchInactivitySeconds * 1000,
         endpoint: undefined,
         responseId: undefined,
@@ -2129,6 +2131,8 @@ export function registerChatHandlers(
           win.webContents.send("chat:typing", {
             chatId,
             messageId: assistantMessageId,
+            // A turn the window didn't start (a scheduled task) shows its prompt too.
+            userMessage: { id: userMessage.id, content: userMessage.content, timestamp: userMessage.timestamp },
           });
         }
       } catch (_) {}
@@ -2159,6 +2163,11 @@ export function registerChatHandlers(
       // requests verify by identity, sampled requests by rejection sampling),
       // so the request boundary forwards the user's overrides untouched.
       const effectiveSamplerOverrides = overrides;
+      // Changes review: checkpoint what this turn's file tools touch.
+      if (mode === "send" && overrides?.builtinToolsEnabled === true && overrides?.workingDirectory) {
+        turnChanges.begin(chatId, assistantMessageId, overrides.workingDirectory);
+        turnChangeMessageId = assistantMessageId;
+      }
       if (supportsInstructMode === false && overrides?.enableThinking === false) {
         throw new Error(
           "This model has no native Thinking Off/Instruct mode. Open Chat Settings and choose Auto or On.",
@@ -5458,7 +5467,11 @@ export function registerChatHandlers(
                         toolArgs,
                         workDir,
                         undefined,
-                        { sandboxProfile: gate.sandboxProfile },
+                        {
+                          sandboxProfile: gate.sandboxProfile,
+                          // Changes review: the file's state before this turn first touched it.
+                          beforeChange: (fullPath) => turnChanges.noteBefore(chatId, fullPath),
+                        },
                       );
                       // The sandbox may be why it failed: offer the one-shot
                       // escalation (DeepSeek Harness flow).
@@ -6359,7 +6372,7 @@ export function registerChatHandlers(
         }
         db.addMessage(assistantMessage);
 
-        notifyTurnEnded(chatId, "done", activeRequests.get(chatId)?.startedAt);
+        notifyTurnEnded(chatId, "done", activeRequests.get(chatId)?.turnStartedAt);
         // Send final metrics
         try {
           const win = getWindow();
@@ -6647,7 +6660,7 @@ export function registerChatHandlers(
           return hadVisibleActivity ? assistantMessage : null;
         }
         // A failed turn (not a user stop) is worth a notification when away.
-        notifyTurnEnded(chatId, "failed", activeRequests.get(chatId)?.startedAt);
+        notifyTurnEnded(chatId, "failed", activeRequests.get(chatId)?.turnStartedAt);
         if (projectedMetalHeadroomErrorContent) {
           return assistantMessage;
         }
@@ -6686,6 +6699,15 @@ export function registerChatHandlers(
 
       } finally {
         if (fetchTimeout) clearTimeout(fetchTimeout);
+        // What this turn's file tools changed, under the reply ("2 files changed").
+        if (turnChangeMessageId) {
+          try {
+            const set = turnChanges.finish(chatId, turnChangeMessageId);
+            if (set) for (const w of appWindows()) w.webContents.send("changes:turn", set);
+          } catch (err) {
+            console.warn("[CHAT] Changes checkpoint failed:", err);
+          }
+        }
         // Only delete our own entry — after an abort or stale-lock recovery,
         // a newer request may have already registered a replacement.
         const current = activeRequests.get(chatId);
@@ -6706,30 +6728,33 @@ export function registerChatHandlers(
       attachments?: Parameters<typeof handleSendMessage>[4],
     ) => handleSendMessage(event, chatId, content, endpoint, attachments, "send"),
   );
-  runChatTurnFromMain = async (chatId: string, prompt: string): Promise<{ ok: boolean; error?: string; retry?: boolean }> => {
+  runChatTurnFromMain = async (chatId: string, prompt: string): Promise<{ ok: boolean; error?: string; retry?: boolean; code?: string }> => {
     const chat = db.getChat(chatId);
-    if (!chat) return { ok: false, error: "The task's chat was deleted." };
+    if (!chat) return { ok: false, code: "chat-deleted", error: "The task's chat was deleted." };
     const modelPath = String(chat.modelPath || chat.modelId || "");
-    if (!modelPath) return { ok: false, error: "The task's chat has no model." };
+    if (!modelPath) return { ok: false, code: "no-model", error: "The task's chat has no model." };
     let endpoint: { host: string; port: number } | undefined;
     if (modelPath.startsWith("provider://")) {
       // A cloud model needs its provider binding; never fall back to whatever runs locally.
       let bound = false;
       try { bound = !!db.providers.getChatBinding(chatId); } catch { bound = false; }
-      if (!bound) return { ok: false, error: "The task's chat lost its cloud model. Open the chat and pick a model." };
+      if (!bound) return { ok: false, code: "cloud-lost", error: "The task's chat lost its cloud model. Open the chat and pick a model." };
     } else {
       const session = sessionManager.getSessionByModelPath(modelPath.replace(/\/+$/, ""));
       if (!session || !["running", "loading", "standby"].includes(session.status)) {
-        return { ok: false, retry: true, error: "Its model was not running. Start the model (or switch the task's chat to a cloud model)." };
+        return { ok: false, retry: true, code: "model-not-running", error: "Its model was not running. Start the model (or switch the task's chat to a cloud model)." };
       }
       endpoint = { host: session.host, port: session.port };
     }
+    unattendedTurns.add(chatId);
     try {
       const res = await handleSendMessage(null, chatId, prompt, endpoint);
       if (res && res.success === false) return { ok: false, error: String(res.error || "Failed") };
       return { ok: true };
     } catch (err: any) {
       return { ok: false, error: String(err?.message ?? err) };
+    } finally {
+      unattendedTurns.delete(chatId);
     }
   };
   // Manual compaction (/compact): summarize the older history now.
@@ -6784,6 +6809,9 @@ export function registerChatHandlers(
       } catch (_) {}
 
       activeRequests.delete(chatId);
+      // The turn's own cleanup no longer sees itself as current: hand the
+      // additions it never picked up back to the queue here.
+      returnUnusedSteers(chatId);
       return { success: true };
     }
     return { success: false, error: "No active request for this chat" };
@@ -6810,6 +6838,7 @@ export function registerChatHandlers(
       if (entry.controller.signal.aborted || now - entry.startedAt > staleLockMs) {
         cancelAndAbortEntry(chatId, entry);
         activeRequests.delete(chatId);
+        returnUnusedSteers(chatId);
         cleared++;
       }
     }
