@@ -790,6 +790,11 @@
     },
     "context": {
       "title": "Context: {used} of {window} tokens ({pct}%). Older messages are summarized at {at}%. Click to summarize now."
+    },
+    "queue": {
+      "label": "Next",
+      "remove": "Remove from the queue",
+      "placeholder": "Type the next message; it sends when this reply ends…"
     }
   },
   "sessions": {
