@@ -714,7 +714,8 @@
         "applescript": "Ejecutar AppleScript",
         "git": "Ejecutar git",
         "mcp": "Usar herramienta MCP",
-        "tool": "Usar herramienta"
+        "tool": "Usar herramienta",
+        "app": "Usar una app"
       },
       "why": {
         "read-only": "Este chat está en Solo lectura.",
@@ -724,7 +725,9 @@
         "outside": "Este comando de git puede actuar fuera del directorio de trabajo.",
         "git-internals": "Esto cambia hooks o ajustes de git, que luego se ejecutan fuera del sandbox.",
         "workspace": "Los permisos de Espacio de trabajo piden aprobación para esto.",
-        "mcp-write": "Esta herramienta puede cambiar cosas fuera de MLX Harness, así que pregunta antes."
+        "mcp-write": "Esta herramienta puede cambiar cosas fuera de MLX Harness, así que pregunta antes.",
+        "app-write": "Esto envía o cambia algo en tus apps. Revisa los campos antes de permitirlo.",
+        "exfil": "Hay datos de apps en este chat, así que las peticiones web preguntan antes: el texto de un correo podría intentar enviarlos a otro sitio."
       },
       "reason": "Motivo del modelo",
       "allowOnce": "Permitir una vez",
@@ -2971,7 +2974,8 @@
       "accounts": "Cuentas",
       "node": "MLX Node",
       "keys": "Claves de API",
-      "about": "Acerca de"
+      "about": "Acerca de",
+      "apps": "Apps"
     }
   },
   "media": {
@@ -3141,5 +3145,37 @@
       "dismiss": "Descartar",
       "go": "Adelante con el plan."
     }
+  },
+  "apps": {
+    "title": "Tus apps, a través de Composio",
+    "subtitle": "Deja que el agente lea y actúe en Gmail, Calendar, Slack, Notion, GitHub y más de 1000 apps. Pregunta antes de enviar o cambiar algo.",
+    "continue": "Continuar con Composio",
+    "ownKey": "Usar tu propia clave de Composio",
+    "keyPlaceholder": "Clave de consumidor de Composio",
+    "connectKey": "Conectar",
+    "keyHelp": "En el panel de Composio, abre AI clients y copia tu clave de consumidor. Se guarda en tu Llavero.",
+    "connected": "Conectado con tu cuenta de Composio",
+    "connectedKey": "Conectado con tu clave de Composio",
+    "disconnect": "Desconectar",
+    "waitingBrowser": "Termina de iniciar sesión en el navegador…",
+    "connecting": "Conectando…",
+    "yourApps": "Tus apps",
+    "rulesHelp": "Leer siempre funciona. Preguntar: los envíos y cambios necesitan tu OK. Siempre: se ejecutan sin preguntar (borrar sigue preguntando). Bloqueada: nunca se usa.",
+    "rule": {
+      "ask": "Preguntar",
+      "always": "Siempre",
+      "blocked": "Bloqueada"
+    },
+    "ruleLabel": "Envíos y cambios en {name}",
+    "connectApp": "Conectar",
+    "finishInBrowser": "Termina de conectar en el navegador.",
+    "alreadyConnected": "Ya está conectada.",
+    "connectFailed": "No se pudo empezar a conectar. Inténtalo de nuevo.",
+    "privacy": "Composio gestiona las conexiones en sus servidores y guarda las entradas y resultados en sus registros (hasta un año por defecto). MLX Harness solo guarda tu inicio de sesión, en el Llavero.",
+    "privacyLink": "Retención de datos de Composio",
+    "chip": "Apps",
+    "onTitle": "Las apps están activadas en este chat",
+    "offTitle": "Activar apps (Gmail, Calendar, Slack…) en este chat",
+    "setupTitle": "Conectar apps (Gmail, Calendar, Slack…)"
   }
 }

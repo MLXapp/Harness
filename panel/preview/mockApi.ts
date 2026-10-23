@@ -501,6 +501,29 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       readText: async () => 'sk-preview-0123456789abcdef',
     },
 
+    // Apps (Composio): ?apps=connected starts signed in.
+    apps: (() => {
+      const featured = [['gmail', 'Gmail'], ['googlecalendar', 'Google Calendar'], ['googledrive', 'Google Drive'], ['slack', 'Slack'], ['notion', 'Notion'], ['github', 'GitHub'], ['linear', 'Linear'], ['outlook', 'Outlook'], ['googlesheets', 'Google Sheets'], ['hubspot', 'HubSpot'], ['jira', 'Jira'], ['todoist', 'Todoist']].map(([id, name]) => ({ id, name }))
+      const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()
+      let status: any = params.get('apps') === 'connected' ? { state: 'connected', via: 'oauth', toolCount: 5 } : { state: 'off', via: null }
+      let rules: Record<string, any> = { slack: 'always' }
+      const chats = new Set<string>()
+      const view = () => ({ ...status, featured })
+      return {
+        status: async () => view(),
+        connect: async () => { status = { state: 'waiting-for-browser', via: 'oauth' }; events.emit('apps:status', view()); await new Promise(r => setTimeout(r, 900)); status = { state: 'connected', via: 'oauth', toolCount: 5 }; events.emit('apps:status', view()); return view() },
+        connectKey: async () => { status = { state: 'connected', via: 'key', toolCount: 5 }; return view() },
+        cancel: async () => view(),
+        disconnect: async () => { status = { state: 'off', via: null }; return view() },
+        connectApp: async () => ({ ok: true, opened: 1 }),
+        rules: async () => rules,
+        setRule: async (toolkit: string, rule: string) => { rules = { ...rules, [toolkit]: rule }; if (rule === 'ask') delete rules[toolkit]; return rules },
+        chatEnabled: async (chatId: string) => status.state === 'connected' && chats.has(chatId),
+        setChatEnabled: async (chatId: string, on: boolean) => { if (on) chats.add(chatId); else chats.delete(chatId); return on && status.state === 'connected' },
+        onStatus: on('apps:status'),
+      }
+    })(),
+
     // Media tabs: jobs live in fx.mediaJobs; a submit "runs" for a few
     // seconds and finishes with a sample picture (or a short silent clip).
     media: {

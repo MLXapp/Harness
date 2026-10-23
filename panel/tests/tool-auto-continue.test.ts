@@ -732,7 +732,9 @@ describe('tool auto-continue policy', () => {
     expect(source).not.toContain(
       'const currentPromptAlreadyForbidsTools =\n        userForbidsToolCalls ||',
     )
-    expect(source.match(/if \(attachBuiltinToolsForCurrentTurn\)/g) || []).toHaveLength(2)
+    expect(source.match(/if \(attachToolsForCurrentTurn\)/g) || []).toHaveLength(2)
+    // App tools (Composio) ride the same guard; built-ins still follow their toggle.
+    expect(source).toContain('attachBuiltinToolsForCurrentTurn || appToolsForTurn.length > 0')
     expect(source).toContain('toolChoiceForCurrentTurn(')
     expect(source).toContain('const requestToolChoice = currentTurnToolChoice()')
     expect(source).toContain('const remainingExactlyOnceBuiltinTools =')

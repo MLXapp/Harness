@@ -714,7 +714,8 @@
         "applescript": "运行 AppleScript",
         "git": "运行 git",
         "mcp": "使用 MCP 工具",
-        "tool": "使用工具"
+        "tool": "使用工具",
+        "app": "使用应用"
       },
       "why": {
         "read-only": "此聊天设置为只读。",
@@ -724,7 +725,9 @@
         "outside": "此 git 命令可能在工作目录之外执行操作。",
         "git-internals": "这会修改 git 钩子或配置，它们之后会在沙盒外运行。",
         "workspace": "工作区权限要求先确认此操作。",
-        "mcp-write": "此工具可能会更改 MLX Harness 之外的内容，因此会先询问。"
+        "mcp-write": "此工具可能会更改 MLX Harness 之外的内容，因此会先询问。",
+        "app-write": "这会在你的应用中发送或更改内容。允许前请检查各项内容。",
+        "exfil": "此对话中已有应用数据，因此网络请求会先询问：邮件中的文字可能试图把数据发送到别处。"
       },
       "reason": "模型给出的理由",
       "allowOnce": "允许一次",
@@ -2971,7 +2974,8 @@
       "accounts": "账户",
       "node": "MLX Node",
       "keys": "API 密钥",
-      "about": "关于"
+      "about": "关于",
+      "apps": "应用"
     }
   },
   "media": {
@@ -3141,5 +3145,37 @@
       "dismiss": "关闭",
       "go": "按计划执行。"
     }
+  },
+  "apps": {
+    "title": "通过 Composio 使用你的应用",
+    "subtitle": "让智能体在 Gmail、日历、Slack、Notion、GitHub 等 1000 多个应用中读取和操作。发送或更改任何内容前都会先询问。",
+    "continue": "使用 Composio 继续",
+    "ownKey": "使用你自己的 Composio 密钥",
+    "keyPlaceholder": "Composio 消费者密钥",
+    "connectKey": "连接",
+    "keyHelp": "在 Composio 控制台中打开 AI clients 并复制你的消费者密钥。它会保存在钥匙串中。",
+    "connected": "已通过你的 Composio 账户连接",
+    "connectedKey": "已使用你的 Composio 密钥连接",
+    "disconnect": "断开连接",
+    "waitingBrowser": "请在浏览器中完成登录…",
+    "connecting": "正在连接…",
+    "yourApps": "你的应用",
+    "rulesHelp": "读取始终运行。先询问：发送和更改需要你确认。始终：无需询问直接运行（删除仍会询问）。阻止：从不使用。",
+    "rule": {
+      "ask": "先询问",
+      "always": "始终",
+      "blocked": "阻止"
+    },
+    "ruleLabel": "{name} 中的发送和更改",
+    "connectApp": "连接",
+    "finishInBrowser": "请在浏览器中完成连接。",
+    "alreadyConnected": "已连接。",
+    "connectFailed": "无法开始连接，请重试。",
+    "privacy": "连接在 Composio 的服务器上运行，工具的输入和结果会保存在其日志中（默认最长一年）。MLX Harness 只在钥匙串中保存你的登录信息。",
+    "privacyLink": "Composio 数据保留",
+    "chip": "应用",
+    "onTitle": "此对话已开启应用",
+    "offTitle": "在此对话中开启应用（Gmail、日历、Slack…）",
+    "setupTitle": "连接应用（Gmail、日历、Slack…）"
   }
 }

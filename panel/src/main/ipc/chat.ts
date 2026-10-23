@@ -55,6 +55,8 @@ import {
   sandboxEscalationMarker,
 } from "../agent/permissions";
 import { ApprovalBroker, type ApprovalCard } from "../agent/approvals";
+import { appsService } from "./apps";
+import { appsInCall, decideAppCall, wrapUntrusted } from "../apps/composioPolicy";
 import { t as tMain } from "../i18n";
 import {
   looksLikeSandboxDenial,
@@ -2093,6 +2095,9 @@ export function registerChatHandlers(
       const permissionPreset = normalizePermissionPreset(overrides?.permissionPreset);
       // Plan mode (Code sessions): reading tools only, and a note asking for a plan.
       const planMode = planModeChats.has(chatId) && overrides?.builtinToolsEnabled === true;
+      // Set once an app's data is in this turn: web tools then ask first, so
+      // text inside an email cannot quietly send data elsewhere.
+      let appDataInTurn = false;
       // Escalations the user refused this turn: the same one is not asked twice.
       const refusedEscalations = new Set<string>();
       /**
@@ -2119,6 +2124,7 @@ export function registerChatHandlers(
           alwaysAllowed: alwaysAllowedCommands.get(chatId),
           refusedEscalations,
           plan: planMode,
+          untrustedData: appDataInTurn,
         });
         if (decision.action === "deny") return { ok: false, message: decision.message };
         if (decision.action === "allow") {
@@ -2233,14 +2239,28 @@ export function registerChatHandlers(
           : scopedCurrentTurnBuiltinToolNames;
       const directAnswerAfterSingleTool =
         exactFinalBuiltinToolNames.length === 1;
-      const currentTurnToolDefinitions = attachBuiltinToolsForCurrentTurn
-        ? scopeToolDefinitionsByName(
-            unscopedCurrentTurnToolDefinitions,
-            exactFinalBuiltinToolNames.length > 0
-              ? exactFinalBuiltinToolNames
-              : scopedCurrentTurnBuiltinToolNames,
-          )
-        : [];
+      // Apps (Composio): the chat's Apps switch adds the meta tools, for
+      // every model. Not on a no-tools turn or a turn scoped to named tools.
+      const appToolsForTurn =
+        !userForbidsToolCalls &&
+        !exactTextOnlyNoToolTurn &&
+        restrictedToolNamesForCurrentTurn.length === 0 &&
+        appsService().chatEnabled(chatId)
+          ? await appsService().listTools().catch(() => [])
+          : [];
+      const attachToolsForCurrentTurn =
+        attachBuiltinToolsForCurrentTurn || appToolsForTurn.length > 0;
+      const currentTurnToolDefinitions = [
+        ...(attachBuiltinToolsForCurrentTurn
+          ? scopeToolDefinitionsByName(
+              unscopedCurrentTurnToolDefinitions,
+              exactFinalBuiltinToolNames.length > 0
+                ? exactFinalBuiltinToolNames
+                : scopedCurrentTurnBuiltinToolNames,
+            )
+          : []),
+        ...appToolsForTurn,
+      ];
       const currentToolCapabilityFingerprint = toolCapabilityFingerprint(
         currentTurnToolDefinitions,
       );
@@ -3019,7 +3039,7 @@ export function registerChatHandlers(
             // unusable catalog, and keeps the rendered prefix stable across
             // Responses history replay (some native templates otherwise add a
             // fallback schema block only on the follow-up turn).
-            if (attachBuiltinToolsForCurrentTurn) {
+            if (attachToolsForCurrentTurn) {
               obj.tools = availableToolDefinitions().map((t) => ({
                 type: "function",
                 name: t.function.name,
@@ -3101,7 +3121,7 @@ export function registerChatHandlers(
               obj.frequency_penalty = overrides.frequencyPenalty;
             if (overrides?.presencePenalty != null)
               obj.presence_penalty = overrides.presencePenalty;
-            if (attachBuiltinToolsForCurrentTurn) {
+            if (attachToolsForCurrentTurn) {
               // Chat Completions API: tools must be in OpenAI format with "function" wrapper
               // e.g. {"type": "function", "function": {"name": ..., "parameters": ...}}
               obj.tools = availableToolDefinitions();
@@ -3203,7 +3223,7 @@ export function registerChatHandlers(
         // though the model now sees them summarized.
         const compactedCurrentTurnItems: any[] = [];
         const toolsForEstimate = () =>
-          attachBuiltinToolsForCurrentTurn ? availableToolDefinitions() : [];
+          attachToolsForCurrentTurn ? availableToolDefinitions() : [];
         const notePromptSent = () => {
           lastSentHeuristicTokens = estimateRequestTokens(requestMessages, toolsForEstimate());
         };
@@ -5017,6 +5037,49 @@ export function registerChatHandlers(
                 } catch (todoErr: any) {
                   resultText = `Error: ${todoErr?.message || String(todoErr)} The list was not changed.`;
                   emitToolStatus("error", tc.function.name, resultText, toolIteration, tc.id);
+                }
+              } else if (appsService().owns(tc.function.name)) {
+                const apps = appsService();
+                const decision = decideAppCall(tc.function.name, toolArgs, apps.rules(), { plan: planMode });
+                const appsHere = appsInCall(tc.function.name, toolArgs);
+                const alwaysKey = alwaysAllowKey(`app:${decision.action === "ask" ? decision.apps.slice().sort().join(",") : ""}`, "");
+                let appRefusal: string | null = null;
+                if (decision.action === "deny") {
+                  appRefusal = decision.message;
+                } else if (decision.action === "ask" && !alwaysAllowedCommands.get(chatId)?.has(alwaysKey)) {
+                  const broker = approvalBroker;
+                  const outcome = broker
+                    ? await broker.request({
+                        chatId,
+                        toolCallId: tc.id,
+                        toolName: tc.function.name,
+                        kind: "app",
+                        subject: decision.summary.length > 8000 ? `${decision.summary.slice(0, 8000)}…` : decision.summary,
+                        reason: statedIntent(fullContent),
+                        why: "app-write",
+                        allowAlways: decision.allowAlways,
+                        signal: abortController.signal,
+                      })
+                    : "unavailable";
+                  console.log(`[CHAT] Approval for app action (${decision.apps.join(",")}): ${outcome}`);
+                  if (outcome === "aborted") throw Object.assign(new Error("AbortError"), { name: "AbortError" });
+                  if (outcome === "allow-always") {
+                    let set = alwaysAllowedCommands.get(chatId);
+                    if (!set) alwaysAllowedCommands.set(chatId, (set = new Set()));
+                    set.add(alwaysKey);
+                  }
+                  if (outcome !== "allow-once" && outcome !== "allow-always") {
+                    appRefusal = approvalRefusalMessage(outcome, tc.function.name, Math.round((broker?.timeoutMs ?? 300000) / 60000));
+                  }
+                }
+                if (appRefusal) {
+                  resultText = appRefusal;
+                  emitToolStatus("error", tc.function.name, resultText, toolIteration, tc.id);
+                } else {
+                  const appResult = await apps.call(tc.function.name, toolArgs, abortController.signal);
+                  appDataInTurn = true;
+                  resultText = wrapUntrusted(appResult.text, appsHere.join(", ") || undefined);
+                  emitToolStatus(appResult.isError ? "error" : "result", tc.function.name, appResult.text, toolIteration, tc.id);
                 }
               } else if (isBuiltinTool(tc.function.name)) {
                 // Enforce tool category toggles at execution time (defense-in-depth:

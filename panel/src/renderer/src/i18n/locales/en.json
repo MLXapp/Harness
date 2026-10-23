@@ -714,7 +714,8 @@
         "applescript": "Run AppleScript",
         "git": "Run git",
         "mcp": "Use MCP tool",
-        "tool": "Use tool"
+        "tool": "Use tool",
+        "app": "Use an app"
       },
       "why": {
         "read-only": "This chat is set to Read only.",
@@ -724,7 +725,9 @@
         "outside": "This git command can act outside the working directory.",
         "git-internals": "This changes git hooks or settings, which later run outside the sandbox.",
         "workspace": "Workspace permissions ask before this.",
-        "mcp-write": "This tool may change things outside MLX Harness, so it asks first."
+        "mcp-write": "This tool may change things outside MLX Harness, so it asks first.",
+        "app-write": "This sends or changes something in your apps. Check the fields before you allow it.",
+        "exfil": "App data is in this chat, so web requests ask first: text in an email could try to send it elsewhere."
       },
       "reason": "Model's reason",
       "allowOnce": "Allow once",
@@ -2971,7 +2974,8 @@
       "accounts": "Accounts",
       "node": "MLX Node",
       "keys": "API keys",
-      "about": "About"
+      "about": "About",
+      "apps": "Apps"
     }
   },
   "media": {
@@ -3141,5 +3145,37 @@
       "dismiss": "Dismiss",
       "go": "Go ahead with the plan."
     }
+  },
+  "apps": {
+    "title": "Your apps, through Composio",
+    "subtitle": "Let the agent read and act in Gmail, Calendar, Slack, Notion, GitHub and 1,000+ more. It asks before it sends or changes anything.",
+    "continue": "Continue with Composio",
+    "ownKey": "Use your own Composio key",
+    "keyPlaceholder": "Composio consumer key",
+    "connectKey": "Connect",
+    "keyHelp": "In the Composio dashboard, open AI clients and copy your consumer key. It is stored in your Keychain.",
+    "connected": "Connected through your Composio account",
+    "connectedKey": "Connected with your Composio key",
+    "disconnect": "Disconnect",
+    "waitingBrowser": "Finish signing in in your browser…",
+    "connecting": "Connecting…",
+    "yourApps": "Your apps",
+    "rulesHelp": "Reading always runs. Ask first: sends and changes need your OK. Always: they run without asking (deletes still ask). Blocked: never used.",
+    "rule": {
+      "ask": "Ask first",
+      "always": "Always",
+      "blocked": "Blocked"
+    },
+    "ruleLabel": "Sends and changes in {name}",
+    "connectApp": "Connect",
+    "finishInBrowser": "Finish connecting in your browser.",
+    "alreadyConnected": "Already connected.",
+    "connectFailed": "Could not start connecting. Try again.",
+    "privacy": "Composio runs the connections on its servers and keeps tool inputs and results in its logs (up to a year by default). MLX Harness stores only your sign-in, in the Keychain.",
+    "privacyLink": "Composio data retention",
+    "chip": "Apps",
+    "onTitle": "Apps are on in this chat",
+    "offTitle": "Turn on apps (Gmail, Calendar, Slack…) in this chat",
+    "setupTitle": "Connect apps (Gmail, Calendar, Slack…)"
   }
 }
