@@ -3276,7 +3276,7 @@
     "yield": {
       "title": "여기서 모델이 실행되는 동안 MLX Node 일시 중지",
       "help": "MLX Harness에 모델이 로드된 동안 MLX Node는 네트워크 작업을 멈추고 메모리를 비우며, 모델이 멈추면 몇 분 안에 다시 이어갑니다.",
-      "update": "MLX Node 0.9.5 이상이 필요합니다(이 Mac은 {version})."
+      "update": "MLX Node 0.9.6 이상이 필요합니다(이 Mac은 {version})."
     }
   }
 }
