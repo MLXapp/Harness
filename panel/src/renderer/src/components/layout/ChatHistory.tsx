@@ -166,17 +166,17 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
     <div className="flex-1 overflow-y-auto">
       {groups.map(group => (
         <div key={group.label}>
-          <div className="px-4 pt-3 pb-1 text-[11px] font-semibold text-muted-foreground">
+          <div className="pl-[22px] pr-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground/80">
             {t(`layout.chatHistory.group${group.label.replace(/\s+/g, '')}`)}
           </div>
           {group.chats.map(chat => (
             <div
               key={chat.id}
               onClick={() => onChatSelect(chat.id, chat.modelPath)}
-              className={`group flex min-h-[34px] items-center gap-2 px-2.5 py-1 mx-1.5 rounded-lg cursor-pointer transition-colors ${
+              className={`group flex min-h-[34px] items-center gap-2 px-2.5 py-1 mx-3 rounded-[10px] cursor-pointer transition-colors ${
                 chat.id === currentChatId
-                  ? 'bg-accent text-foreground'
-                  : 'text-foreground/80 hover:bg-accent/50'
+                  ? 'bg-[var(--sidebar-row)] text-foreground'
+                  : 'text-foreground/80 hover:bg-[var(--sidebar-hover)]'
               }`}
             >
               {renamingId === chat.id ? (
@@ -200,7 +200,7 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
                 </div>
               ) : (
                 <>
-                  <span className="flex-1 text-[13px] leading-5 truncate">{chat.title}</span>
+                  <span className="flex-1 text-[13.5px] leading-5 truncate">{chat.title}</span>
                   <div className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
                     <button
                       onClick={(e) => {
@@ -228,7 +228,7 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
       {/* vmlx#70: delete every chat — a quiet row at the end of the list
           (shift-click skips the confirmation). */}
       {chats.length > 1 && !searchQuery && (
-        <div className="px-1.5 pb-3 pt-4">
+        <div className="px-3 pb-3 pt-4">
           <button
             type="button"
             onClick={handleClearAll}

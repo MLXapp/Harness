@@ -11,17 +11,17 @@
 
 :root {
   /* ---- surfaces --------------------------------------------------------- */
-  --well:            #FFFFFF;  --well-rgb:            255 255 255;  /* inputs */
-  --bg:              #ECEEF2;  --bg-rgb:              236 238 242;  /* mlx --bg */
-  --bg-2:            #F7F8F9;  --bg-2-rgb:            247 248 249;  /* glass on bg (cards) */
-  --bg-3:            #E2E5EA;  --bg-3-rgb:            226 229 234;  /* mlx --bg-deep (hover/selected) */
-  --bg-4:            #FBFCFC;  --bg-4-rgb:            251 252 252;  /* glass-strong (popovers) */
-  --sidebar-bg:      #E6E8EC;  --sidebar-bg-rgb:      230 232 236;
+  --well:            #FFFFFF;  --well-rgb:            255 255 255;  /* inputs, composer */
+  --bg:              #F8F8FA;  --bg-rgb:              248 248 250;  /* the content pane */
+  --bg-2:            #FFFFFF;  --bg-2-rgb:            255 255 255;  /* cards on the pane */
+  --bg-3:            #EEEFF2;  --bg-3-rgb:            238 239 242;  /* hover / selected */
+  --bg-4:            #FFFFFF;  --bg-4-rgb:            255 255 255;  /* popovers */
+  --sidebar-bg:      #ECEDF0;  --sidebar-bg-rgb:      236 237 240;  /* opaque sidebar (no window glass) */
 
   /* ---- lines (mlx --line / --line-strong over the background) ----------- */
-  --line-subtle:     #DFE1E5;  --line-subtle-rgb:     223 225 229;
-  --line:            #D2D5DA;  --line-rgb:            210 213 218;
-  --line-2:          #C4C8CE;  --line-2-rgb:          196 200 206;
+  --line-subtle:     #ECEDF0;  --line-subtle-rgb:     236 237 240;
+  --line:            #E0E1E6;  --line-rgb:            224 225 230;
+  --line-2:          #CDCFD6;  --line-2-rgb:          205 207 214;
 
   /* ---- text ------------------------------------------------------------- */
   --text:            #1D1D1F;  --text-rgb:            29 29 31;     /* mlx --ink */
@@ -34,8 +34,8 @@
   --acc:             #F08A00;  --acc-rgb:             240 138 0;
   --acc-hi:          #FF9F0A;  --acc-hi-rgb:          255 159 10;
   --acc-dim:         #B86A00;  --acc-dim-rgb:         184 106 0;
-  --acc-wash:        #EFE1CD;  --acc-wash-rgb:        239 225 205;  /* mlx --core-soft */
-  --acc-line:        #F2C58A;  --acc-line-rgb:        242 197 138;
+  --acc-wash:        #FFF0DC;  --acc-wash-rgb:        255 240 220;  /* mlx --core-soft on white */
+  --acc-line:        #F7CF96;  --acc-line-rgb:        247 207 150;
   --acc-glow:        rgba(255, 159, 10, 0.5);
   --link:            #A65A00;  /* orange that reads on light surfaces */
 
@@ -58,6 +58,27 @@
   --sys-blue: #007aff; --sys-indigo: #5856d6; --sys-purple: #af52de; --sys-pink: #ff2d55;
   --sys-orange: #ff9500; --sys-teal: #30b0c7; --sys-green: #34c759; --sys-mint: #00c7be;
   --sys-yellow: #ffcc00;
+
+  /* ---- window glass (DeepSeek Harness-style chrome, MLX orange) --------- */
+  /* 0.5px hairlines; a translucent sidebar over macOS vibrancy with an
+     orange -> coral wash, the MLX touch from mlx.app's hero glow. */
+  --hair:            rgba(0, 0, 0, 0.09);
+  --hair-strong:     rgba(0, 0, 0, 0.14);
+  --sidebar-glass:   rgba(240, 240, 243, 0.4);
+  --sidebar-wash:    linear-gradient(to bottom, rgba(255, 159, 10, 0.11), rgba(255, 159, 10, 0) 35%, rgba(255, 90, 46, 0) 68%, rgba(255, 90, 46, 0.07));
+  --sidebar-row:     rgba(0, 0, 0, 0.055);   /* selected row */
+  --sidebar-hover:   rgba(0, 0, 0, 0.035);
+  --chrome-hover:    rgba(0, 0, 0, 0.05);
+  --seg-track:       rgba(0, 0, 0, 0.055);
+  --seg-thumb:       #FFFFFF;
+  --menu-bg:         rgba(255, 255, 255, 0.78);
+  --menu-blur:       blur(40px) saturate(150%);
+  --scrim:           rgba(20, 22, 28, 0.22);
+  --coral:           #FF5A2E;
+  /* Raised surfaces: the stroke is drawn inside, the shadow outside. */
+  --elev-1:          0 0 0 0.5px var(--hair), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --elev-2:          0 0 0 0.5px var(--hair), 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -12px rgba(20, 24, 33, 0.16);
+  --elev-3:          0 0 0 0.5px var(--hair-strong), 0 2px 6px rgba(0, 0, 0, 0.05), 0 24px 60px -20px rgba(20, 24, 33, 0.28);
 
   /* ---- liquid glass (mlx .glass) ---------------------------------------- */
   --glass:           rgba(255, 255, 255, 0.56);
@@ -97,11 +118,12 @@
   --tr-h2:      -0.02em;
   --tr-label:    0.04em;
 
-  /* ---- shape (mlx radii, scaled for a dense desktop app) ---------------- */
+  /* ---- shape ------------------------------------------------------------ */
   --radius:      14px;   /* cards, panels (mlx --r-control) */
   --radius-ctl:  10px;   /* buttons, inputs */
   --radius-dot:  50%;
   --r-card:      20px;
+  --r-xs: 4px; --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px; --r-panel: 28px;
 
   /* ---- depth ------------------------------------------------------------ */
   --elev-plate: inset 0 1px 0 var(--lg-inner);
@@ -124,8 +146,8 @@
   --sp-12: 48px; --sp-16: 64px; --sp-18: 72px;
 
   /* ---- app chrome ------------------------------------------------------- */
-  --titlebar-h:  38px;
-  --sidebar-w:   244px;
+  --titlebar-h:  52px;   /* the top strip: traffic lights, tabs */
+  --sidebar-w:   272px;
   --sidebar-min: 56px;
   --row-h:       32px;
   --control-h:   32px;
@@ -139,15 +161,15 @@
 /* Dark values, written once and applied by the system or by html.dark. */
 @media (prefers-color-scheme: dark) {
   :root:not(.light) {
-    --well:            #16171B;  --well-rgb:            22 23 27;
-    --bg:              #000000;  --bg-rgb:              0 0 0;
-    --bg-2:            #111215;  --bg-2-rgb:            17 18 21;
-    --bg-3:            #1C1E23;  --bg-3-rgb:            28 30 35;
-    --bg-4:            #212229;  --bg-4-rgb:            33 34 41;
-    --sidebar-bg:      #070708;  --sidebar-bg-rgb:      7 7 8;
-    --line-subtle:     #18191C;  --line-subtle-rgb:     24 25 28;
-    --line:            #26272B;  --line-rgb:            38 39 43;
-    --line-2:          #34363B;  --line-2-rgb:          52 54 59;
+    --well:            #1F1F22;  --well-rgb:            31 31 34;
+    --bg:              #151517;  --bg-rgb:              21 21 23;
+    --bg-2:            #1D1D20;  --bg-2-rgb:            29 29 32;
+    --bg-3:            #2A2A2E;  --bg-3-rgb:            42 42 46;
+    --bg-4:            #262629;  --bg-4-rgb:            38 38 41;
+    --sidebar-bg:      #1B1B1E;  --sidebar-bg-rgb:      27 27 30;
+    --line-subtle:     #232326;  --line-subtle-rgb:     35 35 38;
+    --line:            #2E2E33;  --line-rgb:            46 46 51;
+    --line-2:          #3D3D43;  --line-2-rgb:          61 61 67;
     --text:            #F5F5F7;  --text-rgb:            245 245 247;
     --text-dim:        #A5AAB4;  --text-dim-rgb:        165 170 180;
     --text-faint:      #6F747E;  --text-faint-rgb:      111 116 126;
@@ -155,8 +177,8 @@
     --acc:             #FFA21A;  --acc-rgb:             255 162 26;
     --acc-hi:          #FFB547;  --acc-hi-rgb:          255 181 71;
     --acc-dim:         #8A5A12;  --acc-dim-rgb:         138 90 18;
-    --acc-wash:        #241703;  --acc-wash-rgb:        36 23 3;
-    --acc-line:        #5A3A0A;  --acc-line-rgb:        90 58 10;
+    --acc-wash:        #33230C;  --acc-wash-rgb:        51 35 12;
+    --acc-line:        #6A4512;  --acc-line-rgb:        106 69 18;
     --acc-glow:        rgba(255, 162, 26, 0.6);
     --link:            #FFA21A;
     --brand-a:         #F5F5F7;
@@ -181,19 +203,33 @@
     --lg-depth:        rgba(0, 0, 0, 0.3);
     --shadow:          rgba(0, 0, 0, 0.5);
     --shadow-deep:     rgba(0, 0, 0, 0.7);
+    --hair:            rgba(255, 255, 255, 0.09);
+    --hair-strong:     rgba(255, 255, 255, 0.14);
+    --sidebar-glass:   rgba(28, 28, 31, 0.5);
+    --sidebar-wash:    linear-gradient(to bottom, rgba(255, 159, 10, 0.09), rgba(255, 159, 10, 0) 35%, rgba(255, 90, 46, 0) 68%, rgba(255, 90, 46, 0.06));
+    --sidebar-row:     rgba(255, 255, 255, 0.08);
+    --sidebar-hover:   rgba(255, 255, 255, 0.045);
+    --chrome-hover:    rgba(255, 255, 255, 0.07);
+    --seg-track:       rgba(255, 255, 255, 0.07);
+    --seg-thumb:       #3A3A3F;
+    --menu-bg:         rgba(38, 38, 42, 0.8);
+    --scrim:           rgba(0, 0, 0, 0.45);
+    --elev-1:          0 0 0 0.5px var(--hair), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --elev-2:          0 0 0 0.5px var(--hair), 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px -12px rgba(0, 0, 0, 0.6);
+    --elev-3:          0 0 0 0.5px var(--hair-strong), 0 2px 8px rgba(0, 0, 0, 0.35), 0 28px 70px -20px rgba(0, 0, 0, 0.75);
     color-scheme: dark;
   }
 }
 :root.dark {
-  --well:            #16171B;  --well-rgb:            22 23 27;
-  --bg:              #000000;  --bg-rgb:              0 0 0;
-  --bg-2:            #111215;  --bg-2-rgb:            17 18 21;
-  --bg-3:            #1C1E23;  --bg-3-rgb:            28 30 35;
-  --bg-4:            #212229;  --bg-4-rgb:            33 34 41;
-  --sidebar-bg:      #070708;  --sidebar-bg-rgb:      7 7 8;
-  --line-subtle:     #18191C;  --line-subtle-rgb:     24 25 28;
-  --line:            #26272B;  --line-rgb:            38 39 43;
-  --line-2:          #34363B;  --line-2-rgb:          52 54 59;
+  --well:            #1F1F22;  --well-rgb:            31 31 34;
+  --bg:              #151517;  --bg-rgb:              21 21 23;
+  --bg-2:            #1D1D20;  --bg-2-rgb:            29 29 32;
+  --bg-3:            #2A2A2E;  --bg-3-rgb:            42 42 46;
+  --bg-4:            #262629;  --bg-4-rgb:            38 38 41;
+  --sidebar-bg:      #1B1B1E;  --sidebar-bg-rgb:      27 27 30;
+  --line-subtle:     #232326;  --line-subtle-rgb:     35 35 38;
+  --line:            #2E2E33;  --line-rgb:            46 46 51;
+  --line-2:          #3D3D43;  --line-2-rgb:          61 61 67;
   --text:            #F5F5F7;  --text-rgb:            245 245 247;
   --text-dim:        #A5AAB4;  --text-dim-rgb:        165 170 180;
   --text-faint:      #6F747E;  --text-faint-rgb:      111 116 126;
@@ -201,8 +237,8 @@
   --acc:             #FFA21A;  --acc-rgb:             255 162 26;
   --acc-hi:          #FFB547;  --acc-hi-rgb:          255 181 71;
   --acc-dim:         #8A5A12;  --acc-dim-rgb:         138 90 18;
-  --acc-wash:        #241703;  --acc-wash-rgb:        36 23 3;
-  --acc-line:        #5A3A0A;  --acc-line-rgb:        90 58 10;
+  --acc-wash:        #33230C;  --acc-wash-rgb:        51 35 12;
+  --acc-line:        #6A4512;  --acc-line-rgb:        106 69 18;
   --acc-glow:        rgba(255, 162, 26, 0.6);
   --link:            #FFA21A;
   --brand-a:         #F5F5F7;
@@ -227,6 +263,20 @@
   --lg-depth:        rgba(0, 0, 0, 0.3);
   --shadow:          rgba(0, 0, 0, 0.5);
   --shadow-deep:     rgba(0, 0, 0, 0.7);
+  --hair:            rgba(255, 255, 255, 0.09);
+  --hair-strong:     rgba(255, 255, 255, 0.14);
+  --sidebar-glass:   rgba(28, 28, 31, 0.5);
+  --sidebar-wash:    linear-gradient(to bottom, rgba(255, 159, 10, 0.09), rgba(255, 159, 10, 0) 35%, rgba(255, 90, 46, 0) 68%, rgba(255, 90, 46, 0.06));
+  --sidebar-row:     rgba(255, 255, 255, 0.08);
+  --sidebar-hover:   rgba(255, 255, 255, 0.045);
+  --chrome-hover:    rgba(255, 255, 255, 0.07);
+  --seg-track:       rgba(255, 255, 255, 0.07);
+  --seg-thumb:       #3A3A3F;
+  --menu-bg:         rgba(38, 38, 42, 0.8);
+  --scrim:           rgba(0, 0, 0, 0.45);
+  --elev-1:          0 0 0 0.5px var(--hair), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --elev-2:          0 0 0 0.5px var(--hair), 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px -12px rgba(0, 0, 0, 0.6);
+  --elev-3:          0 0 0 0.5px var(--hair-strong), 0 2px 8px rgba(0, 0, 0, 0.35), 0 28px 70px -20px rgba(0, 0, 0, 0.75);
   color-scheme: dark;
 }
 

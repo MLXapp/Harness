@@ -159,8 +159,8 @@ describe('composer and chat chrome', () => {
     expect(row.indexOf('<ModelSwitcher')).toBeLessThan(row.indexOf('<VoiceChat'))
     expect(row.indexOf('<VoiceChat')).toBeLessThan(row.indexOf('data-vmlx-control="chat-send"'))
     expect(input).toContain("const sendTitle = noModel ? t('chat.switcher.chooseFirst') : t('chat.input.sendTitle')")
-    expect(input).toContain('min-h-[44px]')
-    expect(input).toContain('text-[14px]')
+    expect(input).toContain('min-h-[48px]')
+    expect(input).toContain('text-[15px]')
     expect(input).toContain('rounded-full bg-[color:var(--acc)] text-white')
   })
 

@@ -191,8 +191,8 @@ describe('i18n locale consistency', () => {
         'renderer',
         'src',
         'components',
-        'layout',
-        'TitleBar.tsx',
+        'preferences',
+        'PreferencesSheet.tsx',
       ),
       'utf8',
     )
@@ -353,10 +353,9 @@ describe('i18n locale consistency', () => {
       resolve(__dirname, '..', 'src', 'renderer', 'src', 'components', 'chat', 'VoiceChat.tsx'),
       'utf-8',
     )
-    const appSrc = readFileSync(
-      resolve(__dirname, '..', 'src', 'renderer', 'src', 'App.tsx'),
-      'utf-8',
-    )
+    // App.tsx plus Preferences, which moved out of it into a sheet.
+    const appSrc = ['App.tsx', 'components/preferences/PreferencesSheet.tsx', 'components/preferences/ApiKeysSection.tsx']
+      .map(f => readFileSync(resolve(__dirname, '..', 'src', 'renderer', 'src', f), 'utf-8')).join('\n')
 
     for (const key of [
       'layout.chatHistory.clearAll',
@@ -392,7 +391,6 @@ describe('i18n locale consistency', () => {
     }
     for (const key of [
       'app.about.version',
-      'app.about.apiKeysTitle',
       'app.about.braveKey',
       'app.about.hfToken',
       'app.code.title',
@@ -457,10 +455,9 @@ describe('i18n locale consistency', () => {
   })
 
   it('removes the obsolete release modal and localizes the active update banner', () => {
-    const appSrc = readFileSync(
-      resolve(__dirname, '..', 'src', 'renderer', 'src', 'App.tsx'),
-      'utf-8',
-    )
+    // App.tsx plus Preferences, which moved out of it into a sheet.
+    const appSrc = ['App.tsx', 'components/preferences/PreferencesSheet.tsx', 'components/preferences/ApiKeysSection.tsx']
+      .map(f => readFileSync(resolve(__dirname, '..', 'src', 'renderer', 'src', f), 'utf-8')).join('\n')
     const updateNoticePath = resolve(
       __dirname,
       '..',
@@ -580,10 +577,9 @@ describe('i18n locale consistency', () => {
   })
 
   it('keeps retired Swift migration UI and stale release-notice proof suppression removed', () => {
-    const appSrc = readFileSync(
-      resolve(__dirname, '..', 'src', 'renderer', 'src', 'App.tsx'),
-      'utf-8',
-    )
+    // App.tsx plus Preferences, which moved out of it into a sheet.
+    const appSrc = ['App.tsx', 'components/preferences/PreferencesSheet.tsx', 'components/preferences/ApiKeysSection.tsx']
+      .map(f => readFileSync(resolve(__dirname, '..', 'src', 'renderer', 'src', f), 'utf-8')).join('\n')
     const swiftMigrationBannerPath = resolve(
       __dirname,
       '..',

@@ -136,7 +136,7 @@ export function MessageList({ messages, streamingMessageId, currentMetrics, reas
 
   return (
     <div className="relative flex-1 overflow-hidden">
-      <div ref={containerRef} onScroll={handleScroll} onWheel={handleWheel} className="h-full overflow-y-auto overflow-x-hidden px-6 py-6 space-y-5 w-full">
+      <div ref={containerRef} onScroll={handleScroll} onWheel={handleWheel} className="h-full overflow-y-auto overflow-x-hidden px-6 pt-6 pb-8 space-y-6 w-full [&>*]:mx-auto [&>*]:max-w-[820px]">
         {(() => {
           const lastAssistantIdx = messages.reduceRight((found: number, m, i) => found === -1 && m.role === 'assistant' ? i : found, -1)
           return messages.map((message, idx) => {

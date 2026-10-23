@@ -472,18 +472,19 @@ describe('SessionView chat list overlay', () => {
 // below 900px and collapses to an icon rail, and every mode button keeps its
 // accessible name (aria-label/title) even when its visible label is hidden.
 describe('Console sidebar narrow-width mode controls', () => {
-  const titleBarSource = readFileSync('src/renderer/src/components/layout/TitleBar.tsx', 'utf8')
+  const titleBarSource = readFileSync('src/renderer/src/components/layout/AppHeader.tsx', 'utf8')
   const sidebarSource = readFileSync('src/renderer/src/components/layout/ConsoleSidebar.tsx', 'utf8')
 
   it('keeps every mode accessible while compacting labels in the narrow/collapsed sidebar', () => {
-    for (const mode of ['chat', 'server', 'models']) expect(sidebarSource).toContain(`['${mode}', `)
+    // Workspaces (Chat · Image · Video · Audio · Music · Code) are tabs in the
+    // top strip; the sidebar keeps the app's other pages.
+    for (const mode of ['server', 'models', 'network']) expect(sidebarSource).toContain(`['${mode}', `)
     expect(sidebarSource).toContain('data-vmlx-control={`mode-${mode}`}')
     expect(sidebarSource).toContain('title={label} aria-label={label}')
-    // Labels stay mounted and fade with the width animation (no jump cut).
-    expect(sidebarSource).toContain('<span className={fade}>{label}</span>')
+    // Hiding slides the width; the inner column keeps its width and fades.
     expect(sidebarSource).toContain('transition-[width] duration-300')
-    expect(sidebarSource).toContain("max-[900px]:w-[208px]")
-    // Mode navigation must not be duplicated back into the TitleBar.
+    expect(sidebarSource).toContain("max-[900px]:w-[236px]")
+    expect(titleBarSource).toContain('<WorkspaceTabs />')
     expect(titleBarSource).not.toContain('data-vmlx-control={`mode-')
   })
 })
@@ -498,7 +499,10 @@ describe('ChatModeToolbar narrow-width controls', () => {
     expect(toolbarSource).not.toContain('showModelPicker')
     expect(toolbarSource).not.toContain('handleConnectRemote')
     expect(toolbarSource).toContain('flex min-w-0 items-center gap-1 mlx-view-in')
-    expect(toolbarSource).toContain('<div className="min-w-0 flex-1" />')
+    // The controls live in the window's top strip (ChromeEnd portal); labels
+    // drop before the buttons do when the strip narrows.
+    expect(toolbarSource).toContain('<ChromeEnd>')
+    expect(toolbarSource).toContain('mlx-tb-label')
     expect(toolbarSource).toContain('flex flex-shrink-0 items-center gap-1')
     const inputBox = readFileSync('src/renderer/src/components/chat/InputBox.tsx', 'utf8')
     expect(inputBox).toContain('export const COMPACT_COMPOSER_PX = 420')

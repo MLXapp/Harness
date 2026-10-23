@@ -298,7 +298,7 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
 
   return (
     <div
-      className={`relative px-4 pb-4 pt-2 transition-colors ${isDragOver ? 'bg-primary/5' : ''}`}
+      className={`relative mx-auto w-full max-w-[868px] px-6 pb-5 pt-2 transition-colors ${isDragOver ? 'bg-primary/5' : ''}`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -373,7 +373,7 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
       <div
         ref={composerRef}
         data-vmlx-surface="chat-composer"
-        className="rounded-[22px] border border-border/80 bg-card shadow-[0_1px_2px_var(--lg-depth),0_10px_30px_-18px_var(--shadow)] transition-[border-color,box-shadow] duration-200 focus-within:border-ring/50 focus-within:shadow-[0_0_0_3px_rgb(var(--ring)/0.12),0_10px_30px_-18px_var(--shadow)]"
+        className="mlx-composer"
       >
         <input
           ref={fileInputRef}
@@ -392,7 +392,7 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
           onPaste={handlePaste}
           placeholder={loading ? t('chat.input.placeholderWaiting') : t('chat.input.placeholderDefault')}
           disabled={disabled && !loading}
-          className="block w-full resize-none bg-transparent px-4 pb-1 pt-3 min-h-[44px] max-h-[200px] text-[14px] leading-[1.5] text-foreground placeholder:text-muted-foreground focus:outline-none"
+          className="block w-full resize-none bg-transparent px-4 pb-1 pt-3 min-h-[48px] max-h-[240px] text-[15px] leading-[1.5] text-foreground placeholder:text-muted-foreground focus:outline-none"
           rows={1}
         />
         <div className="flex items-center gap-1 px-2 pb-2 pt-1">

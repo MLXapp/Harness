@@ -1,4 +1,10 @@
-export type AppMode = 'code' | 'chat' | 'server' | 'tools' | 'api' | 'image' | 'models' | 'network'
+export type AppMode = 'code' | 'chat' | 'server' | 'tools' | 'api' | 'image' | 'video' | 'audio' | 'music' | 'models' | 'network'
+
+/** The six workspaces in the top bar: Chat · Image · Video · Audio · Music · Code. */
+export type WorkspaceTab = 'chat' | 'image' | 'video' | 'audio' | 'music' | 'code'
+
+/** Preferences is a sheet over the window; these are its sections. */
+export type PreferencesSection = 'general' | 'accounts' | 'node' | 'keys' | 'about'
 
 export type ServerPanel = 'dashboard' | 'session' | 'create' | 'settings' | 'about'
 
@@ -24,6 +30,8 @@ export interface AppState {
   toolsModelPath: string | null
   // Layout
   sidebarCollapsed: boolean
+  // Preferences sheet (null = closed)
+  preferences: PreferencesSection | null
 }
 
 export type AppAction =
@@ -34,4 +42,6 @@ export type AppAction =
   | { type: 'SET_IMAGE_PANEL'; panel: ImagePanel; sessionId?: string; modelPath?: string }
   | { type: 'SET_TOOLS_PANEL'; panel: ToolsPanel; modelPath?: string | null }
   | { type: 'TOGGLE_SIDEBAR' }
+  | { type: 'OPEN_PREFERENCES'; section?: PreferencesSection }
+  | { type: 'CLOSE_PREFERENCES' }
   | { type: 'RESTORE_STATE'; state: Partial<AppState> }

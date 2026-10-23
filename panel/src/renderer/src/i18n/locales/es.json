@@ -2937,5 +2937,31 @@
       "tip": "Cambia de modelo cuando quieras con el botón de modelo, bajo el cuadro de mensaje.",
       "startsWith": "Tu primer chat empieza con {model}."
     }
+  },
+  "shell": {
+    "tabs": {
+      "label": "Espacios de trabajo",
+      "chat": "Chat",
+      "image": "Imagen",
+      "video": "Vídeo",
+      "audio": "Audio",
+      "music": "Música",
+      "code": "Código"
+    },
+    "new": {
+      "chat": "Nuevo chat",
+      "image": "Nueva imagen",
+      "video": "Nuevo vídeo",
+      "audio": "Nuevo audio",
+      "music": "Nueva canción",
+      "code": "Nueva sesión de código"
+    },
+    "prefs": {
+      "general": "General",
+      "accounts": "Cuentas",
+      "node": "MLX Node",
+      "keys": "Claves de API",
+      "about": "Acerca de"
+    }
   }
 }

@@ -2,7 +2,7 @@ import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 import { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react'
-import { AlertTriangle, Copy, Check, User, Sparkles, RefreshCw, Pencil, Loader2 } from 'lucide-react'
+import { AlertTriangle, Copy, Check, RefreshCw, Pencil, Loader2 } from 'lucide-react'
 import { VideoAttachmentPreview } from './VideoAttachmentPreview'
 import { ReasoningBox } from './ReasoningBox'
 import { ToolCallStatus } from './ToolCallStatus'
@@ -520,7 +520,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
 
     return (
       <div
-        className="flex justify-end gap-2.5 ml-[5%] md:ml-[10%] lg:ml-[15%] group"
+        className="flex justify-end gap-2.5 ml-[12%] group"
         data-vmlx-proof-message-id={message.id}
         data-vmlx-proof-message-role="user"
       >
@@ -545,15 +545,12 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
           </div>
         )}
         <div className="flex flex-col items-end max-w-full">
-          <div className="prose-on-accent bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-2.5 text-sm">
+          <div className="mlx-user-bubble">
             {renderUserContent()}
           </div>
           <span className="text-[11px] text-muted-foreground/50 mt-1 mr-1">
             {timeLabel}
           </span>
-        </div>
-        <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0 mt-0.5">
-          <User className="h-3.5 w-3.5 text-primary" />
         </div>
 
         {/* Image zoom overlay */}
@@ -582,16 +579,13 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
     )
   }
 
-  // ─── Assistant message: left-aligned with avatar ───────────────
+  // ─── Assistant message: left-aligned, no avatar (DeepSeek Harness-style) ───
   return (
     <div
-      className="flex gap-2.5 group mr-[5%] md:mr-[10%] lg:mr-[15%]"
+      className="flex gap-2.5 group"
       data-vmlx-proof-message-id={message.id}
       data-vmlx-proof-message-role="assistant"
     >
-      <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-        <Sparkles className="h-3.5 w-3.5 text-primary" />
-      </div>
       <div className="flex-1 min-w-0">
         {/* Header: timestamp + actions */}
         <div className="flex items-center gap-2 mb-1">

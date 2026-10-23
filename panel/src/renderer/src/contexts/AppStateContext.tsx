@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, useEffect, useRef, useState } from 'react'
-import type { AppState, AppAction, AppMode } from '../types/app-state'
+import type { AppState, AppAction, AppMode, PreferencesSection } from '../types/app-state'
 import { restoreAppMode } from '../lib/consoleNavigation'
 
 const initialState: AppState = {
@@ -15,6 +15,7 @@ const initialState: AppState = {
   toolsPanel: 'dashboard',
   toolsModelPath: null,
   sidebarCollapsed: false,
+  preferences: null,
 }
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -26,11 +27,17 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'CLOSE_CHAT':
       return { ...state, activeChatId: null, activeSessionId: null }
     case 'SET_SERVER_PANEL':
+      // Preferences used to be a page under Servers; it is a sheet now.
+      if (action.panel === 'about') return { ...state, preferences: state.preferences ?? 'general' }
       return { ...state, serverPanel: action.panel, serverSessionId: action.sessionId ?? state.serverSessionId, serverInitialModelPath: action.modelPath !== undefined ? (action.modelPath || null) : state.serverInitialModelPath }
     case 'SET_IMAGE_PANEL':
       return { ...state, imagePanel: action.panel, imageSessionId: action.sessionId ?? state.imageSessionId, imageInitialModelPath: action.modelPath !== undefined ? (action.modelPath || null) : state.imageInitialModelPath }
     case 'SET_TOOLS_PANEL':
       return { ...state, toolsPanel: action.panel, toolsModelPath: action.modelPath !== undefined ? action.modelPath : state.toolsModelPath }
+    case 'OPEN_PREFERENCES':
+      return { ...state, preferences: action.section ?? state.preferences ?? 'general' }
+    case 'CLOSE_PREFERENCES':
+      return { ...state, preferences: null }
     case 'TOGGLE_SIDEBAR':
       return { ...state, sidebarCollapsed: !state.sidebarCollapsed }
     case 'RESTORE_STATE':
@@ -45,6 +52,7 @@ interface AppStateContextValue {
   restored: boolean
   dispatch: React.Dispatch<AppAction>
   setMode: (mode: AppMode) => void
+  openPreferences: (section?: PreferencesSection) => void
   openChat: (chatId: string, sessionId: string) => void
 }
 
@@ -103,9 +111,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const setMode = (mode: AppMode) => dispatch({ type: 'SET_MODE', mode })
   const openChat = (chatId: string, sessionId: string) => dispatch({ type: 'OPEN_CHAT', chatId, sessionId })
+  const openPreferences = (section?: PreferencesSection) => dispatch({ type: 'OPEN_PREFERENCES', section })
 
   return (
-    <AppStateContext.Provider value={{ state, restored, dispatch, setMode, openChat }}>
+    <AppStateContext.Provider value={{ state, restored, dispatch, setMode, openPreferences, openChat }}>
       {children}
     </AppStateContext.Provider>
   )

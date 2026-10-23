@@ -485,6 +485,12 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       readText: async () => 'sk-preview-0123456789abcdef',
     },
 
+    // The preview pretends to be a Mac with window glass; ?glass=0 shows the
+    // opaque fallback other platforms get. The wallpaper behind it is preview.css.
+    chrome: {
+      vibrancy: () => new URLSearchParams(window.location.search).get('glass') !== '0',
+    },
+
     // The preview pretends to be a Mac: the mic offers Apple Dictation (a no-op here).
     dictation: {
       supported: () => true,

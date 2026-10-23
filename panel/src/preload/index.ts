@@ -416,6 +416,12 @@ const api = {
     readText: (): Promise<string> => ipcRenderer.invoke('clipboard:readText'),
   },
 
+  // Window chrome: on macOS the sidebar is window glass (vibrancy) and the
+  // renderer leaves the page background transparent behind it.
+  chrome: {
+    vibrancy: (): boolean => process.platform === 'darwin',
+  },
+
   // Apple Dictation for the chat composer (macOS only; see main/dictation.ts).
   dictation: {
     supported: (): boolean => process.platform === 'darwin',

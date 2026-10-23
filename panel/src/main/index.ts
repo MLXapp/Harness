@@ -197,12 +197,45 @@ if (!gotTheLock) {
   })
 }
 
+/**
+ * Deminiaturize reattaches the NSVisualEffectView material late
+ * (electron/electron#25368), so a transparent window would show the desktop
+ * through the sidebar for a moment. Paint an opaque base while the window is
+ * minimized or hidden and flip back on restore (the null -> 'sidebar'
+ * transition also forces the material to reattach).
+ * Adapted from DeepSeek Harness (apps/desktop/src/main.ts), MIT License,
+ * Copyright (c) 2026 DeepSeek.
+ */
+function attachSidebarGlassWorkaround(window: BrowserWindow): void {
+  const applyBackdrop = (): void => {
+    if (window.isDestroyed()) return
+    if (window.isMinimized() || !window.isVisible()) {
+      window.setVibrancy(null)
+      window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#ececee')
+    } else {
+      window.setVibrancy('sidebar')
+      window.setBackgroundColor('#00000000')
+    }
+  }
+  window.on('minimize', applyBackdrop)
+  window.on('hide', applyBackdrop)
+  window.on('restore', applyBackdrop)
+  window.on('show', applyBackdrop)
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    // Match the renderer's first paint (MLX tokens) so no flash on open.
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#eceef2',
+    minWidth: 720,
+    minHeight: 520,
+    // macOS: the sidebar is real window glass (NSVisualEffectView 'sidebar'),
+    // so the window itself is transparent and the renderer paints the content
+    // pane. Elsewhere, match the renderer's first paint so there is no flash.
+    // Pattern from DeepSeek Harness (apps/desktop/src/main.ts), MIT License.
+    ...(process.platform === 'darwin'
+      ? { vibrancy: 'sidebar' as const, visualEffectState: 'active' as const, backgroundColor: '#00000000' }
+      : { backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#eceef2' }),
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -212,8 +245,10 @@ function createWindow(): void {
       nodeIntegration: false
     },
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 15, y: 15 }
+    // Traffic lights sit in the sidebar's 52px top strip.
+    trafficLightPosition: { x: 18, y: 18 }
   })
+  if (process.platform === 'darwin') attachSidebarGlassWorkaround(mainWindow)
 
   // Register IPC handlers only once — pass getter to avoid stale window references on macOS recreation
   if (!handlersRegistered) {

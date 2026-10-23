@@ -2937,5 +2937,31 @@
       "tip": "Switch models any time from the model button under the message box.",
       "startsWith": "Your first chat starts with {model}."
     }
+  },
+  "shell": {
+    "tabs": {
+      "label": "Workspaces",
+      "chat": "Chat",
+      "image": "Image",
+      "video": "Video",
+      "audio": "Audio",
+      "music": "Music",
+      "code": "Code"
+    },
+    "new": {
+      "chat": "New chat",
+      "image": "New image",
+      "video": "New video",
+      "audio": "New audio",
+      "music": "New song",
+      "code": "New code session"
+    },
+    "prefs": {
+      "general": "General",
+      "accounts": "Accounts",
+      "node": "MLX Node",
+      "keys": "API keys",
+      "about": "About"
+    }
   }
 }
