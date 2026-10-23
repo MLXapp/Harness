@@ -12,6 +12,7 @@ import {
 } from "../shared/sessionStatusReconcile";
 import { decryptSecret, decryptValue, encryptValue } from "./secretStorage";
 import { ensureProviderSchema, ProviderStore, type SecretBox } from "./providers/store";
+import { MediaJobStore } from "./media/store";
 
 /** Provider credentials: Keychain-backed safeStorage, refusing plaintext both ways. */
 const keychainSecretBox: SecretBox = {
@@ -1329,6 +1330,18 @@ class DatabaseManager {
 
   private providerStore?: ProviderStore;
   private providerStoreDb?: Database.Database;
+  private mediaStore?: MediaJobStore;
+  private mediaStoreDb?: Database.Database;
+
+  /** Image (cloud), Video, Audio and Music generations. */
+  get media(): MediaJobStore {
+    this.ensureOpen();
+    if (!this.mediaStore || this.mediaStoreDb !== this.db) {
+      this.mediaStore = new MediaJobStore(this.db);
+      this.mediaStoreDb = this.db;
+    }
+    return this.mediaStore;
+  }
 
   /** Model providers, credentials (write-only to the renderer) and chat bindings. */
   get providers(): ProviderStore {

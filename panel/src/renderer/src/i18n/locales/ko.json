@@ -2963,5 +2963,129 @@
       "keys": "API 키",
       "about": "정보"
     }
+  },
+  "media": {
+    "chooseModel": "모델 선택",
+    "section": {
+      "local": "이 Mac에서",
+      "cloud": "클라우드"
+    },
+    "onThisMac": "이 Mac에서",
+    "yourMac": "{chip} · {gb}GB",
+    "badge": {
+      "value": "가성비 최고",
+      "best": "최고",
+      "fast": "빠름",
+      "new": "신규",
+      "nonCommercial": "비상업용"
+    },
+    "download": "{gb}GB 다운로드",
+    "connect": "{name} 연결",
+    "useCloud": "클라우드의 {name} 사용",
+    "fit": {
+      "good": "이 Mac에서 잘 실행됨",
+      "tight": "실행되지만 메모리가 빠듯합니다(원활하려면 {need}GB)",
+      "no": "{need}GB 필요 · 이 Mac은 {have}GB",
+      "soonYes": "MLX Harness에 곧 추가 · 이 Mac에서 실행 가능",
+      "soonNo": "곧 추가 · {need}GB 필요, 이 Mac은 {have}GB",
+      "cloudReady": "사용 가능",
+      "cloudConnect": "계정 필요"
+    },
+    "price": {
+      "image": "{price} / 이미지",
+      "second": "{price} / 초",
+      "run": "{price} / 회",
+      "1k-chars": "{price} / 1000자",
+      "song": "{price} / 곡",
+      "from": "{price}부터"
+    },
+    "value": {
+      "soundOn": "사운드 켬",
+      "soundOff": "사운드 끔",
+      "instrumental": "연주곡",
+      "vocals": "보컬 포함",
+      "on": "켬",
+      "off": "끔",
+      "seconds": "{n}초",
+      "autoLanguage": "언어 자동"
+    },
+    "param": {
+      "duration": "길이",
+      "aspect": "화면 비율",
+      "resolution": "해상도",
+      "audio": "사운드",
+      "voice": "목소리",
+      "speed": "속도",
+      "language": "언어",
+      "instrumental": "보컬",
+      "size": "크기"
+    },
+    "cancelled": "취소됨",
+    "failed": "실패했습니다",
+    "save": "저장…",
+    "reveal": "Finder에서 보기",
+    "reuse": "이 프롬프트 다시 사용",
+    "phase": {
+      "submitting": "보내는 중",
+      "queued": "대기 중",
+      "generating": "만드는 중",
+      "loading": "모델 불러오는 중",
+      "downloading": "이 Mac에 저장 중"
+    },
+    "generate": "생성",
+    "estimateTitle": "이 설정의 정가이며, 실제 청구액은 제공업체 기준입니다",
+    "cloudNote": "{name}에서 실행됩니다. 프롬프트는 {name}로 전송되고 결과는 이 Mac에 저장됩니다.",
+    "image": {
+      "title": "클라우드에서 이미지 만들기",
+      "subtitle": "최신 이미지 모델용입니다. 일상적인 이미지는 이 Mac에서 빠르게 만들 수 있어요(이 Mac에서로 전환).",
+      "placeholder": "이미지를 설명하세요…",
+      "ideas": {
+        "0": "햇살 드는 대리석 조리대 위의 도자기 커피잔, 부드러운 아침 빛",
+        "1": "굵은 주황색 글씨로 \"늦게까지 영업\"이라고 쓴 포스터",
+        "2": "Mac mini 안의 작은 데이터 센터를 그린 아이소메트릭 일러스트"
+      }
+    },
+    "video": {
+      "title": "동영상 만들기",
+      "subtitle": "장면을 설명하세요. 최고의 동영상 모델은 클라우드의 대형 GPU에서 실행되어 클립을 이 Mac으로 보내 줍니다.",
+      "placeholder": "장면 설명: 피사체, 움직임, 카메라, 조명…",
+      "ideas": {
+        "0": "비 오는 밤 도쿄 골목을 천천히 지나가는 돌리 숏, 네온 반사",
+        "1": "해 뜰 무렵 해변을 달리는 골든 리트리버, 부서지는 파도",
+        "2": "커피를 따르는 매크로 숏, 피어오르는 김, 4초"
+      }
+    },
+    "audio": {
+      "title": "텍스트를 음성으로",
+      "subtitle": "내레이션, 메모, 초안을 위한 자연스러운 목소리. 작은 음성 모델은 이 Mac에서 바로 실행됩니다.",
+      "placeholder": "읽을 내용을 입력하세요…",
+      "ideas": {
+        "0": "MLX Harness에 오신 것을 환영합니다. 여기 보이는 모든 것이 당신의 Mac에서 실행됩니다.",
+        "1": "오늘 할 일: 발표 자료 마무리, 은행에 전화, 6시에 퇴근.",
+        "2": "옛날 옛적에, 작은 컴퓨터가 노래하는 법을 배웠어요."
+      }
+    },
+    "music": {
+      "title": "노래 만들기",
+      "subtitle": "스타일을 설명하고 원하면 가사를 더하면 완성된 곡을 받을 수 있어요.",
+      "placeholder": "스타일: 장르, 분위기, 템포, 악기, 목소리…",
+      "ideas": {
+        "0": "경쾌한 신스팝, 밝은 여성 보컬, 120 BPM, 여름밤 드라이브",
+        "1": "로파이 힙합, 따뜻한 피아노, 바이닐 잡음, 연주곡",
+        "2": "영화 같은 오케스트라 빌드업, 현악과 드럼, 웅장한 피날레"
+      },
+      "lyrics": "가사",
+      "lyricsPlaceholder": "[Verse]\n가사를 입력하세요…\n\n[Chorus]\n…"
+    },
+    "mac": {
+      "what": {
+        "video": "동영상",
+        "audio": "음성",
+        "music": "음악"
+      },
+      "runsHere": "{gb}GB {chip}에서 {what}을(를) 바로 만듭니다: 비공개, 무료",
+      "soon": "{gb}GB {chip}은(는) 로컬 {what} 지원이 추가되면 이 Mac에서 만들 수 있습니다. 그때까지는 클라우드에서 실행됩니다",
+      "cloudOnly": "로컬 {what}에는 {need}GB 이상이 필요합니다. 이 {chip}은(는) {gb}GB이므로 클라우드가 가장 좋습니다"
+    }
   }
 }

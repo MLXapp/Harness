@@ -32,6 +32,7 @@ describe('provider catalog', () => {
       deepseek: 'openai-completions https://api.deepseek.com',
       google: 'openai-completions https://generativelanguage.googleapis.com/v1beta/openai',
       wavespeed: 'openai-completions https://llm.wavespeed.ai/v1',
+      atlascloud: 'openai-completions https://api.atlascloud.ai/v1',
       openrouter: 'openai-completions https://openrouter.ai/api/v1',
       groq: 'openai-completions https://api.groq.com/openai/v1',
       mistral: 'openai-completions https://api.mistral.ai/v1',

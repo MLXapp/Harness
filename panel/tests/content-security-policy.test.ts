@@ -22,7 +22,8 @@ describe('main-process content security policy', () => {
   it('allows persisted local audio and video without opening remote media', () => {
     const policy = buildContentSecurityPolicy({ devRenderer: false })
 
-    expect(policy).toContain("media-src 'self' data: blob:;")
+    // mlx-media: is MLX Harness's own generated-media folder (main/media/protocol.ts).
+    expect(policy).toContain("media-src 'self' data: blob: mlx-media:;")
     expect(policy).not.toMatch(/media-src[^;]*https?:/)
   })
 })

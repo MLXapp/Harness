@@ -100,6 +100,8 @@ export interface Fixtures {
   localServers: ProviderView[]
   chatBindings: ChatModelBinding[]
   settings: Record<string, string>
+  /** Media tab generations (preview mock of main/media). */
+  mediaJobs: any[]
 }
 
 const MIN = 60_000
@@ -317,7 +319,15 @@ export function buildFixtures(scenario: ScenarioName, opts: { engineInstalled: b
     localServers: [],
     chatBindings: [],
     settings: {},
+    mediaJobs: [],
   }
+  const params = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search)
+  // ?accounts=wavespeed,atlascloud connects those media accounts (any scenario).
+  for (const id of (params.get('accounts') ?? '').split(',').map(s => s.trim()).filter(Boolean)) {
+    base.providers.push(mediaAccount(id, now))
+  }
+  // ?media=samples fills the media tabs with finished examples.
+  if (params.get('media') === 'samples') base.mediaJobs = sampleMediaJobs(now)
   if (scenario === 'fresh') return base
 
   const { chats, messages } = localChats(now)
@@ -327,7 +337,7 @@ export function buildFixtures(scenario: ScenarioName, opts: { engineInstalled: b
   base.messages = messages
 
   if (scenario === 'connected') {
-    base.providers = [ANTHROPIC, DEEPSEEK]
+    base.providers = [ANTHROPIC, DEEPSEEK, ...base.providers]
     const t = now - 6 * MIN
     base.chats.unshift({ id: 'chat-claude', title: 'Review my launch email', createdAt: t, updatedAt: t + 40_000, modelId: 'claude-sonnet-4-5', modelPath: 'provider://anthropic/claude-sonnet-4-5' })
     base.messages.push(
@@ -337,4 +347,66 @@ export function buildFixtures(scenario: ScenarioName, opts: { engineInstalled: b
     base.chatBindings = [{ chatId: 'chat-claude', providerId: 'anthropic', modelId: 'claude-sonnet-4-5' }]
   }
   return base
+}
+
+// ── Media tabs ──────────────────────────────────────────────────────────────
+
+function mediaAccount(id: string, now: number): ProviderView {
+  const name = id === 'atlascloud' ? 'Atlas Cloud' : id === 'wavespeed' ? 'WaveSpeed AI' : id
+  return {
+    id, kind: 'catalog', displayName: name, api: 'openai-completions',
+    baseURL: id === 'atlascloud' ? 'https://api.atlascloud.ai/v1' : 'https://llm.wavespeed.ai/v1',
+    models: [], createdAt: now - 2 * HOUR, headerNames: [], configured: true, needsKey: true,
+  } as ProviderView
+}
+
+const PALETTES = [['#ff9f0a', '#ff5a2e', '#3a1c71'], ['#0ea5e9', '#6366f1', '#0f172a'], ['#34c759', '#0ea5e9', '#052e16'], ['#f472b6', '#a855f7', '#1e1b4b']]
+
+/** A sample picture (labelled) so cards have something to show in screenshots. */
+function samplePicture(seed: number, label: string): string {
+  const [a, b, c] = PALETTES[seed % PALETTES.length]
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><defs><radialGradient id="g" cx="30%" cy="30%" r="90%"><stop offset="0" stop-color="${a}"/><stop offset=".55" stop-color="${b}"/><stop offset="1" stop-color="${c}"/></radialGradient></defs><rect width="1280" height="720" fill="url(#g)"/><circle cx="930" cy="250" r="150" fill="#fff" fill-opacity=".14"/><text x="64" y="660" font-family="-apple-system,Inter,sans-serif" font-size="30" fill="#fff" fill-opacity=".85">${label}</text></svg>`
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
+
+/** One second of silence as a WAV data URL. */
+function silentWav(): string {
+  const rate = 8000, n = rate
+  const buf = new ArrayBuffer(44 + n)
+  const v = new DataView(buf)
+  const w = (o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)) }
+  w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true)
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate, true)
+  v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true)
+  for (let i = 0; i < n; i++) v.setUint8(44 + i, 128)
+  let bin = ''
+  new Uint8Array(buf).forEach(x => { bin += String.fromCharCode(x) })
+  return `data:audio/wav;base64,${btoa(bin)}`
+}
+
+let sampleSeed = 0
+export function sampleOutput(kind: string, prompt: string) {
+  if (kind === 'audio' || kind === 'music') return { kind: 'file' as const, url: silentWav(), mime: 'audio/wav', name: 'sample.wav' }
+  return { kind: 'file' as const, url: samplePicture(sampleSeed++, `Preview sample · ${prompt.slice(0, 48)}`), mime: 'image/svg+xml', name: 'sample.svg' }
+}
+
+function sampleMediaJobs(now: number): any[] {
+  const job = (kind: string, modelId: string, modelName: string, provider: string | undefined, prompt: string, values: any, ago: number, status = 'done') => ({
+    id: `sample-${kind}-${ago}`, kind, modelId, modelName, where: provider ? 'cloud' : 'local', ...(provider ? { provider } : {}),
+    prompt, values, status, ...(status === 'running' ? { phase: 'generating' } : {}),
+    outputs: status === 'done' ? [sampleOutput(kind, prompt)] : [],
+    ...(status === 'failed' ? { error: 'Insufficient credits on this account' } : {}),
+    createdAt: now - ago, updatedAt: now - ago, finishedAt: now - ago + 60_000,
+  })
+  return [
+    job('video', 'ws:wan-3.0', 'Wan 3.0', 'wavespeed', 'Slow dolly shot through a rainy Tokyo alley at night, neon reflections', { duration: 5, aspect: '16:9', resolution: '720p', audio: true }, 40_000, 'running'),
+    job('video', 'at:seedance-2.0', 'Seedance 2.0', 'atlascloud', 'A golden retriever runs along the beach at sunrise, waves crashing', { duration: 5, aspect: '16:9', audio: true }, 20 * MIN),
+    job('video', 'ws:kling-3.0-std', 'Kling 3.0', 'wavespeed', 'Macro shot of coffee being poured, steam rising', { duration: 4, aspect: '1:1', audio: false }, 2 * HOUR),
+    job('audio', 'local:kokoro-82m', 'Kokoro', undefined, 'Welcome to MLX Harness. Everything you see here runs on your Mac.', { voice: 'af_heart', speed: 1 }, 5 * MIN),
+    job('audio', 'at:elevenlabs-v3', 'ElevenLabs v3', 'atlascloud', 'Once upon a time, a small computer learned to sing.', {}, 3 * HOUR),
+    job('music', 'ws:ace-step-1.5', 'ACE-Step 1.5', 'wavespeed', 'Upbeat synth-pop, bright female vocals, 120 BPM, summer night drive', { duration: 60 }, 12 * MIN),
+    job('music', 'at:minimax-music-3', 'MiniMax Music 3.0', 'atlascloud', 'Lo-fi hip hop, warm piano, vinyl crackle', { instrumental: true }, 26 * HOUR, 'failed'),
+    job('image', 'ws:nano-banana-2', 'Nano Banana 2', 'wavespeed', 'A poster that says "Open late" in bold orange letters', { aspect: '16:9', resolution: '1k' }, 8 * MIN),
+    job('image', 'ws:z-image-turbo', 'Z-Image Turbo', 'wavespeed', 'A ceramic coffee cup on a sunlit marble counter', { size: '1024*1024' }, 30 * MIN),
+  ]
 }

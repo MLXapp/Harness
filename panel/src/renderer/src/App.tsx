@@ -32,7 +32,8 @@ import { ModelInspector } from './components/tools/ModelInspector'
 import { ModelDoctor } from './components/tools/ModelDoctor'
 import { ModelConverter } from './components/tools/ModelConverter'
 import { ApiDashboard } from './components/api/ApiDashboard'
-import { ImageTab } from './components/image/ImageTab'
+import { ImageWorkspace } from './components/media/ImageWorkspace'
+import { MediaWorkspace } from './components/media/MediaWorkspace'
 import { NetworkView } from './components/network/NetworkView'
 import { isImageSession, sessionMatchesModelPath } from '../../shared/sessionUtils'
 import { resolveDownloadModelType, type DownloadModelType } from '../../shared/modelDiscoveryNavigation'
@@ -445,7 +446,10 @@ function App() {
               </div>
             )}
             {state.mode === 'image' && (
-              <ImageTab />
+              <ImageWorkspace />
+            )}
+            {(state.mode === 'video' || state.mode === 'audio' || state.mode === 'music') && (
+              <MediaWorkspace key={state.mode} kind={state.mode} />
             )}
             {state.mode === 'network' && (
               <NetworkView />

@@ -12,11 +12,12 @@ export function buildContentSecurityPolicy(options: { devRenderer?: boolean } = 
     // ms#75: allow hf-mirror.com and modelscope.cn so users in mainland
     // China can load README images and previews when the hf_endpoint setting
     // points at a mirror.
-    " img-src 'self' data: blob: http://127.0.0.1:* http://localhost:* https://huggingface.co https://*.huggingface.co https://raw.githubusercontent.com https://hf-mirror.com https://*.hf-mirror.com https://modelscope.cn https://*.modelscope.cn;" +
+    " img-src 'self' data: blob: mlx-media: http://127.0.0.1:* http://localhost:* https://huggingface.co https://*.huggingface.co https://raw.githubusercontent.com https://hf-mirror.com https://*.hf-mirror.com https://modelscope.cn https://*.modelscope.cn;" +
     " connect-src 'self' http://127.0.0.1:* http://localhost:* https://huggingface.co https://*.huggingface.co https://hf-mirror.com https://*.hf-mirror.com https://modelscope.cn https://*.modelscope.cn;" +
     // Chat audio/video attachments are persisted and rendered as local data
-    // URLs. Keep remote media blocked while allowing those local payloads and
-    // object URLs created by the renderer.
-    " media-src 'self' data: blob:;"
+    // URLs. Keep remote media blocked while allowing those local payloads,
+    // object URLs created by the renderer, and generated media from MLX
+    // Harness's own folder (mlx-media://, main/media/protocol.ts).
+    " media-src 'self' data: blob: mlx-media:;"
   )
 }

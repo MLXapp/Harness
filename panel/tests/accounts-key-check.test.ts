@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkProviderKey, WAVESPEED_BALANCE_URL } from '../src/main/providers/keyCheck'
+import { ATLAS_BALANCE_URL, checkProviderKey, WAVESPEED_BALANCE_URL } from '../src/main/providers/keyCheck'
 import type { DiscoveryFetch } from '../src/main/providers/discovery'
 import { classifyKeyStatus } from '../src/shared/providers/keyCheck'
 import { cleanPastedKey } from '../src/shared/providers/apiKey'
@@ -113,6 +113,19 @@ describe('key check verdicts', () => {
     expect(calls[0].headers.authorization).toBe(`Bearer ${KEY}`)
     // The public list is read without the key.
     expect(calls[1].headers.authorization).toBeUndefined()
+  })
+
+  it('Atlas Cloud: proves the key on the billing balance (string value), counts the public list', async () => {
+    const { fn, calls } = fakeFetch({
+      [ATLAS_BALANCE_URL]: { body: { value: '12.500000', currency: 'usd' } },
+      'https://api.atlascloud.ai/v1/models': { body: { code: 200, msg: 'ok', data: [{ id: 'deepseek-ai/deepseek-v4-flash' }] } },
+    })
+    expect(await checkProviderKey({ providerId: 'atlascloud', apiKey: KEY }, fn)).toMatchObject({ ok: true, models: 1 })
+    expect(calls[0]).toMatchObject({ url: ATLAS_BALANCE_URL })
+    const rejected = fakeFetch({ [ATLAS_BALANCE_URL]: { status: 401, body: { code: 401, msg: 'invalid token' } } })
+    expect(await checkProviderKey({ providerId: 'atlascloud', apiKey: KEY }, rejected.fn)).toMatchObject({ ok: false, reason: 'rejected' })
+    const empty = fakeFetch({ [ATLAS_BALANCE_URL]: { body: { value: '0.000000', currency: 'usd' } } })
+    expect(await checkProviderKey({ providerId: 'atlascloud', apiKey: KEY }, empty.fn)).toMatchObject({ ok: false, reason: 'no-credit' })
   })
 
   it('WaveSpeed AI: 401 is rejected, an empty balance is "no credit"', async () => {

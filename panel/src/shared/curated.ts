@@ -26,7 +26,7 @@ import type { ProviderReasoningLevel } from './providers/types'
 
 // ── Accounts ────────────────────────────────────────────────────────────────
 
-export type FeaturedAccountId = 'deepseek' | 'anthropic' | 'openai' | 'google' | 'wavespeed'
+export type FeaturedAccountId = 'deepseek' | 'anthropic' | 'openai' | 'google' | 'wavespeed' | 'atlascloud'
 
 export interface FeaturedAccount {
   id: FeaturedAccountId
@@ -110,8 +110,30 @@ export const FEATURED_ACCOUNTS: readonly FeaturedAccount[] = [
   },
 ]
 
+/**
+ * Accounts for the Image, Video, Audio and Music tabs. WaveSpeed AI is also a
+ * chat account (above); Atlas Cloud is offered here only, so the chat lists
+ * keep their five. Facts: atlascloud.ai/docs (keys, public API), 23 Oct 2026.
+ */
+export const MEDIA_ACCOUNTS: readonly FeaturedAccount[] = [
+  FEATURED_ACCOUNTS.find(a => a.id === 'wavespeed')!,
+  {
+    id: 'atlascloud',
+    catalogId: 'atlascloud',
+    name: 'Atlas Cloud',
+    company: 'Atlas Cloud',
+    tagline: 'Video, image and voice models at aggregator prices.',
+    keyUrl: 'https://www.atlascloud.ai/console/api-keys',
+    keySiteName: 'Atlas Cloud',
+    keyPrefix: 'apikey-',
+    tint: '#0EA5E9',
+    monogram: 'A',
+  },
+]
+
 export function featuredAccount(id: string): FeaturedAccount | undefined {
   return FEATURED_ACCOUNTS.find(a => a.id === id || a.catalogId === id)
+    ?? MEDIA_ACCOUNTS.find(a => a.id === id || a.catalogId === id)
 }
 
 // ── Cloud models ────────────────────────────────────────────────────────────

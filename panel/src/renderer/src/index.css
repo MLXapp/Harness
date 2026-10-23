@@ -619,3 +619,68 @@ html.vibrancy .mlx-sidebar { background: var(--sidebar-wash), var(--sidebar-glas
 .mlx-composer:focus-within {
   box-shadow: 0 0 0 0.5px rgb(var(--acc-rgb) / 0.55), 0 0 0 4px rgb(var(--acc-rgb) / 0.10), 0 8px 24px -12px rgba(20, 24, 33, 0.18);
 }
+
+/* Media workspaces (Image cloud, Video, Audio, Music). */
+.mlx-hero-tile {
+  width: 72px; height: 72px; border-radius: 22px;
+  display: grid; place-items: center;
+  color: #fff;
+  background: linear-gradient(145deg, #ff9f0a, var(--coral));
+  box-shadow: 0 14px 34px -14px rgba(255, 110, 30, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.mlx-idea {
+  max-width: 100%;
+  padding: 8px 14px; border-radius: 999px;
+  font-size: 13.5px; line-height: 18px; text-align: left;
+  color: rgb(var(--foreground) / 0.85);
+  background: rgb(var(--bg-2-rgb));
+  box-shadow: var(--elev-1);
+  transition: transform var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+.mlx-idea:hover { background: rgb(var(--acc-wash-rgb)); }
+.mlx-idea:active { transform: scale(0.98); }
+.mlx-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 28px; padding: 0 10px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 500; white-space: nowrap;
+  color: rgb(var(--muted-foreground));
+  background: rgb(var(--foreground) / 0.05);
+}
+.mlx-chip:hover { color: rgb(var(--foreground)); background: rgb(var(--foreground) / 0.08); }
+.mlx-chip.is-on { color: rgb(var(--foreground)); background: rgb(var(--primary) / 0.14); }
+.mlx-generate {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 36px; padding: 0 16px; border-radius: 999px;
+  font-size: 13.5px; font-weight: 600;
+  color: #fff;
+  background: linear-gradient(145deg, var(--acc-hi), var(--acc));
+  box-shadow: 0 8px 20px -10px var(--acc-glow);
+  transition: transform 0.35s var(--spring), opacity var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.mlx-generate:hover:not(:disabled) { box-shadow: 0 10px 24px -8px var(--acc-glow); }
+.mlx-generate:active:not(:disabled) { transform: scale(0.96); }
+.mlx-generate:disabled { opacity: 0.38; box-shadow: none; }
+.mlx-badge {
+  flex-shrink: 0; padding: 1px 6px; border-radius: 6px;
+  font-size: 11px; font-weight: 600; line-height: 15px;
+  color: var(--link); background: rgb(var(--primary) / 0.13);
+}
+.mlx-badge-warn { color: rgb(var(--warning)); background: rgb(var(--warning) / 0.13); }
+@keyframes mlx-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.mlx-shimmer {
+  background: linear-gradient(100deg, transparent 30%, rgb(var(--primary) / 0.10) 50%, transparent 70%) rgb(var(--bg-3-rgb));
+  background-size: 200% 100%;
+  animation: mlx-shimmer 2.2s linear infinite;
+}
+.mlx-audio { height: 40px; }
+@media (prefers-reduced-motion: reduce) { .mlx-shimmer { animation: none; } }
+.mlx-card-actions {
+  position: absolute; top: 10px; right: 10px;
+  display: flex; gap: 2px; padding: 3px; border-radius: 11px;
+  background: var(--menu-bg);
+  -webkit-backdrop-filter: var(--menu-blur); backdrop-filter: var(--menu-blur);
+  box-shadow: var(--elev-2);
+  opacity: 0; transform: translateY(-4px);
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.group:hover .mlx-card-actions, .mlx-card-actions:focus-within { opacity: 1; transform: none; }
