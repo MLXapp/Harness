@@ -18,7 +18,9 @@ export function useAppsStatus(): AppsStatusView | null {
     let alive = true
     api.status().then(s => { if (alive) setStatus(s) }).catch(() => undefined)
     const off = api.onStatus(s => setStatus(prev => ({ ...prev, ...s, featured: s.featured ?? prev?.featured })))
-    return () => { alive = false; off() }
+    const onLocal = (e: Event) => setStatus((e as CustomEvent).detail)
+    window.addEventListener('vmlx:apps-status', onLocal)
+    return () => { alive = false; off(); window.removeEventListener('vmlx:apps-status', onLocal) }
   }, [])
   return status
 }
@@ -44,6 +46,7 @@ export function AppsPreference() {
     try {
       const r = await window.api.apps.connectApp(id)
       setNote(n => ({ ...n, [id]: r.ok ? (r.opened ? t('apps.finishInBrowser') : t('apps.alreadyConnected')) : (r.message || t('apps.connectFailed')) }))
+      void window.api.apps.status().then(s => window.dispatchEvent(new CustomEvent('vmlx:apps-status', { detail: s })))
     } finally {
       setBusy(null)
     }
@@ -100,12 +103,15 @@ export function AppsPreference() {
       </Group>
 
       <Reveal open={connected}>
-        <Group title={t('apps.yourApps')} footer={t('apps.rulesHelp')}>
+        <Group title={t('apps.yourApps')} footer={`${t('apps.rulesHelp')} ${t('apps.directNote')}`}>
           {(status?.featured ?? []).map(app => {
             const rule = rules[app.id] ?? 'ask'
             return (
               <div key={app.id} className="flex min-h-[52px] flex-wrap items-center gap-3 px-4 py-2" data-vmlx-app-row={app.id}>
-                <span className="min-w-[120px] flex-1 text-[13.5px] font-medium">{app.name}</span>
+                <span className="flex min-w-[120px] flex-1 items-center gap-2 text-[13.5px] font-medium">
+                  {app.name}
+                  {app.connected && <span className="h-1.5 w-1.5 rounded-full bg-success" title={t('apps.connectedApp')} aria-label={t('apps.connectedApp')} />}
+                </span>
                 <div role="radiogroup" aria-label={t('apps.ruleLabel', { name: app.name })}
                   className="relative grid grid-cols-3 w-[228px] rounded-[9px] bg-[var(--seg-track)] p-[2px]">
                   <div aria-hidden className="absolute top-[2px] bottom-[2px] left-[2px] rounded-[7px] bg-[var(--seg-thumb)] shadow-[var(--elev-1)] transition-transform duration-300 ease-mlx"

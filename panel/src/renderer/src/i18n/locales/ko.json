@@ -3207,7 +3207,9 @@
     "chip": "앱",
     "onTitle": "이 채팅에서 앱이 켜져 있음",
     "offTitle": "이 채팅에서 앱(Gmail, 캘린더, Slack…) 켜기",
-    "setupTitle": "앱 연결(Gmail, 캘린더, Slack…)"
+    "setupTitle": "앱 연결(Gmail, 캘린더, Slack…)",
+    "connectedApp": "연결됨",
+    "directNote": "이 Mac의 모델은 여기서 연결한 앱의 주요 작업을 직접 받습니다(작은 모델에게 더 쉬움). 클라우드 모델은 Composio 전체를 검색합니다."
   },
   "skills": {
     "intro": "스킬은 SKILL.md가 있는 폴더로, 특정 작업을 위한 지침(때로는 스크립트)입니다. 형식은 Claude Code와 같습니다. 에이전트는 이름과 설명만 보고 작업에 필요할 때만 지침을 읽습니다. 스크립트는 일반 도구로 실행되므로 다른 명령처럼 먼저 묻습니다.",

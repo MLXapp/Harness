@@ -17,6 +17,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js'
+import { pickDirectSlugs, parseToolSchemas, slugForDirect, toDirectTools, type DirectSchema } from './composioDirect'
 import { COMPOSIO_CONNECT_URL, connectionLinks, isOfferedTool, mcpResultText, sanitizeArguments, type AppRule } from './composioPolicy'
 
 export const OAUTH_CALLBACK_PORT = 47391
@@ -33,6 +34,12 @@ export interface AppsStorage {
   writeRules(rules: Record<string, AppRule>): void
   chatEnabled(chatId: string): boolean
   setChatEnabled(chatId: string, on: boolean): void
+  /** Apps the user connected from Preferences → Apps (toolkit slugs). Optional for tests. */
+  readConnected?(): string[]
+  writeConnected?(apps: string[]): void
+  /** Cached direct-tool schemas, by slug. */
+  readSchemaCache?(): Record<string, DirectSchema>
+  writeSchemaCache?(cache: Record<string, DirectSchema>): void
 }
 
 export interface AppsDeps {
@@ -293,7 +300,9 @@ export class AppsService {
     await this.close()
     this.deps.storage.writeOAuth(null)
     this.deps.storage.writeKey(null)
+    this.deps.storage.writeConnected?.([])
     this.tools = null
+    this.direct = []
     return this.setAndReturn({ state: 'off', via: null })
   }
 
@@ -326,7 +335,41 @@ export class AppsService {
   /** Cached tools only (no network): for building a request quickly. */
   cachedTools(): AppTool[] { return this.tools ?? [] }
 
-  owns(name: string): boolean { return isOfferedTool(name) || name === 'COMPOSIO_REMOTE_WORKBENCH' || name === 'COMPOSIO_REMOTE_BASH_TOOL' }
+  owns(name: string): boolean {
+    return isOfferedTool(name) || name === 'COMPOSIO_REMOTE_WORKBENCH' || name === 'COMPOSIO_REMOTE_BASH_TOOL' || this.direct.some(t => t.function.name === name)
+  }
+
+  private direct: AppTool[] = []
+
+  /** Apps connected from Preferences → Apps. */
+  connectedApps(): string[] { return this.deps.storage.readConnected?.() ?? [] }
+
+  /**
+   * Direct tools for small local models: real actions of the connected apps
+   * (schemas fetched once, cached). Empty when no app is known to be
+   * connected, so the caller falls back to the meta tools.
+   */
+  async directTools(): Promise<AppTool[]> {
+    const slugs = pickDirectSlugs(this.connectedApps())
+    if (slugs.length === 0) return []
+    const cache = { ...(this.deps.storage.readSchemaCache?.() ?? {}) }
+    const missing = slugs.filter(s => !cache[s])
+    if (missing.length > 0 && (await this.ensure())) {
+      const r = await this.call('COMPOSIO_GET_TOOL_SCHEMAS', { tool_slugs: missing })
+      if (!r.isError) {
+        Object.assign(cache, parseToolSchemas(r.json))
+        this.deps.storage.writeSchemaCache?.(cache)
+      }
+    }
+    this.direct = toDirectTools(slugs, cache)
+    return this.direct
+  }
+
+  /** A direct tool call as the COMPOSIO_MULTI_EXECUTE_TOOL arguments it stands for. */
+  asExecute(name: string, args: Record<string, unknown>): Record<string, unknown> | null {
+    const slug = slugForDirect(name, this.direct)
+    return slug ? { tools: [{ tool_slug: slug, arguments: args }] } : null
+  }
 
   async call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<{ text: string; isError: boolean; json: unknown }> {
     const client = await this.ensure()
@@ -350,6 +393,9 @@ export class AppsService {
     if (isError) return { ok: false, opened: 0, message: text.slice(0, 300) }
     const links = connectionLinks(json)
     for (const l of links.slice(0, 1)) await this.deps.openExternal(l.url)
+    // Remember it for direct tools (small local models).
+    const known = new Set(this.connectedApps())
+    if (!known.has(toolkit)) this.deps.storage.writeConnected?.([...known, toolkit])
     return { ok: true, opened: Math.min(1, links.length), message: links.length ? undefined : 'Already connected.' }
   }
 }

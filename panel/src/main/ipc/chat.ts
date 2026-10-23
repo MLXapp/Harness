@@ -2325,7 +2325,12 @@ export function registerChatHandlers(
         restrictedToolNamesForCurrentTurn.length === 0 &&
         appsService().chatEnabled(chatId)
           ? await Promise.race([
-              appsService().listTools().catch(() => appsService().cachedTools()),
+              // Small local models get the connected apps' real actions
+              // (direct tools); cloud models the Composio meta tools.
+              (!isRemote && !providerRoute
+                ? appsService().directTools().then((d) => (d.length > 0 ? d : appsService().listTools()))
+                : appsService().listTools()
+              ).catch(() => appsService().cachedTools()),
               // Never hold a turn on the network: after 4 s use what is cached.
               new Promise<ReturnType<ReturnType<typeof appsService>["cachedTools"]>>((resolve) =>
                 setTimeout(() => resolve(appsService().cachedTools()), 4000),
@@ -5243,10 +5248,14 @@ export function registerChatHandlers(
                 // offered this tool: a name in a web page or a file must not
                 // reach the user's apps from another chat.
                 const offeredThisTurn = appToolsForTurn.some((t) => t.function.name === tc.function.name);
+                // A direct tool (gmail_send_email) is one COMPOSIO_MULTI_EXECUTE_TOOL call.
+                const directArgs = apps.asExecute(tc.function.name, toolArgs);
+                const appToolName = directArgs ? "COMPOSIO_MULTI_EXECUTE_TOOL" : tc.function.name;
+                const appArgs = directArgs ?? toolArgs;
                 const decision = offeredThisTurn
-                  ? decideAppCall(tc.function.name, toolArgs, apps.rules(), { plan: planMode, untrusted: appDataInTurn })
+                  ? decideAppCall(appToolName, appArgs, apps.rules(), { plan: planMode, untrusted: appDataInTurn })
                   : { action: "deny" as const, message: `Apps are off in this chat, so ${tc.function.name} was not run.` };
-                const appsHere = appsInCall(tc.function.name, toolArgs);
+                const appsHere = appsInCall(appToolName, appArgs);
                 const alwaysKey = alwaysAllowKey(`app:${decision.action === "ask" ? decision.apps.slice().sort().join(",") : ""}`, "");
                 let appRefusal: string | null = null;
                 if (decision.action === "deny") {
@@ -5284,7 +5293,7 @@ export function registerChatHandlers(
                   resultText = appRefusal;
                   emitToolStatus("error", tc.function.name, resultText, toolIteration, tc.id);
                 } else {
-                  const appResult = await apps.call(tc.function.name, toolArgs, abortController.signal);
+                  const appResult = await apps.call(appToolName, appArgs, abortController.signal);
                   appDataInTurn = true;
                   chatsWithAppData.add(chatId);
                   resultText = wrapUntrusted(appResult.text, appsHere.join(", ") || undefined);
