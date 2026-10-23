@@ -201,7 +201,7 @@ describe('media runner (cloud)', () => {
 
 describe('mlx-media protocol paths', () => {
   it('serves only <kind>/<plain file> inside the media folder', async () => {
-    const { resolveMediaPath } = await import('../src/main/media/protocol')
+    const { resolveMediaPath } = await import('../src/main/media/paths')
     expect(resolveMediaPath('/m', 'mlx-media://media/video/ab12-0.mp4')).toBe('/m/video/ab12-0.mp4')
     expect(resolveMediaPath('/m', 'mlx-media://media/video/..%2F..%2Fetc%2Fpasswd')).toBeNull()
     expect(resolveMediaPath('/m', 'mlx-media://media/secrets/a.mp4')).toBeNull()
