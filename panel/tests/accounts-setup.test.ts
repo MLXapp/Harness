@@ -208,7 +208,7 @@ describe('first-run setup', () => {
     expect(app).toContain("detail?.mode === 'onboarding'")
     expect(app).toContain('window.addEventListener(ONBOARDING_EVENT, open)')
     expect(app).toContain('<AccountSheetsHost />')
-    expect(app).toContain('<AccountsPreference />')
+    expect(readFileSync('src/renderer/src/components/preferences/PreferencesSheet.tsx', 'utf8')).toContain('<AccountsPreference />')
     expect(readFileSync('src/renderer/src/components/accounts/events.ts', 'utf8')).toContain("CONNECT_ACCOUNT_EVENT = 'vmlx:connect-account'")
   })
 })

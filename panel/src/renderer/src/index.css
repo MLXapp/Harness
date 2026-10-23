@@ -413,3 +413,209 @@ button, input, select, textarea, a {
 @media (prefers-reduced-motion: reduce) {
   .mlx-disclose { transition-duration: 1ms; }
 }
+
+/* ============================================================================
+   Window shell (glass sidebar, opaque content pane, 52px top strip)
+   Layout and materials follow DeepSeek Harness (MIT); the accents are MLX's.
+   ============================================================================ */
+
+/* macOS paints the sidebar with NSVisualEffectView ('sidebar' vibrancy); the
+   page stays transparent behind it. Other platforms keep an opaque window. */
+html.vibrancy, html.vibrancy body { background: transparent; }
+.mlx-window { background: rgb(var(--sidebar-bg-rgb)); }
+html.vibrancy .mlx-window { background: transparent; }
+
+.mlx-sidebar {
+  position: relative;
+  background: var(--sidebar-wash), rgb(var(--sidebar-bg-rgb));
+}
+html.vibrancy .mlx-sidebar { background: var(--sidebar-wash), var(--sidebar-glass); }
+/* Reduce Transparency flattens the vibrancy layer: use a near-opaque fill. */
+@media (prefers-reduced-transparency: reduce) {
+  html.vibrancy .mlx-sidebar { background: var(--sidebar-wash), rgb(var(--sidebar-bg-rgb) / 0.9); }
+}
+
+/* The content pane: opaque, a hairline from the glass. */
+.mlx-pane {
+  background: rgb(var(--bg-rgb));
+  box-shadow: -0.5px 0 0 var(--hair);
+  position: relative;
+}
+
+.mlx-hair-t { box-shadow: inset 0 0.5px 0 var(--hair); }
+.mlx-hair-b { box-shadow: inset 0 -0.5px 0 var(--hair); }
+
+/* Top strip */
+.mlx-chrome {
+  height: var(--titlebar-h);
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  user-select: none;
+}
+.mlx-chrome-start { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mlx-chrome-lights { flex-shrink: 0; height: 1px; transition: width var(--dur-lg) var(--ease); }
+.mlx-chrome-title {
+  font-size: 14px; font-weight: 600; letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 4px;
+}
+.mlx-chrome-end { display: flex; justify-content: flex-end; align-items: center; gap: 4px; min-width: 0; }
+
+/* Icon buttons in chrome: 30px, quiet until hovered. */
+.mlx-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  color: rgb(var(--muted-foreground));
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease),
+              opacity var(--dur-lg) var(--ease), margin var(--dur-lg) var(--ease);
+}
+.mlx-icon-btn:hover { background: var(--chrome-hover); color: rgb(var(--foreground)); }
+
+/* Segmented control (the workspace tabs). */
+.mlx-seg {
+  position: relative;
+  display: flex; align-items: center; gap: 2px;
+  padding: 3px; border-radius: 11px;
+  background: var(--seg-track);
+}
+.mlx-seg-thumb {
+  position: absolute; top: 3px; bottom: 3px; left: 0;
+  border-radius: 8px;
+  background: var(--seg-thumb);
+  box-shadow: var(--elev-1);
+  transition: transform var(--dur-lg) var(--ease), width var(--dur-lg) var(--ease), opacity var(--dur) var(--ease);
+}
+.mlx-seg-item {
+  position: relative; z-index: 1;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 13px; border-radius: 8px;
+  font-size: 13px; font-weight: 500; white-space: nowrap;
+  color: rgb(var(--muted-foreground));
+}
+.mlx-seg-item:hover { color: rgb(var(--foreground)); }
+.mlx-seg-item.is-on { color: rgb(var(--foreground)); }
+.mlx-seg-icon { width: 15px; height: 15px; transition: color var(--dur) var(--ease); }
+.mlx-seg-item.is-on .mlx-seg-icon { color: rgb(var(--primary)); }
+/* The strip narrows with the pane (sidebar open or not), so it decides by
+   its own width: first the page controls drop their labels, then the tabs. */
+.mlx-chrome { container-type: inline-size; container-name: chrome; }
+@container chrome (max-width: 1180px) { .mlx-tb-label { display: none; } }
+@container chrome (max-width: 900px) {
+  .mlx-seg-label { display: none; }
+  .mlx-seg-item { padding: 0 11px; }
+}
+.mlx-toolbar { justify-content: flex-end; }
+
+/* The sidebar's New button: a raised glass row. */
+.mlx-new-btn {
+  width: 100%; height: 36px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  border-radius: 11px;
+  font-size: 13.5px; font-weight: 500;
+  background: rgb(var(--bg-2-rgb) / 0.72);
+  box-shadow: var(--elev-1);
+}
+.mlx-new-btn:hover { background: rgb(var(--bg-2-rgb) / 0.95); }
+.mlx-new-btn:active { transform: scale(0.985); }
+
+/* Grouped settings card (System Settings-like). */
+.mlx-group {
+  border-radius: var(--r-lg);
+  background: rgb(var(--bg-2-rgb));
+  box-shadow: var(--elev-1);
+}
+
+/* macOS pop-up button and glass menu. */
+.mlx-popup-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 10px 0 12px; border-radius: 8px;
+  font-size: 13px; background: rgb(var(--bg-3-rgb) / 0.7);
+  box-shadow: var(--elev-1);
+}
+.mlx-popup-btn:hover { background: rgb(var(--bg-3-rgb)); }
+.mlx-menu {
+  padding: 5px; border-radius: 12px;
+  background: var(--menu-bg);
+  -webkit-backdrop-filter: var(--menu-blur); backdrop-filter: var(--menu-blur);
+  box-shadow: var(--elev-3);
+}
+.mlx-menu-item {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  height: 32px; padding: 0 10px; border-radius: 7px;
+  font-size: 13.5px; text-align: left;
+}
+.mlx-menu-item:hover { background: rgb(var(--primary) / 0.12); }
+@keyframes mlx-menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+.mlx-menu-in { animation: mlx-menu-in 180ms var(--ease) both; transform-origin: top right; }
+
+@keyframes mlx-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.mlx-fade-in { animation: mlx-fade-in var(--dur) var(--ease) both; }
+
+/* Sheets (Preferences): dimmed window, a raised panel that rises in. */
+.mlx-sheet-root { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; place-items: center; padding: 32px; }
+.mlx-sheet-scrim {
+  position: absolute; inset: 0; background: var(--scrim);
+  opacity: 0; transition: opacity 220ms var(--ease);
+}
+.mlx-sheet {
+  position: relative; outline: none;
+  border-radius: var(--r-xl);
+  background: rgb(var(--bg-rgb));
+  box-shadow: var(--elev-3);
+  opacity: 0; transform: translateY(10px) scale(0.98);
+  transition: opacity 220ms var(--ease), transform 320ms var(--ease);
+}
+.mlx-sheet-root.is-shown .mlx-sheet-scrim { opacity: 1; }
+.mlx-sheet-root.is-shown .mlx-sheet { opacity: 1; transform: none; }
+
+.mlx-prefs {
+  width: min(880px, 100%); height: min(660px, 100%);
+  display: grid; grid-template-columns: 208px minmax(0, 1fr);
+  overflow: hidden;
+}
+.mlx-prefs-nav {
+  padding: 18px 10px; overflow: auto;
+  background: var(--sidebar-wash), rgb(var(--sidebar-bg-rgb));
+  box-shadow: inset -0.5px 0 0 var(--hair);
+}
+.mlx-prefs-main { display: flex; flex-direction: column; min-height: 0; }
+.mlx-prefs-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  height: 60px; padding: 0 16px 0 28px; flex-shrink: 0;
+}
+.mlx-prefs-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 28px 28px; }
+/* Older preference cards inside the sheet take the grouped-card look. */
+.mlx-prefs-body section.border.border-border.rounded-lg,
+.mlx-prefs-body div.border.border-border.rounded-lg {
+  border-color: transparent; border-radius: var(--r-lg);
+  background: rgb(var(--bg-2-rgb)); box-shadow: var(--elev-1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mlx-sheet, .mlx-sheet-scrim, .mlx-seg-thumb { transition-duration: 1ms; }
+}
+
+/* Chat: a pale MLX-orange bubble for your messages (no avatars), and the R26
+   composer: well colour, hairline, soft lift; focus warms the hairline. */
+.mlx-user-bubble {
+  background: rgb(var(--acc-wash-rgb));
+  color: rgb(var(--foreground));
+  border-radius: 20px 20px 6px 20px;
+  padding: 10px 16px;
+  font-size: 15px;
+  line-height: 1.5;
+  box-shadow: inset 0 0 0 0.5px rgb(var(--acc-rgb) / 0.18);
+}
+.dark .mlx-user-bubble { background: rgb(var(--bg-3-rgb)); box-shadow: inset 0 0 0 0.5px var(--hair); }
+@media (prefers-color-scheme: dark) { :root:not(.light) .mlx-user-bubble { background: rgb(var(--bg-3-rgb)); box-shadow: inset 0 0 0 0.5px var(--hair); } }
+.mlx-composer {
+  border-radius: 26px;
+  background: rgb(var(--well-rgb));
+  box-shadow: var(--elev-2);
+  transition: box-shadow var(--dur) var(--ease);
+}
+.mlx-composer:focus-within {
+  box-shadow: 0 0 0 0.5px rgb(var(--acc-rgb) / 0.55), 0 0 0 4px rgb(var(--acc-rgb) / 0.10), 0 8px 24px -12px rgba(20, 24, 33, 0.18);
+}

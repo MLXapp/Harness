@@ -20,3 +20,18 @@
 @font-face { font-family: 'SF Pro Display'; font-weight: 650 1000; src: local('Inter Display Bold'), local('InterDisplay-Bold'), local('Inter Bold'); }
 
 @font-face { font-family: 'SF Mono'; src: local('SF Mono'), local('Menlo'), local('DejaVu Sans Mono'), local('DejaVuSansMono'); }
+
+/* Preview-only stand-in for macOS window glass: a desktop wallpaper behind
+   the transparent window and a blur on the sidebar (NSVisualEffectView does
+   this natively in the app). ?glass=0 shows the opaque fallback. */
+html.vibrancy {
+  background:
+    radial-gradient(60% 80% at 15% 20%, #ff9f0a 0%, transparent 60%),
+    radial-gradient(50% 70% at 30% 85%, #7a5cff 0%, transparent 60%),
+    radial-gradient(70% 90% at 0% 60%, #2f7bff 0%, transparent 70%),
+    #1d2a4a;
+  min-height: 100vh;
+}
+html.vibrancy .mlx-sidebar { -webkit-backdrop-filter: blur(60px) saturate(180%); backdrop-filter: blur(60px) saturate(180%); }
+html.vibrancy.light .mlx-sidebar, html.vibrancy:not(.dark) .mlx-sidebar { background: var(--sidebar-wash), rgba(246, 246, 248, 0.78); }
+html.vibrancy.dark .mlx-sidebar { background: var(--sidebar-wash), rgba(30, 30, 33, 0.72); }

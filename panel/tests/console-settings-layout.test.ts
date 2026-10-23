@@ -18,10 +18,12 @@ describe('Console settings and responsive layout contract', () => {
     expect(read('renderer/src/components/layout/ChatModeToolbar.tsx')).not.toContain("mode: 'server', panel: 'create'")
   })
   it('puts global preferences on the existing gateway and language owners', () => {
-    const app = read('renderer/src/App.tsx')
+    // Preferences is a sheet; the language lives only there (no title bar picker).
+    const app = read('renderer/src/components/preferences/PreferencesSheet.tsx')
     expect(app).toContain('data-vmlx-surface="general-preferences"')
     expect(app).toContain('<SingleModelPreference />')
     expect(app).toContain('data-vmlx-control={`preferences-locale-${l}`}')
+    expect(read('renderer/src/components/layout/AppHeader.tsx')).not.toContain('LOCALE')
     const preference = read('renderer/src/components/layout/SingleModelPreference.tsx')
     expect(preference).toContain('window.api.gateway.getStatus()')
     expect(preference).toContain('window.api.gateway.setSingleModelMode(!enabled)')
@@ -32,7 +34,8 @@ describe('Console settings and responsive layout contract', () => {
     expect(preference).not.toContain('window.api.settings.set')
   })
   it('uses dark on-accent Markdown without recoloring assistant prose or code surfaces', () => {
-    expect(read('renderer/src/components/chat/MessageBubble.tsx')).toContain('prose-on-accent bg-primary text-primary-foreground')
+    // Your own messages are a pale MLX-orange bubble with normal prose colours.
+    expect(read('renderer/src/components/chat/MessageBubble.tsx')).toContain('<div className="mlx-user-bubble">')
     const css = read('renderer/src/index.css')
     const rule = css.split('.dark .prose-on-accent .prose {')[1].split('}')[0]
     for (const token of ['body', 'headings', 'links', 'bold', 'counters', 'bullets', 'quotes', 'code']) {
@@ -61,7 +64,7 @@ describe('Console settings and responsive layout contract', () => {
     expect(provider).toContain("root.classList.toggle('dark', resolved === 'dark')")
     expect(provider).toContain("root.classList.toggle('light', resolved === 'light')")
     expect(provider).toContain("useState<ThemePreference>(readPreference)")
-    expect(read('renderer/src/components/layout/TitleBar.tsx')).not.toContain('ThemeToggle')
+    expect(read('renderer/src/components/layout/AppHeader.tsx')).not.toContain('ThemeToggle')
     expect(existsSync(resolve(__dirname, '../src/renderer/src/components/ui/theme-toggle.tsx'))).toBe(false)
     const html = read('renderer/index.html')
     expect(html).toContain('name="color-scheme" content="light dark"')

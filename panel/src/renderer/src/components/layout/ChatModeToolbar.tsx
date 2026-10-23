@@ -11,6 +11,7 @@ import {
 import { useTranslation } from '../../i18n'
 import { useToast } from '../Toast'
 import { useProviders } from '../settings/useProviders'
+import { ChromeEnd } from './ChromeSlot'
 import { findBoundModel } from '../../../../shared/providers/pickerGroups'
 import type { ChatModelBinding } from '../../../../shared/providers/types'
 
@@ -177,7 +178,8 @@ export function ChatModeToolbar({ activeChatId, activeSessionId, onOverridesChan
 
   return (
     <>
-      <div className="flex h-11 flex-shrink-0 items-center gap-1 border-b border-border/70 px-3" data-vmlx-section="chat-toolbar">
+      <ChromeEnd>
+      <div className="mlx-toolbar flex min-w-0 flex-shrink items-center gap-1 no-drag" data-vmlx-section="chat-toolbar">
         {/* The MLX session's Start / Stop (provider models have nothing to start). */}
         {displaySession && !providerBinding && (
           <div className="flex min-w-0 items-center gap-1 mlx-view-in">
@@ -196,7 +198,7 @@ export function ChatModeToolbar({ activeChatId, activeSessionId, onOverridesChan
                 title={isRemote ? t('common.reconnect') : t('sessions.toolbar.restartModel')}
               >
                 <RotateCw className="h-4 w-4" />
-                {isRemote ? t('common.reconnect') : t('sessions.toolbar.restart')}
+                <span className="mlx-tb-label">{isRemote ? t('common.reconnect') : t('sessions.toolbar.restart')}</span>
               </button>
             )}
             {isStopped && !isError && (
@@ -206,7 +208,7 @@ export function ChatModeToolbar({ activeChatId, activeSessionId, onOverridesChan
                 title={isRemote ? t('common.connect') : t('sessions.toolbar.startModel')}
               >
                 <Play className="h-4 w-4 text-success" />
-                {isRemote ? t('common.connect') : t('common.start')}
+                <span className="mlx-tb-label">{isRemote ? t('common.connect') : t('common.start')}</span>
               </button>
             )}
             {isLoading && (
@@ -232,13 +234,12 @@ export function ChatModeToolbar({ activeChatId, activeSessionId, onOverridesChan
                 title={isRemote ? t('common.disconnect') : t('sessions.toolbar.stopModel')}
               >
                 <Square className="h-3.5 w-3.5" />
-                {isRemote ? t('common.disconnect') : t('common.stop')}
+                <span className="mlx-tb-label">{isRemote ? t('common.disconnect') : t('common.stop')}</span>
               </button>
             )}
           </div>
         )}
 
-        <div className="min-w-0 flex-1" />
 
         {/* Settings drawers */}
         <div className="flex flex-shrink-0 items-center gap-1">
@@ -270,7 +271,7 @@ export function ChatModeToolbar({ activeChatId, activeSessionId, onOverridesChan
             title={t('sessions.view.chatSettingsTitle')}
           >
             <Settings className="h-4 w-4" />
-            {t('sessions.view.chatLabel')}
+            <span className="mlx-tb-label">{t('sessions.view.chatLabel')}</span>
           </button>
           {!providerBinding && displaySession && <button
             data-vmlx-control="server-settings"
@@ -282,10 +283,11 @@ export function ChatModeToolbar({ activeChatId, activeSessionId, onOverridesChan
             title={isRemote ? t('sessions.view.connectionTitle') : t('sessions.view.serverSettingsTitle')}
           >
             <Server className="h-4 w-4" />
-            {isRemote ? t('sessions.view.connection') : t('sessions.view.server')}
+            <span className="mlx-tb-label">{isRemote ? t('sessions.view.connection') : t('sessions.view.server')}</span>
           </button>}
         </div>
       </div>
+      </ChromeEnd>
 
       {/* Settings drawers */}
       {showChatSettings && activeChatId && chatSettingsSession && (

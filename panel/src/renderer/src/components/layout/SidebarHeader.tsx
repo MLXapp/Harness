@@ -24,9 +24,9 @@ export function SidebarHeader({ onNewChat, onSearch }: SidebarHeaderProps) {
   }
 
   return (
-    <div className="flex flex-col gap-2 px-3 pt-3 pb-2 border-b border-sidebar-border">
+    <div className="flex flex-col gap-2 pl-[22px] pr-3 pt-3 pb-1">
       <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold text-foreground tracking-wide flex-1">{t('layout.sidebarHeader.chats')}</span>
+        <span className="text-[12px] font-semibold text-muted-foreground flex-1">{t('layout.sidebarHeader.chats')}</span>
         <button
           onClick={() => setSearchOpen(!searchOpen)}
           className="p-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent transition-colors"
@@ -53,7 +53,7 @@ export function SidebarHeader({ onNewChat, onSearch }: SidebarHeaderProps) {
             onChange={e => handleSearchChange(e.target.value)}
             onKeyDown={e => e.key === 'Escape' && closeSearch()}
             placeholder={t('layout.sidebarHeader.searchPlaceholder')}
-            className="w-full pl-7 pr-7 py-1.5 bg-background border border-input rounded text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            className="w-full pl-7 pr-7 h-8 bg-[rgb(var(--well-rgb)/0.7)] shadow-[var(--elev-1)] rounded-[9px] text-[13px] focus:outline-none focus:ring-2 focus:ring-ring/30"
           />
           {query && (
             <button

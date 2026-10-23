@@ -449,6 +449,9 @@ declare global {
         readText: () => Promise<string>;
       };
       /** Apple Dictation (macOS): `start` opens the system Dictation UI at the focused field. */
+      chrome?: {
+        vibrancy: () => boolean;
+      };
       dictation?: {
         supported: () => boolean;
         start: () => Promise<{ ok: boolean; reason?: 'unsupported' }>;

@@ -22,7 +22,7 @@ describe('Console app icon assets', () => {
     expect(generator).toContain('src/renderer/public')
     const sidebar = readFileSync(resolve(root, 'src/renderer/src/components/layout/ConsoleSidebar.tsx'), 'utf8')
     // The sidebar draws the MLX emblem as vector art (brand gradient, follows the theme).
-    expect(sidebar).toContain('<Emblem size={28}')
+    expect(sidebar).toContain('<Emblem size={24}')
     expect(readFileSync(resolve(root, 'src/renderer/index.html'), 'utf8')).not.toContain('favicon.svg')
   })
 })

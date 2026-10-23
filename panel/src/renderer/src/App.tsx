@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { MessageSquare, ArrowLeft, Terminal } from 'lucide-react'
-import { TitleBar } from './components/layout/TitleBar'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { MessageSquare, Terminal } from 'lucide-react'
+import { AppHeader } from './components/layout/AppHeader'
+import { PreferencesSheet } from './components/preferences/PreferencesSheet'
 import { ConsoleSubnavigation } from './components/layout/ConsoleSubnavigation'
 import { DownloadTab } from './components/sessions/DownloadTab'
 import { ConsoleSidebar } from './components/layout/ConsoleSidebar'
-import { SingleModelPreference } from './components/layout/SingleModelPreference'
 import { SessionDashboard } from './components/sessions/SessionDashboard'
 import { CreateSession } from './components/sessions/CreateSession'
 import { SessionView } from './components/sessions/SessionView'
@@ -20,7 +20,6 @@ import { MetalMemoryNotice } from './components/MetalMemoryNotice'
 import { useAppState } from './contexts/AppStateContext'
 import { useSessionsContext } from './contexts/SessionsContext'
 import { ChatModeToolbar } from './components/layout/ChatModeToolbar'
-import { AccountsPreference } from './components/accounts/AccountsPreference'
 import { AccountSheetsHost } from './components/accounts/AccountSheetsHost'
 import { ONBOARDING_EVENT } from './components/accounts/events'
 import { Onboarding } from './components/setup/Onboarding'
@@ -35,11 +34,9 @@ import { ModelConverter } from './components/tools/ModelConverter'
 import { ApiDashboard } from './components/api/ApiDashboard'
 import { ImageTab } from './components/image/ImageTab'
 import { NetworkView } from './components/network/NetworkView'
-import { MlxNodePreference } from './components/network/MlxNodePreference'
 import { isImageSession, sessionMatchesModelPath } from '../../shared/sessionUtils'
 import { resolveDownloadModelType, type DownloadModelType } from '../../shared/modelDiscoveryNavigation'
-import { useTranslation, LOCALES, LOCALE_NAMES, LOCALE_FLAGS } from './i18n'
-import { useTheme, type ThemePreference } from './providers/ThemeProvider'
+import { useTranslation } from './i18n'
 
 function App() {
   const { t } = useTranslation()
@@ -102,6 +99,10 @@ function App() {
       const detail = (e as CustomEvent).detail
       if (detail?.mode === 'onboarding') {
         setOnboardingOpen(true)
+        return
+      }
+      if (detail?.mode === 'preferences' || detail?.panel === 'about') {
+        dispatch({ type: 'OPEN_PREFERENCES', section: detail?.section })
         return
       }
       if (detail?.mode === 'models') {
@@ -302,9 +303,11 @@ function App() {
         setChatCreationError(String(error))
         setCreatingChatSession(true)
       })
-    } else if (action === 'preferences' || action === 'servers') {
+    } else if (action === 'preferences') {
+      dispatch({ type: 'OPEN_PREFERENCES' })
+    } else if (action === 'servers') {
       setMode('server')
-      dispatch({ type: 'SET_SERVER_PANEL', panel: action === 'preferences' ? 'about' : 'dashboard' })
+      dispatch({ type: 'SET_SERVER_PANEL', panel: 'dashboard' })
     } else {
       setMode(action)
     }
@@ -374,18 +377,16 @@ function App() {
 
   return (
     <ToastProvider>
-      <div className="flex flex-col h-screen bg-background text-foreground">
-        <TitleBar />
-        <UpdateBanner />
-        <MtpComponentUpdatePrompt />
-        <MetalMemoryNotice />
-        <DownloadStatusBar />
+      <div className="mlx-window flex h-screen text-foreground">
+        <ConsoleSidebar onChatSelect={handleChatSelect} onNewChat={handleNewChat} />
 
-        <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-          <ConsoleSidebar onChatSelect={handleChatSelect} onNewChat={handleNewChat} />
-
-          {/* Main content area */}
-          <main className="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
+        {/* The content pane: opaque, beside the sidebar's window glass. */}
+        <main className="mlx-pane flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
+            <AppHeader />
+            <UpdateBanner />
+            <MtpComponentUpdatePrompt />
+            <MetalMemoryNotice />
+            <DownloadStatusBar />
             <ConsoleSubnavigation />
             {/* Keyed by view so every page change fades in instead of cutting. */}
             <div key={`${state.mode}:${state.mode === 'server' ? state.serverPanel : state.mode === 'tools' ? state.toolsPanel : ''}`}
@@ -453,8 +454,8 @@ function App() {
               <ApiDashboard />
             )}
             </div>
-          </main>
-        </div>
+        </main>
+        <PreferencesSheet />
         <AccountSheetsHost />
         <Onboarding open={onboardingOpen} onFinish={finishOnboarding} onStart={(choice) => void startFromOnboarding(choice)} />
       </div>
@@ -593,7 +594,6 @@ function ChatEmptyState({ onNewChat }: { onNewChat: () => void }) {
 function ServerModeContent() {
   const { state, dispatch } = useAppState()
   const { serverPanel, serverSessionId, serverInitialModelPath } = state
-  const { t, locale, setLocale } = useTranslation()
 
   return (
     <>
@@ -627,63 +627,6 @@ function ServerModeContent() {
         />
       )}
 
-      {serverPanel === 'about' && (
-        <div data-vmlx-surface="general-preferences" className="p-4 sm:p-8 overflow-auto h-full min-h-0 min-w-0">
-          <div className="max-w-3xl mx-auto space-y-6">
-            <button
-              onClick={() => dispatch({ type: 'SET_SERVER_PANEL', panel: 'dashboard' })}
-              className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-            >
-              <ArrowLeft className="h-3 w-3" />
-              {t('common.back')}
-            </button>
-            <h2 className="text-2xl font-bold">{t('console.preferences')}</h2>
-            <AppearancePreference />
-            <SingleModelPreference />
-            <AccountsPreference />
-            <MlxNodePreference />
-            <div className="border border-border rounded-lg p-5">
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">{t('app.about.language')}</h3>
-              <div className="flex flex-wrap gap-2">
-                {LOCALES.map((l) => (
-                  <button
-                    key={l}
-                    data-vmlx-control={`preferences-locale-${l}`}
-                    aria-pressed={locale === l}
-                    onClick={() => setLocale(l)}
-                    className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
-                      locale === l
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'border-border hover:bg-accent'
-                    }`}
-                  >
-                    {LOCALE_FLAGS[l]} {LOCALE_NAMES[l]}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <ApiKeysSection />
-            <section className="border-t border-border pt-5 space-y-3">
-              <h3 className="text-sm font-semibold">{t('app.about.title')}</h3>
-              <p className="text-sm text-muted-foreground">{t('app.about.desc')}</p>
-              <p className="text-xs text-muted-foreground/70">{t('app.about.creator')}</p>
-              <AppVersion />
-              <div className="flex flex-wrap gap-4 text-xs">
-                <a href="https://harness.mlx.app" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">harness.mlx.app</a>
-                <a href="https://github.com/MLXapp/harness" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">GitHub</a>
-                <a href="https://github.com/jjang-ai/vmlx" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">vMLX</a>
-                <a href="https://github.com/MLXapp/harness/blob/main/NOTICE" target="_blank" rel="noopener noreferrer" className="text-[color:var(--link)] hover:underline">{t('app.about.license')}</a>
-              </div>
-              {/* Required in-product attribution (MTPLX NOTICE, Apache-2.0 §4(d)). */}
-              <p className="text-xs text-muted-foreground">
-                <a data-vmlx-control="about-mtplx" href="https://github.com/youssofal/mtplx" target="_blank" rel="noopener noreferrer" className="hover:underline">
-                  {`${t('app.about.poweredByMtplx')} · github.com/youssofal/mtplx`}
-                </a>
-              </p>
-            </section>
-          </div>
-        </div>
-      )}
     </>
   )
 }
@@ -746,185 +689,6 @@ function ToolsModeContent() {
         />
       )}
     </>
-  )
-}
-
-// ─── Shared Components ──────────────────────────────────────────────────────
-
-/** System / Light / Dark. A segmented control whose selection slides. */
-function AppearancePreference() {
-  const { t } = useTranslation()
-  const { preference, setPreference } = useTheme()
-  const options: Array<[ThemePreference, string]> = [
-    ['system', t('app.about.themeSystem')],
-    ['light', t('app.about.themeLight')],
-    ['dark', t('app.about.themeDark')],
-  ]
-  const index = Math.max(0, options.findIndex(([value]) => value === preference))
-  return (
-    <div className="border border-border rounded-lg p-5" data-vmlx-surface="appearance-preference">
-      <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">{t('app.about.appearance')}</h3>
-      <div role="radiogroup" aria-label={t('app.about.appearance')}
-        className="relative grid grid-cols-3 w-full max-w-sm rounded-[10px] bg-foreground/[0.05] p-[3px]">
-        <div aria-hidden
-          className="absolute top-[3px] bottom-[3px] left-[3px] rounded-[8px] bg-card ring-1 ring-border/50 shadow-[0_1px_2px_var(--lg-depth),0_4px_12px_-6px_var(--shadow)] transition-transform duration-300 ease-mlx"
-          style={{ width: 'calc((100% - 6px) / 3)', transform: `translateX(${index * 100}%)` }} />
-        {options.map(([value, label]) => (
-          <button key={value} role="radio" aria-checked={preference === value}
-            data-vmlx-control={`preferences-theme-${value}`}
-            onClick={() => setPreference(value)}
-            className={`relative h-8 text-sm font-medium rounded-[8px] transition-colors ${preference === value ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-            {label}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function AppVersion() {
-  const { t } = useTranslation()
-  const [version, setVersion] = useState('...')
-  useEffect(() => {
-    window.api.app.getVersion().then((v: string) => setVersion(v)).catch(() => setVersion('unknown'))
-  }, [])
-  return (
-    <div className="text-xs text-muted-foreground space-y-1">
-      <p>{t('app.about.version', { version })}</p>
-      <p>{t('app.about.copyright', { year: new Date().getFullYear() })}</p>
-    </div>
-  )
-}
-
-function ApiKeysSection() {
-  const { t } = useTranslation()
-  const [braveKey, setBraveKey] = useState('')
-  const [hfToken, setHfToken] = useState('')
-  const [saved, setSaved] = useState(false)
-  const [hfSaved, setHfSaved] = useState(false)
-  const [hasSavedBraveKey, setHasSavedBraveKey] = useState(false)
-  const [hasSavedHfToken, setHasSavedHfToken] = useState(false)
-  const [showKey, setShowKey] = useState(false)
-  const [showHfKey, setShowHfKey] = useState(false)
-  const mountedRef = useRef(true)
-
-  useEffect(() => {
-    mountedRef.current = true
-    window.api.settings.has('braveApiKey').then((exists) => {
-      if (mountedRef.current) setHasSavedBraveKey(exists)
-    })
-    window.api.settings.has('hf_api_key').then((exists) => {
-      if (mountedRef.current) setHasSavedHfToken(exists)
-    })
-    return () => { mountedRef.current = false }
-  }, [])
-
-  const handleSave = async () => {
-    const trimmed = braveKey.trim()
-    if (trimmed) {
-      await window.api.settings.set('braveApiKey', trimmed)
-    } else {
-      await window.api.settings.delete('braveApiKey')
-    }
-    setHasSavedBraveKey(!!trimmed)
-    setSaved(true)
-    setTimeout(() => { if (mountedRef.current) setSaved(false) }, 2000)
-  }
-
-  const handleHfSave = async () => {
-    const trimmed = hfToken.trim()
-    if (trimmed) {
-      await window.api.settings.set('hf_api_key', trimmed)
-    } else {
-      await window.api.settings.delete('hf_api_key')
-    }
-    setHasSavedHfToken(!!trimmed)
-    setHfSaved(true)
-    setTimeout(() => { if (mountedRef.current) setHfSaved(false) }, 2000)
-  }
-
-  return (
-    <div className="border border-border rounded-lg p-5">
-      <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">{t('app.about.apiKeysTitle')}</h3>
-      <div className="space-y-3">
-        <div>
-          <label className="text-sm font-medium">{t('app.about.braveKey')}</label>
-          <p className="text-xs text-muted-foreground mt-0.5 mb-2">
-            {t('app.about.braveRequired')}{' '}
-            <a
-              href="https://brave.com/search/api/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary hover:underline"
-            >
-              {t('app.about.getFreeKey')}
-            </a>
-          </p>
-          <div className="flex gap-2">
-            <div className="flex-1 relative">
-              <input
-                type={showKey ? 'text' : 'password'}
-                value={braveKey}
-                onChange={e => { setBraveKey(e.target.value); setSaved(false) }}
-                placeholder={hasSavedBraveKey ? t('app.about.savedKeyPlaceholder') : 'BSA...'}
-                className="w-full px-3 py-2 bg-background border border-input rounded text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring pr-10"
-              />
-              <button
-                onClick={() => setShowKey(!showKey)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
-                title={showKey ? t('app.about.hide') : t('app.about.show')}
-              >
-                {showKey ? t('app.about.hide') : t('app.about.show')}
-              </button>
-            </div>
-            <button
-              onClick={handleSave}
-              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90"
-            >
-              {saved ? t('app.about.saved') : t('common.save')}
-            </button>
-          </div>
-        </div>
-        <div className="mt-4 pt-4 border-t border-border">
-          <label className="text-sm font-medium">{t('app.about.hfToken')}</label>
-          <p className="text-xs text-muted-foreground mt-0.5 mb-2">
-            {t('app.about.hfRequired')}{' '}
-            <a
-              href="https://huggingface.co/settings/tokens"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary hover:underline"
-            >
-              {t('app.about.getToken')}
-            </a>
-          </p>
-          <div className="flex gap-2">
-            <div className="flex-1 relative">
-              <input
-                type={showHfKey ? 'text' : 'password'}
-                value={hfToken}
-                onChange={e => { setHfToken(e.target.value); setHfSaved(false) }}
-                placeholder={hasSavedHfToken ? t('app.about.savedTokenPlaceholder') : 'hf_...'}
-                className="w-full px-3 py-2 bg-background border border-input rounded text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring pr-10"
-              />
-              <button
-                onClick={() => setShowHfKey(!showHfKey)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
-                title={showHfKey ? t('app.about.hide') : t('app.about.show')}
-              >
-                {showHfKey ? t('app.about.hide') : t('app.about.show')}
-              </button>
-            </div>
-            <button
-              onClick={handleHfSave}
-              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90"
-            >
-              {hfSaved ? t('app.about.saved') : t('common.save')}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
   )
 }
 

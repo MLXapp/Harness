@@ -1,20 +1,25 @@
-import type { AppMode } from '../types/app-state'
+import type { AppMode, WorkspaceTab } from '../types/app-state'
 
 export type ConsolePage = 'chat' | 'server' | 'models' | 'network'
 
-// Keep persisted modes and existing navigation events compatible. The new
-// primary pages group the existing controllers instead of rewriting history.
+/** The top bar's workspaces, in order. */
+export const WORKSPACE_TABS: readonly WorkspaceTab[] = ['chat', 'image', 'video', 'audio', 'music', 'code']
+
+export function isWorkspaceTab(mode: AppMode | string | null | undefined): mode is WorkspaceTab {
+  return (WORKSPACE_TABS as readonly string[]).includes(mode ?? '')
+}
+
+// Keep persisted modes and existing navigation events compatible. The six
+// workspaces share the 'chat' page; the sidebar's pages are the rest.
 export function consolePageForMode(mode: AppMode): ConsolePage {
-  if (mode === 'image' || mode === 'chat' || mode === 'code') return 'chat'
+  if (isWorkspaceTab(mode)) return 'chat'
   if (mode === 'tools' || mode === 'models') return 'models'
   if (mode === 'network') return 'network'
   return 'server'
 }
 
 export function restoreAppMode(value: string | null | undefined): AppMode {
-  // The removed Code page was a placeholder, not a conversation store.
-  if (value === 'code') return 'chat'
-  return ['chat', 'image', 'server', 'api', 'tools', 'models', 'network'].includes(value ?? '')
+  return ['chat', 'image', 'video', 'audio', 'music', 'code', 'server', 'api', 'tools', 'models', 'network'].includes(value ?? '')
     ? value as AppMode
     : 'chat'
 }

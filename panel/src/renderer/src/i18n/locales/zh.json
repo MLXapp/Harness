@@ -2937,5 +2937,31 @@
       "tip": "随时可通过消息框下方的模型按钮切换模型。",
       "startsWith": "你的第一个对话将使用 {model}。"
     }
+  },
+  "shell": {
+    "tabs": {
+      "label": "工作区",
+      "chat": "聊天",
+      "image": "图像",
+      "video": "视频",
+      "audio": "音频",
+      "music": "音乐",
+      "code": "代码"
+    },
+    "new": {
+      "chat": "新聊天",
+      "image": "新图像",
+      "video": "新视频",
+      "audio": "新音频",
+      "music": "新歌曲",
+      "code": "新代码会话"
+    },
+    "prefs": {
+      "general": "通用",
+      "accounts": "账户",
+      "node": "MLX Node",
+      "keys": "API 密钥",
+      "about": "关于"
+    }
   }
 }

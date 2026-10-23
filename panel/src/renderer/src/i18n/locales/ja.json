@@ -2937,5 +2937,31 @@
       "tip": "メッセージ欄の下のモデルボタンから、いつでもモデルを切り替えられます。",
       "startsWith": "最初のチャットは {model} で始まります。"
     }
+  },
+  "shell": {
+    "tabs": {
+      "label": "ワークスペース",
+      "chat": "チャット",
+      "image": "画像",
+      "video": "動画",
+      "audio": "音声",
+      "music": "音楽",
+      "code": "コード"
+    },
+    "new": {
+      "chat": "新規チャット",
+      "image": "新規画像",
+      "video": "新規動画",
+      "audio": "新規音声",
+      "music": "新しい曲",
+      "code": "新規コードセッション"
+    },
+    "prefs": {
+      "general": "一般",
+      "accounts": "アカウント",
+      "node": "MLX Node",
+      "keys": "APIキー",
+      "about": "情報"
+    }
   }
 }
