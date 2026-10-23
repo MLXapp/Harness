@@ -3370,7 +3370,8 @@
       "deleted": "已删除"
     },
     "atLine": "第 {n} 行",
-    "editComment": "编辑"
+    "editComment": "编辑",
+    "tooBig": "此文件已被重写:+{added} −{removed} 行,太多无法逐行显示。可在访达中查看,或将其还原。"
   },
   "aside": {
     "menu": "旁问…",

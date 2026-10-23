@@ -73,6 +73,7 @@ export function Waveform({ id, url }: { id: string; url: string }) {
       const p = d > 0 ? el.currentTime / d : 0
       track.current?.style.setProperty('--p', String(p))
       track.current?.setAttribute('aria-valuenow', String(Math.round(el.currentTime)))
+      track.current?.setAttribute('aria-valuetext', `${clock(el.currentTime)} / ${clock(d)}`)
       if (time.current) time.current.textContent = `${clock(el.currentTime)} / ${clock(d)}`
       if (!el.paused) raf = requestAnimationFrame(draw)
     }
@@ -137,7 +138,7 @@ export function Waveform({ id, url }: { id: string; url: string }) {
         {playing ? <Pause className="h-4 w-4" fill="currentColor" strokeWidth={0} /> : <Play className="ml-0.5 h-4 w-4" fill="currentColor" strokeWidth={0} />}
       </button>
       <div ref={track} className="mlx-wave-track" tabIndex={0} role="slider" aria-label={t('media.position')}
-        aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuetext={clock(duration)}
+        aria-valuemin={0} aria-valuemax={Math.round(duration)}
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onKeyDown={onKey}>
         {renderBars(false)}
         {renderBars(true)}

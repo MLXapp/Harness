@@ -102,12 +102,26 @@ export function ApprovalCards({ chatId }: { chatId: string }) {
     // send its text on the same ⌘↩ (or stop the reply on ⌘.).
     const onKey = (e: KeyboardEvent) => {
       if (!e.metaKey || e.altKey || e.ctrlKey || e.isComposing) return
-      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); respond(first.card.id, 'allow-once') }
-      else if (e.key === '.') { e.preventDefault(); e.stopPropagation(); respond(first.card.id, 'deny') }
+      if (e.key !== 'Enter' && e.key !== '.') return
+      const target = e.target instanceof Element ? e.target : null
+      // A sheet or the Ask aside card has its own ⌘↩: never approve from there.
+      if (target?.closest('[role="dialog"], [data-vmlx-surface="ask-aside"]')) return
+      // In a "do this instead" note, ⌘↩ sends the note with the Deny; it never allows.
+      const noteCard = target?.closest('[data-vmlx-approval-id]')?.getAttribute('data-vmlx-approval-id')
+      if (noteCard && target?.matches('[data-vmlx-control="approval-note-input"]')) {
+        e.preventDefault(); e.stopPropagation()
+        const n = (notes[noteCard] ?? '').trim()
+        if (e.key === 'Enter' && n) respond(noteCard, 'deny', n)
+        else if (e.key === '.') respond(noteCard, 'deny')
+        return
+      }
+      e.preventDefault(); e.stopPropagation()
+      if (e.key === 'Enter') respond(first.card.id, 'allow-once')
+      else respond(first.card.id, 'deny')
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [shown]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shown, notes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (shown.length === 0) return null
 
@@ -123,6 +137,7 @@ export function ApprovalCards({ chatId }: { chatId: string }) {
         return (
           <div
             key={card.id}
+            data-vmlx-approval-id={card.id}
             style={{
               display: 'grid',
               gridTemplateRows: open ? '1fr' : '0fr',

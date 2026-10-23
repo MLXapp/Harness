@@ -214,6 +214,34 @@ export function connectionLinks(result: unknown): Array<{ toolkit: string; url: 
   return out
 }
 
+/**
+ * Whether a COMPOSIO_MANAGE_CONNECTIONS reply says the app is connected:
+ * 'yes' only on a positive signal (an active status, a connected flag, or the
+ * reply saying so), 'no' on a sign-in link or a pending/failed status, and
+ * 'unknown' otherwise, so an unexpected reply never turns an app on.
+ */
+export function connectionState(json: unknown, text = ''): 'yes' | 'no' | 'unknown' {
+  if (connectionLinks(json).length > 0) return 'no'
+  let yes = false
+  let no = false
+  const POS = /^(active|connected|enabled|success|ready)$/i
+  const NEG = /^(initiated|initializing|pending|inactive|failed|expired|disabled|error|not[_ ]connected)$/i
+  const walk = (node: unknown, depth: number) => {
+    if (depth > 6 || node === null || typeof node !== 'object') return
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (typeof v === 'string' && /status|state/i.test(k)) { if (POS.test(v)) yes = true; else if (NEG.test(v)) no = true }
+      else if (typeof v === 'boolean' && /^(is_?)?(connected|active)$|^has_active_connection$/i.test(k)) { if (v) yes = true; else no = true }
+      else if (v && typeof v === 'object') walk(v, depth + 1)
+    }
+  }
+  walk(json, 0)
+  if (no) return 'no'
+  if (yes) return 'yes'
+  if (/\b(not connected|inactive|expired|failed)\b/i.test(text)) return 'no'
+  if (/\b(already connected|is connected|connection is active|active connection)\b/i.test(text)) return 'yes'
+  return 'unknown'
+}
+
 /** Text content of an MCP tool result. */
 export function mcpResultText(result: unknown, maxChars = 60_000): { text: string; isError: boolean; json: unknown } {
   const r = (result ?? {}) as { content?: unknown; isError?: unknown; structuredContent?: unknown }

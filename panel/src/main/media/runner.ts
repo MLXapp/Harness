@@ -10,7 +10,7 @@
  * the main process and never reach the renderer or the job rows.
  */
 
-import { randomUUID } from 'crypto'
+import { randomInt, randomUUID } from 'crypto'
 import { createWriteStream, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { Readable } from 'stream'
@@ -283,6 +283,8 @@ export class MediaRunner {
     writeFileSync(lyrics, song.lyrics ?? '', 'utf8')
     const args = ['music', '--model', repo, '--caption-file', caption, '--lyrics-file', lyrics]
     if (typeof job.values.duration === 'number') args.push('--duration', String(job.values.duration))
+    // A new seed each time, so the same prompt again is a new take.
+    args.push('--seed', String(randomInt(0, 2 ** 31 - 1)))
     this.runLocalJob(job, args, [caption, lyrics], python, 'Music')
   }
 

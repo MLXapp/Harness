@@ -266,6 +266,7 @@ declare global {
           callback: (data: { id: string; chatId: string; outcome: string }) => void,
         ) => () => void;
         aside?: (chatId: string, question: string, endpoint?: { host: string; port: number }) => Promise<{ success: boolean; text?: string; error?: string }>;
+        asideCancel?: (chatId: string) => Promise<boolean>;
         answerApproval: (
           id: string,
           answer: "allow-once" | "allow-always" | "deny",

@@ -3370,7 +3370,8 @@
       "deleted": "Deleted"
     },
     "atLine": "Line {n}",
-    "editComment": "Edit"
+    "editComment": "Edit",
+    "tooBig": "This file was rewritten: +{added} −{removed} lines, too many to show line by line. Show it in Finder, or revert it."
   },
   "aside": {
     "menu": "Ask Aside…",

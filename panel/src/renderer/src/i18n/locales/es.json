@@ -3370,7 +3370,8 @@
       "deleted": "Eliminado"
     },
     "atLine": "Línea {n}",
-    "editComment": "Editar"
+    "editComment": "Editar",
+    "tooBig": "Este archivo se reescribió: +{added} −{removed} líneas, demasiadas para mostrarlas una a una. Muéstralo en el Finder o reviértelo."
   },
   "aside": {
     "menu": "Preguntar aparte…",

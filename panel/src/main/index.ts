@@ -34,7 +34,7 @@ import { registerMediaHandlers, mediaRoot } from './ipc/media'
 import { registerAppsHandlers } from './ipc/apps'
 import { registerMemoryHandlers } from './ipc/memory'
 import { registerTaskHandlers } from './ipc/tasks'
-import { registerChangesHandlers } from './ipc/changes'
+import { registerChangesHandlers, turnChanges } from './ipc/changes'
 import { registerOpenInHandlers } from './ipc/openIn'
 import { registerMediaScheme, handleMediaProtocol } from './media/protocol'
 import { offerMlxNodeOnFirstRun } from './mlx-node'
@@ -292,6 +292,8 @@ function createWindow(): void {
     registerMemoryHandlers()
     registerTaskHandlers()
     registerChangesHandlers()
+    // Checkpoints of chats deleted while the app was closed (or by an older build).
+    try { turnChanges.prune(new Set(db.getChats().map(c => c.id))) } catch (err) { console.warn('[CHANGES] prune failed', err) }
     registerOpenInHandlers()
 
     // Download window — a real separate window for showing download progress

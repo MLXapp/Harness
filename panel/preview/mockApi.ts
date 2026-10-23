@@ -290,6 +290,7 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
         subject: 'npm install --save-dev vitest', reason: 'Add the test runner the plan uses.',
         why: 'no-sandbox', allowAlways: true, expiresAt: Date.now() + 4 * 60_000,
       }] : [],
+      asideCancel: async () => true,
       // Ask aside (⌘;): a short answer that is not added to the chat.
       aside: async (_chatId: string, question: string) => {
         await new Promise(r => setTimeout(r, 600))
