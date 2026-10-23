@@ -373,6 +373,8 @@ const api = {
     getTotals: () => ipcRenderer.invoke('network:totals'),
     getMining: (walletName: string) => ipcRenderer.invoke('network:mining', walletName),
     getMlxAppStatus: () => ipcRenderer.invoke('network:mlxAppStatus'),
+    yieldEnabled: (): Promise<boolean> => ipcRenderer.invoke('network:yieldEnabled'),
+    setYieldEnabled: (on: boolean): Promise<boolean> => ipcRenderer.invoke('network:setYieldEnabled', on),
     openMlxApp: (): Promise<boolean> => ipcRenderer.invoke('network:openMlxApp'),
     installMlxNode: () => ipcRenderer.invoke('network:installMlxNode'),
   },

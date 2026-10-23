@@ -5,6 +5,8 @@
 import { app, ipcMain, net, shell } from 'electron'
 import { execFile } from 'child_process'
 import { findMlxNode, installMlxNode, mlxNodeStatus, openMlxNode } from '../mlx-node'
+import { evaluateYield, yieldEnabled, YIELD_SETTING } from '../mlxNodeYield'
+import { db } from '../database'
 import {
   MLX_MAC_BUNDLE_ID,
   MLX_NETWORK_TOTALS_URL,
@@ -55,6 +57,12 @@ export function registerNetworkHandlers(): void {
 
   // Opens MLX Node and its menu bar panel: mlx://open sent to the installed
   // copy we found, then the system's mlx:// handler, then the bundle id.
+  ipcMain.handle('network:yieldEnabled', () => yieldEnabled())
+  ipcMain.handle('network:setYieldEnabled', async (_e, on: boolean) => {
+    db.setSetting(YIELD_SETTING, on ? '1' : '0')
+    await evaluateYield()
+    return !!on
+  })
   ipcMain.handle('network:openMlxApp', async (): Promise<boolean> => {
     if (process.platform !== 'darwin') return false
     const found = await findMlxNode()

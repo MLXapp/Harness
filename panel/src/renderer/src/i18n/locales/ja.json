@@ -3271,5 +3271,12 @@
     "smaller": "小さく",
     "hide": "隠す",
     "alt": "{host} を表示中のエージェントのブラウザ"
+  },
+  "mlxNode": {
+    "yield": {
+      "title": "ここでモデルを動かす間は MLX Node を一時停止",
+      "help": "MLX Harness でモデルを読み込んでいる間、MLX Node はネットワークの仕事を止めてメモリを空け、モデル停止後数分以内に再開します。",
+      "update": "MLX Node 0.9.5 以降が必要です（この Mac は {version}）。"
+    }
   }
 }

@@ -1,5 +1,5 @@
 // Preferences row: MLX Node — Installed / Not installed — Open / Install.
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ExternalLink } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { MLX_DOWNLOAD_URL } from '../../../../shared/mlxNetwork'
@@ -51,6 +51,7 @@ export function MlxNodePreference() {
           )}
         </div>
       </div>
+      <YieldRow version={s?.installed ? s.version : undefined} />
       <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-mlx ${node.error ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
         aria-hidden={!node.error || undefined}>
         <div className="min-h-0 overflow-hidden">
@@ -62,6 +63,36 @@ export function MlxNodePreference() {
           </p>
         </div>
       </div>
+    </div>
+  )
+}
+
+const atLeast = (a: string | undefined, b: string) => {
+  if (!a) return false
+  const pa = a.split('.').map(n => parseInt(n, 10) || 0), pb = b.split('.').map(n => parseInt(n, 10) || 0)
+  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) > (pb[i] ?? 0)
+  return true
+}
+
+/** "Pause MLX Node while a model runs here" (MLX Node 0.9.5 and newer). */
+function YieldRow({ version }: { version?: string }) {
+  const { t } = useTranslation()
+  const [on, setOn] = useState<boolean | null>(null)
+  useEffect(() => { window.api.network.yieldEnabled?.().then(setOn).catch(() => setOn(true)) }, [])
+  const supported = atLeast(version, '0.9.5')
+  return (
+    <div className="mt-4 flex items-start gap-4 border-t border-border pt-4">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{t('mlxNode.yield.title')}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {t('mlxNode.yield.help')}{version && !supported ? ` ${t('mlxNode.yield.update', { version })}` : ''}
+        </p>
+      </div>
+      <button type="button" role="switch" aria-checked={!!on} data-vmlx-control="preferences-mlx-node-yield" disabled={on === null}
+        onClick={async () => setOn(await window.api.network.setYieldEnabled!(!on))}
+        className={`relative mt-0.5 h-[22px] w-[38px] shrink-0 rounded-full transition-colors duration-200 ${on ? 'bg-[color:var(--acc)]' : 'bg-foreground/15'}`}>
+        <span className={`absolute left-0 top-[3px] h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ease-mlx ${on ? 'translate-x-[19px]' : 'translate-x-[3px]'}`} />
+      </button>
     </div>
   )
 }
