@@ -600,7 +600,8 @@
       "justNow": "Justo ahora",
       "yesterdayAt": "Ayer {time}",
       "videoPreviewUnavailable": "Vista previa de vídeo no disponible",
-      "videoPreviewUnavailableDetail": "La aplicación no pudo reproducir el vídeo. El archivo adjunto original se conserva para el modelo."
+      "videoPreviewUnavailableDetail": "La aplicación no pudo reproducir el vídeo. El archivo adjunto original se conserva para el modelo.",
+      "working": "Trabajando…"
     },
     "messages": {
       "emptyPrimary": "Envíe un mensaje para iniciar la conversación",
@@ -648,7 +649,10 @@
       "errorLabel": "error",
       "diffRemoved": "eliminado",
       "diffAdded": "agregado",
-      "durationMeasuredTitle": "medido con las marcas de tiempo del propio ejecutor"
+      "durationMeasuredTitle": "medido con las marcas de tiempo del propio ejecutor",
+      "interrupted": "detenido",
+      "waitingOk": "Esperando tu aprobación",
+      "running": "en curso…"
     },
     "voice": {
       "stopRecordingTitle": "Haga clic para detener la grabación",
@@ -2402,7 +2406,9 @@
       "preparing": "Preparando..."
     },
     "notify": {
-      "approvalTitle": "MLX Harness necesita tu aprobación"
+      "approvalTitle": "MLX Harness necesita tu aprobación",
+      "turnDone": "MLX Harness ha terminado",
+      "turnFailed": "MLX Harness se detuvo con un error"
     }
   },
   "tools": {

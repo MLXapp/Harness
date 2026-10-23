@@ -600,7 +600,8 @@
       "justNow": "刚刚",
       "yesterdayAt": "昨天 {time}",
       "videoPreviewUnavailable": "视频预览不可用",
-      "videoPreviewUnavailableDetail": "此应用无法播放该视频。原始附件已保留，供模型使用。"
+      "videoPreviewUnavailableDetail": "此应用无法播放该视频。原始附件已保留，供模型使用。",
+      "working": "处理中…"
     },
     "messages": {
       "emptyPrimary": "发送消息以开始对话",
@@ -648,7 +649,10 @@
       "errorLabel": "错误",
       "diffRemoved": "已删除",
       "diffAdded": "已添加",
-      "durationMeasuredTitle": "根据执行器自身的时间戳测量"
+      "durationMeasuredTitle": "根据执行器自身的时间戳测量",
+      "interrupted": "已停止",
+      "waitingOk": "等待你的确认",
+      "running": "运行中…"
     },
     "voice": {
       "stopRecordingTitle": "点击停止录音",
@@ -2402,7 +2406,9 @@
       "preparing": "准备中..."
     },
     "notify": {
-      "approvalTitle": "MLX Harness 需要你的批准"
+      "approvalTitle": "MLX Harness 需要你的批准",
+      "turnDone": "MLX Harness 已完成",
+      "turnFailed": "MLX Harness 因错误而停止"
     }
   },
   "tools": {

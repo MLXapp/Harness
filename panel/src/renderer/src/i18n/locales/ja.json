@@ -600,7 +600,8 @@
       "justNow": "たった今",
       "yesterdayAt": "昨日 {time}",
       "videoPreviewUnavailable": "動画をプレビューできません",
-      "videoPreviewUnavailableDetail": "このアプリでは動画を再生できませんでした。元の添付ファイルはモデル用に保持されています。"
+      "videoPreviewUnavailableDetail": "このアプリでは動画を再生できませんでした。元の添付ファイルはモデル用に保持されています。",
+      "working": "作業中…"
     },
     "messages": {
       "emptyPrimary": "メッセージを送信して会話を開始",
@@ -648,7 +649,10 @@
       "errorLabel": "エラー",
       "diffRemoved": "削除",
       "diffAdded": "追加",
-      "durationMeasuredTitle": "実行側のタイムスタンプで計測"
+      "durationMeasuredTitle": "実行側のタイムスタンプで計測",
+      "interrupted": "停止",
+      "waitingOk": "承認待ち",
+      "running": "実行中…"
     },
     "voice": {
       "stopRecordingTitle": "クリックして録音を停止",
@@ -2402,7 +2406,9 @@
       "preparing": "準備中..."
     },
     "notify": {
-      "approvalTitle": "MLX Harness があなたの承認を待っています"
+      "approvalTitle": "MLX Harness があなたの承認を待っています",
+      "turnDone": "MLX Harnessの処理が完了しました",
+      "turnFailed": "MLX Harnessがエラーで停止しました"
     }
   },
   "tools": {

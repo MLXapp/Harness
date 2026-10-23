@@ -600,7 +600,8 @@
       "finalizingAnswer": "Finalizing answer...",
       "noVisibleResponse": "No visible response was produced.",
       "justNow": "Just now",
-      "yesterdayAt": "Yesterday {time}"
+      "yesterdayAt": "Yesterday {time}",
+      "working": "Working…"
     },
     "messages": {
       "emptyPrimary": "Send a message to start the conversation",
@@ -648,7 +649,10 @@
       "errorLabel": "error",
       "diffRemoved": "removed",
       "diffAdded": "added",
-      "durationMeasuredTitle": "measured from the executor's own timestamps"
+      "durationMeasuredTitle": "measured from the executor's own timestamps",
+      "interrupted": "stopped",
+      "waitingOk": "Waiting for your OK",
+      "running": "running…"
     },
     "voice": {
       "stopRecordingTitle": "Click to stop recording",
@@ -2402,7 +2406,9 @@
       "preparing": "Preparing..."
     },
     "notify": {
-      "approvalTitle": "MLX Harness needs your approval"
+      "approvalTitle": "MLX Harness needs your approval",
+      "turnDone": "MLX Harness finished",
+      "turnFailed": "MLX Harness stopped with an error"
     }
   },
   "tools": {

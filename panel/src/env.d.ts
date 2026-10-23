@@ -260,6 +260,7 @@ declare global {
           chatId: string,
         ) => Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" }>>;
         onTodos: (callback: (data: any) => void) => () => void;
+        onOpenFromNotification?: (callback: (data: { chatId: string }) => void) => () => void;
         onApprovalRequest: (callback: (data: ChatApprovalCard) => void) => () => void;
         onApprovalSettled: (
           callback: (data: { id: string; chatId: string; outcome: string }) => void,

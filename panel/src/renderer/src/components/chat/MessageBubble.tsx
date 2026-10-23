@@ -283,6 +283,9 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
     !String(message.content || '').trim() &&
     !displayedReasoningSegments.some(segment => segment.trim()) &&
     !hasToolStatus
+  // Before the first token (prefill can take a while on a big local model):
+  // a quiet "Working… 12 s" so the turn never looks stuck.
+  const workingElapsed = useElapsedSeconds(message.timestamp, !!isStreaming && isEmptyAssistant)
 
   // Render a DOMPurify-sanitized markdown segment
   const renderMarkdownSegment = useCallback((text: string, key: string, userContent = false) => {
@@ -657,9 +660,10 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
             </div>
           )}
           {isEmptyAssistant && isStreaming && !answerPassPending && (
-            <div className="flex items-center gap-2 text-muted-foreground py-1">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-              <span>{t('chat.bubble.waitingForResponse')}</span>
+            <div data-vmlx-section="chat-working" className="flex items-center gap-2 py-1 text-[13.5px] text-muted-foreground mlx-fade-in" title={t('chat.bubble.waitingForResponse')}>
+              <span className="mlx-working-dot" aria-hidden />
+              <span>{t('chat.bubble.working')}</span>
+              {workingElapsed != null && workingElapsed >= 1 && <span className="mlx-num text-muted-foreground/80">{workingElapsed} s</span>}
             </div>
           )}
           {isEmptyAssistant && !isStreaming && (
@@ -693,12 +697,9 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
 
         {/* Typing indicator */}
         {isStreaming && !message.content && displayedReasoningSegments.length === 0 && !hasToolStatus && !isEmptyAssistant && (
-          <div className="flex items-center gap-2 text-muted-foreground text-sm py-1">
-            <span className="flex gap-1">
-              <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-            </span>
+          <div className="flex items-center gap-2 py-1 text-[13.5px] text-muted-foreground">
+            <span className="mlx-working-dot" aria-hidden />
+            <span>{t('chat.bubble.working')}</span>
           </div>
         )}
 

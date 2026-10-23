@@ -684,3 +684,16 @@ html.vibrancy .mlx-sidebar { background: var(--sidebar-wash), var(--sidebar-glas
   transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
 .group:hover .mlx-card-actions, .mlx-card-actions:focus-within { opacity: 1; transform: none; }
+
+/* "Working…" before the first token: a breathing MLX-orange dot. */
+@keyframes mlx-breathe { 0%, 100% { transform: scale(0.75); opacity: 0.55; } 50% { transform: scale(1); opacity: 1; } }
+.mlx-working-dot {
+  width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0;
+  background: linear-gradient(145deg, var(--acc-hi), var(--coral));
+  box-shadow: 0 0 10px var(--acc-glow);
+  animation: mlx-breathe 1.6s var(--ease) infinite;
+}
+@media (prefers-reduced-motion: reduce) { .mlx-working-dot { animation: none; } }
+/* Tool calls: quiet rows; a live one carries a soft orange edge glow. */
+.mlx-tool-row { transition: background-color var(--dur) var(--ease); }
+.mlx-tool-row.is-live > button { background: linear-gradient(90deg, rgb(var(--primary) / 0.08), transparent 60%); }

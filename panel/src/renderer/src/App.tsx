@@ -206,6 +206,20 @@ function App() {
     }
   }, [sessions, openChat, dispatch])
 
+  // A turn finished while the window was in the background and its
+  // notification was clicked: open that chat in its tab.
+  useEffect(() => {
+    return window.api.chat.onOpenFromNotification?.(async ({ chatId }) => {
+      try {
+        const chat = await window.api.chat.get(chatId)
+        if (!chat) return
+        const o = await window.api.chat.getOverrides(chatId).catch(() => null)
+        setMode(o?.builtinToolsEnabled && o?.workingDirectory ? 'code' : 'chat')
+        handleChatSelect(chatId, chat.modelPath || chat.modelId || '')
+      } catch { /* the chat is gone */ }
+    })
+  }, [handleChatSelect, setMode])
+
   /** The Code tab's project folder and access level for a chat (agent tools on that folder). */
   const readCodeInfo = useCallback(async (chatId: string | null) => {
     if (!chatId) { setCodeInfo(null); return }

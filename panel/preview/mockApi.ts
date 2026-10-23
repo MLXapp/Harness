@@ -286,6 +286,7 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       getPendingApprovals: async () => [],
       sandboxStatus: async () => ({ available: true, network: false }),
       getTodos: async () => [],
+      onOpenFromNotification: on('chat:openFromNotification'),
       onTodos: on('chat:todos'),
       pickImages: async () => [],
       // The preview "chooses" a project folder so the Code tab can be clicked through.

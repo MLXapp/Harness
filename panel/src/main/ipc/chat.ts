@@ -975,6 +975,10 @@ async function resolveServerEndpoint(
   return { host: "127.0.0.1", port: DEFAULT_PORT };
 }
 
+/** Successful turns shorter than this never notify (the user was probably watching). */
+const TURN_NOTIFY_MIN_SECONDS = 20;
+let notifyTurnEnded: (chatId: string, outcome: "done" | "failed", startedAt?: number) => void = () => {};
+
 export function registerChatHandlers(
   getWindow: () => BrowserWindow | null,
 ): void {
@@ -1016,6 +1020,38 @@ export function registerChatHandlers(
         if (w.isMinimized()) w.restore();
         w.show();
         w.focus();
+      });
+      note.show();
+    } catch (_) {
+      /* notifications are a convenience */
+    }
+  };
+  // End-of-turn notification (Atomic Agent pattern): when the window is in
+  // the background, say the answer is ready, but only for turns long enough
+  // that the user likely switched away; a failed turn always says so.
+  notifyTurnEnded = (chatId: string, outcome: "done" | "failed", startedAt?: number) => {
+    try {
+      const win = getWindow();
+      if (!win || win.isDestroyed()) return;
+      const visible = typeof win.isVisible === "function" ? win.isVisible() : true;
+      const focused = typeof win.isFocused === "function" ? win.isFocused() : true;
+      if (visible && focused) return;
+      const seconds = startedAt ? (Date.now() - startedAt) / 1000 : 0;
+      if (outcome === "done" && seconds < TURN_NOTIFY_MIN_SECONDS) return;
+      if (typeof Notification !== "function" || !Notification.isSupported()) return;
+      const title = String(db.getChat(chatId)?.title || "").replace(/\s+/g, " ").trim();
+      const note = new Notification({
+        title: tMain(outcome === "done" ? "main.notify.turnDone" : "main.notify.turnFailed"),
+        body: title.length > 120 ? `${title.slice(0, 119)}…` : title,
+        silent: outcome === "done",
+      });
+      note.on("click", () => {
+        const w = getWindow();
+        if (!w || w.isDestroyed()) return;
+        if (w.isMinimized()) w.restore();
+        w.show();
+        w.focus();
+        w.webContents.send("chat:openFromNotification", { chatId });
       });
       note.show();
     } catch (_) {
@@ -5927,6 +5963,7 @@ export function registerChatHandlers(
         }
         db.addMessage(assistantMessage);
 
+        notifyTurnEnded(chatId, "done", activeRequests.get(chatId)?.startedAt);
         // Send final metrics
         try {
           const win = getWindow();
@@ -6213,6 +6250,8 @@ export function registerChatHandlers(
           );
           return hadVisibleActivity ? assistantMessage : null;
         }
+        // A failed turn (not a user stop) is worth a notification when away.
+        notifyTurnEnded(chatId, "failed", activeRequests.get(chatId)?.startedAt);
         if (projectedMetalHeadroomErrorContent) {
           return assistantMessage;
         }
