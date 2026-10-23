@@ -2462,7 +2462,7 @@ export function registerChatHandlers(
       // persistent settings and the stored entries only).
       const memoryBlock =
         overrides?.builtinToolsEnabled === true && !chatUsesZayaAppleScriptToolBundle && !leanToolPreset && memoryEnabled()
-          ? renderMemoryBlock(db.memory.list())
+          ? renderMemoryBlock((() => { try { return db.memory?.list() ?? []; } catch { return []; } })())
           : null;
       if (memoryBlock) {
         const head = requestMessages[0];
@@ -6636,6 +6636,27 @@ export function registerChatHandlers(
       attachments?: Parameters<typeof handleSendMessage>[4],
     ) => handleSendMessage(event, chatId, content, endpoint, attachments, "send"),
   );
+  runChatTurnFromMain = async (chatId: string, prompt: string) => {
+    const chat = db.getChat(chatId);
+    if (!chat) return { ok: false, error: "The task's chat was deleted." };
+    const modelPath = String(chat.modelPath || chat.modelId || "");
+    if (!modelPath) return { ok: false, error: "The task's chat has no model." };
+    let endpoint: { host: string; port: number } | undefined;
+    if (!modelPath.startsWith("provider://")) {
+      const session = sessionManager.getSessionByModelPath(modelPath.replace(/\/+$/, ""));
+      if (!session || !["running", "loading", "standby"].includes(session.status)) {
+        return { ok: false, error: "Its model was not running. Start the model (or switch the task's chat to a cloud model)." };
+      }
+      endpoint = { host: session.host, port: session.port };
+    }
+    try {
+      const res = await handleSendMessage(null, chatId, prompt, endpoint);
+      if (res && res.success === false) return { ok: false, error: String(res.error || "Failed") };
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: String(err?.message ?? err) };
+    }
+  };
   // Manual compaction (/compact): summarize the older history now.
   ipcMain.handle(
     "chat:compact",
@@ -6737,27 +6758,6 @@ export function registerChatHandlers(
     return parseStoredTodos(db.getChatAgentState(chatId).todosJson);
   });
 
-  runChatTurnFromMain = async (chatId: string, prompt: string) => {
-    const chat = db.getChat(chatId);
-    if (!chat) return { ok: false, error: "The task's chat was deleted." };
-    const modelPath = String(chat.modelPath || chat.modelId || "");
-    if (!modelPath) return { ok: false, error: "The task's chat has no model." };
-    let endpoint: { host: string; port: number } | undefined;
-    if (!modelPath.startsWith("provider://")) {
-      const session = sessionManager.getSessionByModelPath(modelPath.replace(/\/+$/, ""));
-      if (!session || !["running", "loading", "standby"].includes(session.status)) {
-        return { ok: false, error: "Its model was not running. Start the model (or switch the task's chat to a cloud model)." };
-      }
-      endpoint = { host: session.host, port: session.port };
-    }
-    try {
-      const res = await handleSendMessage(null, chatId, prompt, endpoint);
-      if (res && res.success === false) return { ok: false, error: String(res.error || "Failed") };
-      return { ok: true };
-    } catch (err: any) {
-      return { ok: false, error: String(err?.message ?? err) };
-    }
-  };
   ipcMain.handle("chat:steer", (_, chatId: string, id: string, text: string) => {
     if (typeof chatId !== "string" || typeof text !== "string" || !text.trim()) return { accepted: false };
     if (!activeRequests.has(chatId)) return { accepted: false };
