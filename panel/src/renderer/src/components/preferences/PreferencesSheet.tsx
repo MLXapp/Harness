@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, Cpu, Info, KeyRound, SlidersHorizontal, UserRound, X, type LucideIcon } from 'lucide-react'
+import { Blocks, Check, ChevronDown, Cpu, Info, KeyRound, SlidersHorizontal, UserRound, X, type LucideIcon } from 'lucide-react'
 import { useAppState } from '../../contexts/AppStateContext'
 import { useTranslation, LOCALES, LOCALE_NAMES, LOCALE_FLAGS } from '../../i18n'
 import { useTheme, type ThemePreference } from '../../providers/ThemeProvider'
@@ -9,10 +9,12 @@ import { SingleModelPreference } from '../layout/SingleModelPreference'
 import { AccountsPreference } from '../accounts/AccountsPreference'
 import { MlxNodePreference } from '../network/MlxNodePreference'
 import { ApiKeysSection } from './ApiKeysSection'
+import { AppsPreference } from '../apps/AppsPreference'
 
 const SECTIONS: Array<[PreferencesSection, LucideIcon]> = [
   ['general', SlidersHorizontal],
   ['accounts', UserRound],
+  ['apps', Blocks],
   ['node', Cpu],
   ['keys', KeyRound],
   ['about', Info],
@@ -96,6 +98,7 @@ export function PreferencesSheet() {
           <div key={section} className="mlx-prefs-body mlx-view-in">
             {section === 'general' && <GeneralSection />}
             {section === 'accounts' && <AccountsPreference embedded />}
+            {section === 'apps' && <AppsPreference />}
             {section === 'node' && <MlxNodePreference />}
             {section === 'keys' && <ApiKeysSection />}
             {section === 'about' && <AboutSection />}

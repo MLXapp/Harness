@@ -700,3 +700,15 @@ html.vibrancy .mlx-sidebar { background: var(--sidebar-wash), var(--sidebar-glas
 /* Tool calls: quiet rows; a live one carries a soft orange edge glow. */
 .mlx-tool-row { transition: background-color var(--dur) var(--ease); }
 .mlx-tool-row.is-live > button { background: linear-gradient(90deg, rgb(var(--primary) / 0.08), transparent 60%); }
+
+/* Preferences → Apps: four tinted tiles, the "many apps" mark. */
+.mlx-apps-tile {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
+  width: 40px; height: 40px; padding: 6px; border-radius: 11px; flex-shrink: 0;
+  background: rgb(var(--bg-3-rgb) / 0.8); box-shadow: var(--elev-1);
+}
+.mlx-apps-tile span { border-radius: 4px; }
+.mlx-apps-tile span:nth-child(1) { background: var(--sys-blue, #0a84ff); }
+.mlx-apps-tile span:nth-child(2) { background: var(--acc, #ff7a1a); }
+.mlx-apps-tile span:nth-child(3) { background: var(--sys-green, #30d158); }
+.mlx-apps-tile span:nth-child(4) { background: var(--sys-purple, #bf5af2); }

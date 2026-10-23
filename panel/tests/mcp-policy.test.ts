@@ -150,7 +150,7 @@ describe('MCP policy shared helpers', () => {
 
     expect(registrySource).toContain('export function isBuiltinTool')
     expect(registrySource).toContain('Injected into request.tools when builtinToolsEnabled = true')
-    const builtinInjectionGuards = chatSource.match(/if \(attachBuiltinToolsForCurrentTurn\)/g) || []
+    const builtinInjectionGuards = chatSource.match(/if \(attachToolsForCurrentTurn\)/g) || []
     // Responses and Chat Completions must independently honor the persistent
     // built-in-tools toggle while allowing an explicit no-tool turn to omit
     // the schema catalog. This is stronger than pinning an obsolete standalone
@@ -182,7 +182,7 @@ describe('MCP policy shared helpers', () => {
     // An explicit no-tool turn now omits the schemas entirely (API-equivalent
     // to tool_choice="none", cheaper, and keeps the rendered prefix stable
     // across Responses history replay).
-    expect(chatSource).toContain('if (attachBuiltinToolsForCurrentTurn) {')
+    expect(chatSource).toContain('if (attachToolsForCurrentTurn) {')
     expect(chatSource).toContain('API-equivalent to tool_choice="none"')
     expect(builtinBranch).toBeGreaterThan(-1)
     expect(remoteMcpBranch).toBeGreaterThan(builtinBranch)

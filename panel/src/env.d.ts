@@ -457,6 +457,19 @@ declare global {
       chrome?: {
         vibrancy: () => boolean;
       };
+      apps: {
+        status: () => Promise<import('./shared/apps').AppsStatusView>;
+        connect: () => Promise<import('./shared/apps').AppsStatusView>;
+        connectKey: (key: string) => Promise<import('./shared/apps').AppsStatusView>;
+        cancel: () => Promise<import('./shared/apps').AppsStatusView>;
+        disconnect: () => Promise<import('./shared/apps').AppsStatusView>;
+        connectApp: (toolkit: string) => Promise<{ ok: boolean; opened: number; message?: string }>;
+        rules: () => Promise<Record<string, import('./shared/apps').AppRule>>;
+        setRule: (toolkit: string, rule: import('./shared/apps').AppRule) => Promise<Record<string, import('./shared/apps').AppRule>>;
+        chatEnabled: (chatId: string) => Promise<boolean>;
+        setChatEnabled: (chatId: string, on: boolean) => Promise<boolean>;
+        onStatus: (callback: (status: import('./shared/apps').AppsStatusView) => void) => () => void;
+      };
       media: {
         list: (kind: import('./shared/media/catalog').MediaKind) => Promise<import('./shared/media/jobs').MediaJob[]>;
         submit: (request: import('./shared/media/jobs').MediaSubmitRequest) => Promise<import('./shared/media/jobs').MediaResult<{ job: import('./shared/media/jobs').MediaJob }>>;

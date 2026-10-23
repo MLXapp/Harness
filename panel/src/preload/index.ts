@@ -423,6 +423,24 @@ const api = {
     readText: (): Promise<string> => ipcRenderer.invoke('clipboard:readText'),
   },
 
+  // Apps through Composio (main/ipc/apps.ts). Credentials never come here.
+  apps: {
+    status: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:status'),
+    connect: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:connect'),
+    connectKey: (key: string): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:connectKey', key),
+    cancel: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:cancel'),
+    disconnect: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:disconnect'),
+    connectApp: (toolkit: string): Promise<{ ok: boolean; opened: number; message?: string }> => ipcRenderer.invoke('apps:connectApp', toolkit),
+    rules: (): Promise<Record<string, import('../shared/apps').AppRule>> => ipcRenderer.invoke('apps:rules'),
+    setRule: (toolkit: string, rule: import('../shared/apps').AppRule): Promise<Record<string, import('../shared/apps').AppRule>> => ipcRenderer.invoke('apps:setRule', toolkit, rule),
+    chatEnabled: (chatId: string): Promise<boolean> => ipcRenderer.invoke('apps:chatEnabled', chatId),
+    setChatEnabled: (chatId: string, on: boolean): Promise<boolean> => ipcRenderer.invoke('apps:setChatEnabled', chatId, on),
+    onStatus: (callback: (status: import('../shared/apps').AppsStatusView) => void) => {
+      const listener = (_e: unknown, status: import('../shared/apps').AppsStatusView) => callback(status)
+      ipcRenderer.on('apps:status', listener)
+      return () => { ipcRenderer.removeListener('apps:status', listener) }
+    },
+  },
   // Image (cloud), Video, Audio and Music generations (main/ipc/media.ts).
   media: {
     list: (kind: import('../shared/media/catalog').MediaKind): Promise<import('../shared/media/jobs').MediaJob[]> => ipcRenderer.invoke('media:list', kind),

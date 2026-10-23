@@ -161,7 +161,7 @@ export function describeToolSubject(toolName: string, args: Record<string, unkno
   }
 }
 
-export type ApprovalKind = 'shell' | 'escalation' | 'write' | 'applescript' | 'git' | 'mcp' | 'tool'
+export type ApprovalKind = 'shell' | 'escalation' | 'write' | 'applescript' | 'git' | 'mcp' | 'tool' | 'app'
 
 export type PermissionDecision =
   | { action: 'allow'; sandbox: boolean }
@@ -181,7 +181,12 @@ export interface PermissionInput {
   refusedEscalations?: ReadonlySet<string>
   /** Plan mode: only reading tools run; everything else is refused, never asked. */
   plan?: boolean
+  /** App data (email, messages, documents) is already in this turn. */
+  untrustedData?: boolean
 }
+
+/** Tools that send something to the web: they ask once app data is in the turn. */
+export const EGRESS_TOOLS: ReadonlySet<string> = new Set(['fetch_url', 'web_search', 'ddg_search'])
 
 /** The tool result for a call Plan mode refused. */
 export const PLAN_MODE_REFUSAL =
@@ -255,6 +260,12 @@ export function decideToolPermission(input: PermissionInput): PermissionDecision
   const preset = normalizePermissionPreset(input.preset)
   const { toolName, args } = input
   const subject = describeToolSubject(toolName, args)
+  // Exfiltration guard: after an app's data entered the turn, text inside it
+  // could ask the model to send that data to a URL. Web tools ask first
+  // (except with Full access, where the user chose no prompts).
+  if (input.untrustedData && input.isBuiltin && EGRESS_TOOLS.has(toolName) && preset !== 'full') {
+    return { action: 'ask', kind: 'tool', subject, why: 'exfil', allowAlways: false }
+  }
   if (input.plan) {
     return planModeAllows(toolName, args, input.isBuiltin)
       ? { action: 'allow', sandbox: false }
