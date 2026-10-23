@@ -46,20 +46,33 @@ export function normalizeRef(raw: unknown): string | null {
  * Finds an element by ref in the document, open shadow roots and same-origin
  * iframes (the snapshot walks all three). Shared by the action scripts.
  */
-const FIND = String.raw`
-  function __find(root, ref) {
-    var sel = '[${REF_ATTR}="' + ref + '"]';
-    var el = root.querySelector(sel);
-    if (el) return el;
-    var all = root.querySelectorAll('*');
-    for (var i = 0; i < all.length; i++) {
-      var n = all[i];
-      if (n.shadowRoot) { el = __find(n.shadowRoot, ref); if (el) return el; }
-      if (n.tagName === 'IFRAME' || n.tagName === 'FRAME') {
-        try { var d = n.contentDocument; if (d) { el = __find(d, ref); if (el) return el; } } catch (e) {}
-      }
+/**
+ * Refs map to elements in a registry the scripts keep in their own world
+ * (Harness runs them in an isolated world, so the page cannot see or change
+ * it). The data-mlx-ref attribute is only a hint for reuse: a page that moves
+ * or copies it cannot point a ref at a different element.
+ */
+const REFS = String.raw`
+  function __refs() {
+    var m = window.__mlxRefMap;
+    if (!(m instanceof Map)) {
+      m = new Map();
+      try { Object.defineProperty(window, '__mlxRefMap', { value: m, writable: false, configurable: false, enumerable: false }); } catch (e) {}
     }
-    return null;
+    return m;
+  }
+`
+
+/**
+ * Finds the element a ref was given to, if it is still in the document (the
+ * snapshot walks open shadow roots and same-origin iframes too). Shared by the
+ * action scripts.
+ */
+const FIND = String.raw`
+  ${REFS}
+  function __find(root, ref) {
+    var el = __refs().get(ref);
+    return el && el.isConnected ? el : null;
   }
   function __missing(ref) {
     return { ok: false, error: 'No element ' + ref + ' on this page (it may have changed). Use a ref from the latest snapshot.' };
@@ -116,12 +129,16 @@ function (MAX) {
   }
   function q(s) { return JSON.stringify(s); }
 
+  ${REFS}
+  var REFMAP = __refs();
+  REFMAP.forEach(function (v, k) { if (!v || !v.isConnected) REFMAP.delete(k); });
   function refFor(el) {
     var r = el.getAttribute('${REF_ATTR}');
-    if (r && /^e\d+$/.test(r) && !used[r]) { used[r] = 1; return r; }
+    if (r && /^e\d+$/.test(r) && !used[r] && REFMAP.get(r) === el) { used[r] = 1; return r; }
     seq++;
     r = 'e' + seq;
     el.setAttribute('${REF_ATTR}', r);
+    REFMAP.set(r, el);
     used[r] = 1;
     return r;
   }

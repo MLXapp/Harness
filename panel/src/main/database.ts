@@ -1748,7 +1748,11 @@ class DatabaseManager {
     let next = `${row.content}\n\n${addition}`;
     try {
       const parts = JSON.parse(row.content);
-      if (Array.isArray(parts)) next = JSON.stringify([...parts, { type: "text", text: addition }]);
+      // Multimodal messages are stored as content parts; a plain message that
+      // happens to be a JSON array ("[1, 2]") stays text.
+      if (Array.isArray(parts) && parts.length > 0 && parts.every((p: any) => p && typeof p === "object" && typeof p.type === "string")) {
+        next = JSON.stringify([...parts, { type: "text", text: addition }]);
+      }
     } catch { /* plain text */ }
     this.db.prepare("UPDATE messages SET content = ? WHERE id = ?").run(next, messageId);
     return next;

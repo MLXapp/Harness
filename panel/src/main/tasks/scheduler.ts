@@ -50,7 +50,8 @@ export class TaskStore {
 export interface SchedulerDeps {
   store: () => TaskStore
   /** Send the prompt as a new turn in the chat; resolves when the turn ends. */
-  runTurn: (chatId: string, prompt: string) => Promise<{ ok: boolean; error?: string }>
+  /** `retry`: not run at all (e.g. its model was not up): try again soon. */
+  runTurn: (chatId: string, prompt: string) => Promise<{ ok: boolean; error?: string; retry?: boolean }>
   now?: () => number
   onChange?: () => void
   onFinished?: (task: ScheduledTask) => void
@@ -137,23 +138,51 @@ export class TaskScheduler {
     if (t.schedule.kind === 'once') t.enabled = false
     store.save(t)
     this.deps.onChange?.()
-    let result: { ok: boolean; error?: string }
+    let result: { ok: boolean; error?: string; retry?: boolean }
     try {
       result = await this.deps.runTurn(t.chatId, t.prompt)
     } catch (err: any) {
       result = { ok: false, error: String(err?.message ?? err) }
     }
-    const done = store.get(id) ?? t
+    this.running.delete(id)
+    const done = store.get(id)
+    // Deleted while it ran: stays deleted.
+    if (!done) { this.deps.onChange?.(); return null }
     done.lastStatus = result.ok ? 'ok' : 'error'
     done.lastNote = result.ok ? lateNote : `${result.error ?? 'Failed'}${lateNote ? ` · ${lateNote}` : ''}`
+    // Not run at all (its model was not up yet): try again in 5 minutes, up
+    // to an hour, instead of losing the run.
+    if (result.retry) {
+      const tries = (done.retries ?? 0) + 1
+      if (tries <= 12) {
+        done.retries = tries
+        done.nextRun = this.now() + 5 * 60_000
+        done.enabled = true
+        done.lastNote = `${result.error ?? 'Not run'} Trying again in 5 min.`
+      } else {
+        done.retries = 0
+      }
+    } else {
+      done.retries = 0
+    }
     store.save(done)
-    this.running.delete(id)
     this.deps.onChange?.()
     this.deps.onFinished?.(done)
     return done
   }
 
   isRunning(id: string): boolean { return this.running.has(id) }
+
+  /** After a crash or quit mid-run: stored "running" becomes an error. */
+  recoverInterrupted(): void {
+    const store = this.deps.store()
+    for (const t of store.list()) {
+      if (t.lastStatus !== 'running') continue
+      t.lastStatus = 'error'
+      t.lastNote = 'Interrupted: MLX Harness closed during the run.'
+      store.save(t)
+    }
+  }
 }
 
 export { describeSchedule }

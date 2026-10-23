@@ -95,5 +95,7 @@ export interface ScheduledTask {
   lastRun?: number
   lastStatus?: 'ok' | 'error' | 'running'
   lastNote?: string
+  /** Retries after "not run" (model not up), reset after a run. */
+  retries?: number
   createdAt: number
 }

@@ -74,9 +74,12 @@ async function send(kind: 'yield' | 'resume'): Promise<boolean> {
   })
 }
 
-/** Look again now (session started or stopped, setting changed). */
-export async function evaluateYield(): Promise<void> {
-  if (process.platform !== 'darwin') return
+let inFlight: Promise<void> | null = null
+let again = false
+/** Quitting: no new yields (a model still stopping must not re-yield). */
+let halted = false
+
+async function evaluateOnce(): Promise<void> {
   const step = yieldStep({ enabled: yieldEnabled(), busy: localModelBusy(), yielding, lastSentAt, now: Date.now() })
   if (!step.send) return
   const ok = await send(step.send)
@@ -86,6 +89,23 @@ export async function evaluateYield(): Promise<void> {
   if (step.send === 'yield' && ok) lastSentAt = Date.now()
 }
 
+/** Look again now (session started or stopped, setting changed). One at a time. */
+export function evaluateYield(): Promise<void> {
+  if (process.platform !== 'darwin' || halted) return Promise.resolve()
+  if (inFlight) { again = true; return inFlight }
+  inFlight = (async () => {
+    try {
+      do {
+        again = false
+        await evaluateOnce()
+      } while (again && !halted)
+    } catch { /* never breaks the app */ } finally {
+      inFlight = null
+    }
+  })()
+  return inFlight
+}
+
 export function startMlxNodeYield(onSessionChange: (cb: () => void) => void): void {
   if (timer || process.platform !== 'darwin') return
   onSessionChange(() => { void evaluateYield() })
@@ -93,9 +113,23 @@ export function startMlxNodeYield(onSessionChange: (cb: () => void) => void): vo
   void evaluateYield()
 }
 
-/** On quit: let MLX Node carry on at once. */
-export async function releaseMlxNodeYield(): Promise<void> {
-  if (!yielding) return
-  yielding = false
-  await send('resume').catch(() => false)
+/**
+ * On quit: let MLX Node carry on at once. Waits for a send in flight, then
+ * resumes, at most `timeoutMs` (MLX Node's own yield ends by itself anyway).
+ */
+export async function releaseMlxNodeYield(timeoutMs = 3000): Promise<void> {
+  halted = true
+  const work = (async () => {
+    if (inFlight) await inFlight.catch(() => undefined)
+    if (!yielding) return
+    yielding = false
+    await send('resume').catch(() => false)
+  })()
+  await Promise.race([work, new Promise<void>(r => { const t = setTimeout(r, timeoutMs); (t as any).unref?.() })])
+}
+
+/** A cancelled quit: watch again. */
+export function resumeMlxNodeYieldWatch(): void {
+  halted = false
+  void evaluateYield()
 }

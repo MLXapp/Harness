@@ -89,6 +89,31 @@ function privateV4([a, b]: number[]): boolean {
     a >= 224                                  // multicast, reserved, broadcast
 }
 
+/** IPv6 text → 8 groups, or null. Accepts an IPv4 tail ("::ffff:127.0.0.1") and a zone ("fe80::1%en0"). */
+export function expandV6(text: string): number[] | null {
+  let t = text.toLowerCase().split('%')[0]
+  const tail = /^(.*:)(\d{1,3}(?:\.\d{1,3}){3})$/.exec(t)
+  if (tail) {
+    const v4 = ipv4Parts(tail[2])
+    if (!v4) return null
+    t = `${tail[1]}${((v4[0] << 8) | v4[1]).toString(16)}:${((v4[2] << 8) | v4[3]).toString(16)}`
+  }
+  const halves = t.split('::')
+  if (halves.length > 2) return null
+  const part = (x: string) => (x === '' ? [] : x.split(':'))
+  const left = part(halves[0])
+  const right = halves.length === 2 ? part(halves[1]) : []
+  const missing = 8 - left.length - right.length
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null
+  const all = [...left, ...Array(halves.length === 2 ? missing : 0).fill('0'), ...right]
+  const out: number[] = []
+  for (const x of all) {
+    if (!/^[0-9a-f]{1,4}$/.test(x)) return null
+    out.push(parseInt(x, 16))
+  }
+  return out.length === 8 ? out : null
+}
+
 /** True for loopback, private, link-local and other non-public hosts (hostname as URL gives it). */
 export function isPrivateHost(hostname: string): boolean {
   let h = hostname.toLowerCase().replace(/\.$/, '')
@@ -99,23 +124,21 @@ export function isPrivateHost(hostname: string): boolean {
   const v4 = ipv4Parts(h)
   if (v4) return privateV4(v4)
   if (h.includes(':')) {
-    if (h === '::' || h === '::1') return true
-    // IPv4-mapped (::ffff:7f00:1 or ::ffff:127.0.0.1)
-    const mapped = /^::ffff:(.+)$/.exec(h)
-    if (mapped) {
-      const dotted = ipv4Parts(mapped[1])
-      if (dotted) return privateV4(dotted)
-      const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(mapped[1])
-      if (hex) {
-        const hi = parseInt(hex[1], 16), lo = parseInt(hex[2], 16)
-        return privateV4([hi >> 8, hi & 255, lo >> 8, lo & 255])
-      }
-      return true
-    }
-    const first = parseInt(h.split(':')[0] || '0', 16)
-    if ((first & 0xfe00) === 0xfc00) return true // fc00::/7 unique local
-    if ((first & 0xffc0) === 0xfe80) return true // fe80::/10 link-local
-    if ((first & 0xff00) === 0xff00) return true // multicast
+    const g = expandV6(h)
+    if (!g) return true // not a valid IPv6 address: refuse
+    const v4At = (i: number) => [g[i] >> 8, g[i] & 255, g[i + 1] >> 8, g[i + 1] & 255]
+    // ::/96 (unspecified, loopback, IPv4-compatible such as [::7f00:1])
+    if (g.slice(0, 6).every(x => x === 0)) return true
+    // ::ffff:0:0/96 IPv4-mapped
+    if (g.slice(0, 5).every(x => x === 0) && g[5] === 0xffff) return privateV4(v4At(6))
+    // 64:ff9b::/96 NAT64 and 64:ff9b:1::/48 local-use NAT64
+    if (g[0] === 0x64 && g[1] === 0xff9b) return g[2] === 1 || privateV4(v4At(6))
+    // 2002::/16 6to4 carries an IPv4 address in bits 16–47
+    if (g[0] === 0x2002) return privateV4(v4At(1))
+    if ((g[0] & 0xfe00) === 0xfc00) return true // fc00::/7 unique local
+    if ((g[0] & 0xffc0) === 0xfe80) return true // fe80::/10 link-local
+    if ((g[0] & 0xffc0) === 0xfec0) return true // fec0::/10 site-local (deprecated)
+    if ((g[0] & 0xff00) === 0xff00) return true // multicast
     return false
   }
   return false
@@ -290,6 +313,8 @@ export class AgentBrowser {
       const r = normalizeRef(ref)
       if (!r) return this.badRef(ref)
       const target = describeTarget(r, this.lastSnapshotText)
+      const moved = await this.targetMoved(r, target)
+      if (moved) return moved
       const res = await this.script(CLICK_SCRIPT(r))
       if (!res.ok) return this.after(`Could not click ${target}: ${res.error}`, true)
       return this.after(`Clicked ${target}.`, false, true)
@@ -303,6 +328,8 @@ export class AgentBrowser {
       const r = normalizeRef(ref)
       if (!r) return this.badRef(ref)
       const target = describeTarget(r, this.lastSnapshotText)
+      const moved = await this.targetMoved(r, target)
+      if (moved) return moved
       const res = await this.script(TYPE_SCRIPT(r, text, submit))
       if (!res.ok) return this.after(`Could not type into ${target}: ${res.error}`, true)
       const secret = /type=password/.test(target)
@@ -321,6 +348,8 @@ export class AgentBrowser {
       const r = normalizeRef(ref)
       if (!r) return this.badRef(ref)
       const target = describeTarget(r, this.lastSnapshotText)
+      const moved = await this.targetMoved(r, target)
+      if (moved) return moved
       const res = await this.script(SELECT_SCRIPT(r, value))
       if (!res.ok) return this.after(`Could not select in ${target}: ${res.error}`, true)
       return this.after(`Selected ${quote(String(res.label ?? value))} in ${target}.`, false, true)
@@ -411,6 +440,20 @@ export class AgentBrowser {
   private needsPage(): BrowserResult | null {
     if (this.opened) return null
     return { text: 'No page is open. Use action "open" with a url first.', isError: true }
+  }
+
+  /**
+   * The model (and the approval card) chose a ref by what the last snapshot
+   * showed. If the page has changed that element since, nothing is done: a
+   * page must not turn an approved "Cancel" into "Pay now".
+   */
+  private async targetMoved(ref: string, target: string): Promise<BrowserResult | null> {
+    if (target === `[${ref}]`) return null // never shown: the script reports a bad ref
+    let now: string
+    try { now = describeTarget(ref, (await this.take()).text) } catch { return null }
+    const plain = (t: string) => t.replace(/\s+value=("(?:[^"\\]|\\.)*"|\S+)/g, '').replace(/…$/, '')
+    if (now === `[${ref}]` || plain(now) === plain(target)) return null
+    return this.after(`Nothing was done: the page changed ${ref} since the last look (it was ${target}, now ${now}). Check the page and try again.`, true)
   }
 
   private badRef(ref: string): Promise<BrowserResult> {

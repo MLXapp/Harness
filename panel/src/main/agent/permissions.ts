@@ -54,11 +54,9 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
   'ask_user',
   'todo_write',
   'use_skill',
-  // Memory is the app's own store: every change shows as a tool row and in
-  // Preferences → Memory, and can be undone there.
-  'remember',
+  // Reading memory is the app's own store. remember and forget are decided
+  // in decideToolPermission: memory outlives the chat.
   'recall',
-  'forget',
 ])
 
 /** File-writing tools; the executor confines their paths to the working directory. */
@@ -191,6 +189,8 @@ export interface PermissionInput {
   plan?: boolean
   /** App data (email, messages, documents) is already in this turn. */
   untrustedData?: boolean
+  /** Web pages or MCP tool results are in this turn (memory writes ask). */
+  externalData?: boolean
 }
 
 /** Tools that send something to the web: they ask once app data is in the turn. */
@@ -316,6 +316,16 @@ export function decideToolPermission(input: PermissionInput): PermissionDecision
       ? { action: 'allow', sandbox: false }
       : { action: 'deny', message: PLAN_MODE_REFUSAL }
   }
+  // These outlive the chat, so they are decided before Full access:
+  // a scheduled task runs later on its own, and memory reaches every chat.
+  if (input.isBuiltin && toolName === 'schedule_task') {
+    return { action: 'ask', kind: 'tool', subject, why: 'schedule', allowAlways: false }
+  }
+  if (input.isBuiltin && (toolName === 'remember' || toolName === 'forget')) {
+    // Text from a web page, an app or an MCP tool could plant a "memory".
+    if (input.untrustedData || input.externalData) return { action: 'ask', kind: 'tool', subject, why: 'memory-untrusted', allowAlways: false }
+    return { action: 'allow', sandbox: false }
+  }
   if (preset === 'full') return { action: 'allow', sandbox: false }
 
   const ask = (kind: ApprovalKind, why: string, extra: Partial<{ allowAlways: boolean; justification: string }> = {}): PermissionDecision => ({
@@ -380,8 +390,6 @@ export function decideToolPermission(input: PermissionInput): PermissionDecision
   if (toolName === 'browser') {
     return browserActionKind(args) === 'read' ? { action: 'allow', sandbox: false } : ask('tool', 'browser-act')
   }
-  // Scheduling sets up something that later runs on its own.
-  if (toolName === 'schedule_task') return ask('tool', 'schedule')
   // An unknown built-in: fail closed to asking.
   return ask('tool', preset)
 }

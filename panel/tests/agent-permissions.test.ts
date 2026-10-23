@@ -202,3 +202,19 @@ describe('browser tool permissions', () => {
     expect(d('workspace', { action: 'open', url: 'https://x.y' }, { untrustedData: true })).toMatchObject({ action: 'ask', why: 'exfil' })
   })
 })
+
+describe('lasting tools: schedule_task and memory', () => {
+  const d = (toolName: string, preset: string, extra: Partial<PermissionInput> = {}, args: Record<string, unknown> = {}) =>
+    decideToolPermission({ preset, toolName, args, isBuiltin: true, sandboxAvailable: true, ...extra })
+  it('schedule_task always asks, Full access too, and Plan refuses it', () => {
+    for (const p of ['read-only', 'workspace', 'full']) expect(d('schedule_task', p)).toMatchObject({ action: 'ask', why: 'schedule', allowAlways: false })
+    expect(d('schedule_task', 'full', { plan: true }).action).toBe('deny')
+  })
+  it('remember and forget run, but ask once web or app data is in the chat (Full too); recall always runs', () => {
+    expect(d('remember', 'workspace', {}, { text: 'x' }).action).toBe('allow')
+    expect(d('remember', 'full', { externalData: true }, { text: 'x' })).toMatchObject({ action: 'ask', why: 'memory-untrusted' })
+    expect(d('forget', 'read-only', { untrustedData: true }, { id: 'm1' })).toMatchObject({ action: 'ask', why: 'memory-untrusted' })
+    expect(d('recall', 'workspace', { externalData: true }, { query: 'x' }).action).toBe('allow')
+    expect(d('remember', 'full', { plan: true }, { text: 'x' }).action).toBe('deny')
+  })
+})

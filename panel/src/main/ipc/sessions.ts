@@ -1,3 +1,4 @@
+import { appWindows } from '../browser/electronDriver'
 import { ipcMain, BrowserWindow, dialog, app as electronApp, type OpenDialogOptions } from 'electron'
 import { readFileSync } from 'fs'
 import { sessionManager } from '../sessions'
@@ -163,7 +164,7 @@ export function registerSessionHandlers(getWindow: () => BrowserWindow | null): 
           const started = sessionManager.getSession(sessionId)
           if (started?.modelPath) {
             checkMtpComponentUpdateOnLoad(
-              () => BrowserWindow.getAllWindows()[0] ?? null,
+              () => appWindows()[0] ?? null,
               started.modelPath,
             )
           }

@@ -1,6 +1,7 @@
 // Must stay the first import: keeps a 0.1.x ("MLX Studio") Mac's userData folder and Keychain item.
 import './app-identity'
 import './user-data-dir'
+import { closeAllAgentBrowserWindows } from './browser/electronDriver'
 import { getPowerMode } from './powerMode'
 import { app, BrowserWindow, ipcMain, dialog, shell, session, nativeTheme, clipboard } from 'electron'
 import { join } from 'path'
@@ -35,7 +36,7 @@ import { registerTaskHandlers } from './ipc/tasks'
 import { registerMediaScheme, handleMediaProtocol } from './media/protocol'
 import { offerMlxNodeOnFirstRun } from './mlx-node'
 import { sessionManager } from './sessions'
-import { releaseMlxNodeYield, startMlxNodeYield } from './mlxNodeYield'
+import { releaseMlxNodeYield, resumeMlxNodeYieldWatch, startMlxNodeYield } from './mlxNodeYield'
 import { apiGateway } from './api-gateway'
 import { buildContentSecurityPolicy } from './csp'
 import { rendererSettingValue } from './settingsAccess'
@@ -256,6 +257,8 @@ function createWindow(): void {
     trafficLightPosition: { x: 18, y: 18 }
   })
   if (process.platform === 'darwin') attachSidebarGlassWorkaround(mainWindow)
+  // The agent's hidden browser windows must not keep the app open on Windows/Linux.
+  if (process.platform !== 'darwin') mainWindow.on('closed', () => closeAllAgentBrowserWindows())
 
   // Register IPC handlers only once — pass getter to avoid stale window references on macOS recreation
   if (!handlersRegistered) {
@@ -717,7 +720,6 @@ app.on('before-quit', async (e) => {
   try {
     abortAllChatRequests()
     killSpawnedProcesses()
-    void releaseMlxNodeYield()
   } catch (err) {
     console.error('[QUIT] Error stopping agent work:', err)
   }
@@ -747,7 +749,7 @@ app.on('before-quit', async (e) => {
     killActiveOperation()  // Kill any active developer tool subprocess
     // The session manager offers an explicit force-stop choice for a slow
     // shutdown. Do not bypass that choice while SSD persistence is draining.
-    await Promise.all([sessionManager.stopAll(), processManager.killAll()])
+    await Promise.all([sessionManager.stopAll(), processManager.killAll(), releaseMlxNodeYield()])
     console.log('[QUIT] All vmlx-engine processes stopped')
   } catch (err) {
     console.error('[QUIT] Error stopping processes:', err)
@@ -755,6 +757,7 @@ app.on('before-quit', async (e) => {
     quitConfirmed = false
     cancelUpdateRelaunch()
     sessionManager.startGlobalMonitor()
+    resumeMlxNodeYieldWatch()
     // The app stays open, so restore everything the quit already stopped.
     if (db.getSetting('tray_enabled') !== '0') createTray(processManager, () => mainWindow)
     startMemoryEnforcer(processManager)

@@ -62,7 +62,7 @@ describe('scheduler', () => {
   it('is wired: the tool asks, runs in its own chat, and the app starts the scheduler', () => {
     const chat = readFileSync('src/main/ipc/chat.ts', 'utf8')
     expect(chat).toContain('} else if (tc.function.name === "schedule_task") {')
-    expect(chat).toContain('refusalOf(await gateToolCall(tc.function.name, toolArgs, tc.id, true, fullContent))')
+    expect(chat).toContain('refusalOf(await gateToolCall(tc.function.name, toolArgs, tc.id, true, fullContent, scheduleSubject))')
     expect(readFileSync('src/main/index.ts', 'utf8')).toContain('registerTaskHandlers()')
   })
 })

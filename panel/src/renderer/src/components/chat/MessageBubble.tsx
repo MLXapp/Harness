@@ -368,7 +368,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
   // Text added while the reply ran ("[Added while working] …") shows as its
   // own small block under the message.
   const renderUserText = (text: string, key: string) => {
-    const pieces = text.split(/\n*\[Added while working\] /)
+    const pieces = text.split(/\n*\u2063\[Added while working\] /)
     if (pieces.length === 1) return renderMarkdownSegment(text, key, true)
     return (
       <div key={key}>
