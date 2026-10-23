@@ -147,7 +147,7 @@ export function ApprovalCards({ chatId }: { chatId: string }) {
                     </span>
                   </div>
                   {card.subject && (
-                    <pre className={`mt-2.5 max-h-56 overflow-auto rounded-[10px] bg-[rgb(var(--bg-3-rgb)/0.7)] px-3 py-2 text-[12.5px] leading-[18px] whitespace-pre-wrap select-text ${card.kind === 'app' ? 'font-sans break-words' : 'font-mono break-all'}`}>
+                    <pre className={`mt-2.5 max-h-56 overflow-auto rounded-[10px] bg-[rgb(var(--bg-3-rgb)/0.7)] px-3 py-2 text-[12.5px] leading-[18px] whitespace-pre-wrap select-text ${card.kind === 'app' || card.why === 'schedule' || card.why === 'memory-untrusted' ? 'font-sans break-words [overflow-wrap:anywhere]' : 'font-mono break-all'}`}>
                       {card.subject}
                     </pre>
                   )}
