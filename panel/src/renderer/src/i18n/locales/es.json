@@ -2994,7 +2994,8 @@
       "node": "MLX Node",
       "keys": "Claves de API",
       "about": "Acerca de",
-      "apps": "Apps"
+      "apps": "Apps",
+      "skills": "Habilidades"
     }
   },
   "media": {
@@ -3196,5 +3197,12 @@
     "onTitle": "Las apps están activadas en este chat",
     "offTitle": "Activar apps (Gmail, Calendar, Slack…) en este chat",
     "setupTitle": "Conectar apps (Gmail, Calendar, Slack…)"
+  },
+  "skills": {
+    "intro": "Las habilidades son carpetas con un SKILL.md: instrucciones (y a veces scripts) para un tipo de trabajo, en el mismo formato que Claude Code. El agente ve el nombre y la descripción y solo lee las instrucciones cuando una tarea las necesita. Los scripts se ejecutan con las herramientas normales, así que preguntan como cualquier comando.",
+    "yours": "Tus habilidades",
+    "openFolder": "Abrir carpeta",
+    "none": "Aún no hay habilidades. Añade una carpeta con un SKILL.md en ~/.mlx-harness/skills; también se encuentran las de ~/.claude/skills.",
+    "footer": "Las habilidades propias de un proyecto (.claude/skills o .agents/skills en su carpeta) se usan en sus sesiones de Code y prevalecen sobre las tuyas con el mismo nombre."
   }
 }

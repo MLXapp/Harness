@@ -428,6 +428,10 @@ const api = {
     readText: (): Promise<string> => ipcRenderer.invoke('clipboard:readText'),
   },
 
+  skills: {
+    list: (): Promise<Array<{ name: string; description: string; scope: 'user' | 'project'; dir: string }>> => ipcRenderer.invoke('skills:list'),
+    openFolder: (): Promise<boolean> => ipcRenderer.invoke('skills:openFolder'),
+  },
   // Apps through Composio (main/ipc/apps.ts). Credentials never come here.
   apps: {
     status: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:status'),

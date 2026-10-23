@@ -458,6 +458,10 @@ declare global {
       chrome?: {
         vibrancy: () => boolean;
       };
+      skills?: {
+        list: () => Promise<Array<{ name: string; description: string; scope: 'user' | 'project'; dir: string }>>;
+        openFolder: () => Promise<boolean>;
+      };
       apps: {
         status: () => Promise<import('./shared/apps').AppsStatusView>;
         connect: () => Promise<import('./shared/apps').AppsStatusView>;

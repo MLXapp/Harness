@@ -502,6 +502,13 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       readText: async () => 'sk-preview-0123456789abcdef',
     },
 
+    skills: {
+      list: async () => [
+        { name: 'pdf', description: 'Read, fill and merge PDF files', scope: 'user' as const, dir: '~/.claude/skills/pdf' },
+        { name: 'release-notes', description: 'Write release notes in the house style from the git log', scope: 'user' as const, dir: '~/.mlx-harness/skills/release-notes' },
+      ],
+      openFolder: async () => true,
+    },
     // Apps (Composio): ?apps=connected starts signed in.
     apps: (() => {
       const featured = [['gmail', 'Gmail'], ['googlecalendar', 'Google Calendar'], ['googledrive', 'Google Drive'], ['slack', 'Slack'], ['notion', 'Notion'], ['github', 'GitHub'], ['linear', 'Linear'], ['outlook', 'Outlook'], ['googlesheets', 'Google Sheets'], ['hubspot', 'HubSpot'], ['jira', 'Jira'], ['todoist', 'Todoist']].map(([id, name]) => ({ id, name }))

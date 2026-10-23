@@ -2994,7 +2994,8 @@
       "node": "MLX Node",
       "keys": "APIキー",
       "about": "情報",
-      "apps": "アプリ"
+      "apps": "アプリ",
+      "skills": "スキル"
     }
   },
   "media": {
@@ -3196,5 +3197,12 @@
     "onTitle": "このチャットではアプリがオン",
     "offTitle": "このチャットでアプリ（Gmail、カレンダー、Slack など）をオンにする",
     "setupTitle": "アプリを接続（Gmail、カレンダー、Slack など）"
+  },
+  "skills": {
+    "intro": "スキルは SKILL.md を含むフォルダーで、ある種の作業のための手順（とスクリプト）です。形式は Claude Code と同じです。エージェントは名前と説明だけを見て、必要なときにだけ手順を読みます。スクリプトは通常のツールで実行されるため、ほかのコマンドと同様に確認されます。",
+    "yours": "あなたのスキル",
+    "openFolder": "フォルダーを開く",
+    "none": "まだスキルはありません。SKILL.md を含むフォルダーを ~/.mlx-harness/skills に追加してください。~/.claude/skills のスキルも見つかります。",
+    "footer": "プロジェクト独自のスキル（フォルダー内の .claude/skills または .agents/skills）はその Code セッションで使われ、同名のあなたのスキルより優先されます。"
   }
 }

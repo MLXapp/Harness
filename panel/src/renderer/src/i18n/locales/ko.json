@@ -2994,7 +2994,8 @@
       "node": "MLX Node",
       "keys": "API 키",
       "about": "정보",
-      "apps": "앱"
+      "apps": "앱",
+      "skills": "스킬"
     }
   },
   "media": {
@@ -3196,5 +3197,12 @@
     "onTitle": "이 채팅에서 앱이 켜져 있음",
     "offTitle": "이 채팅에서 앱(Gmail, 캘린더, Slack…) 켜기",
     "setupTitle": "앱 연결(Gmail, 캘린더, Slack…)"
+  },
+  "skills": {
+    "intro": "스킬은 SKILL.md가 있는 폴더로, 특정 작업을 위한 지침(때로는 스크립트)입니다. 형식은 Claude Code와 같습니다. 에이전트는 이름과 설명만 보고 작업에 필요할 때만 지침을 읽습니다. 스크립트는 일반 도구로 실행되므로 다른 명령처럼 먼저 묻습니다.",
+    "yours": "내 스킬",
+    "openFolder": "폴더 열기",
+    "none": "아직 스킬이 없습니다. SKILL.md가 있는 폴더를 ~/.mlx-harness/skills에 추가하세요. ~/.claude/skills의 스킬도 찾습니다.",
+    "footer": "프로젝트 자체 스킬(폴더 안의 .claude/skills 또는 .agents/skills)은 해당 코드 세션에서 사용되며 같은 이름의 내 스킬보다 우선합니다."
   }
 }

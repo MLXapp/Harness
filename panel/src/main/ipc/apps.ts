@@ -13,6 +13,10 @@ import { db } from '../database'
 import { decryptSecret, encryptValue } from '../secretStorage'
 import { AppsService, type AppsStatus } from '../apps/appsService'
 import { FEATURED_APPS, appName, type AppRule } from '../apps/composioPolicy'
+import { discoverSkills } from '../agent/skills'
+import { mkdirSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
 
 const OAUTH_KEY = 'composio_oauth_secret'
 const CONSUMER_KEY = 'composio_consumer_api_key'
@@ -65,6 +69,13 @@ function broadcast(status: AppsStatus): void {
 
 export function registerAppsHandlers(): void {
   const apps = appsService()
+  // Skills (Preferences → Skills): the user's own; project skills show in their sessions.
+  ipcMain.handle('skills:list', () => discoverSkills(undefined).map(s => ({ name: s.name, description: s.description, scope: s.scope, dir: s.dir })))
+  ipcMain.handle('skills:openFolder', async () => {
+    const dir = join(homedir(), '.mlx-harness', 'skills')
+    mkdirSync(dir, { recursive: true })
+    return (await shell.openPath(dir)) === ''
+  })
   ipcMain.handle('apps:status', () => ({ ...apps.status(), featured: FEATURED_APPS.map(id => ({ id, name: appName(id) })) }))
   ipcMain.handle('apps:connect', () => apps.connectOAuth())
   ipcMain.handle('apps:connectKey', (_e, key: string) => apps.connectWithKey(typeof key === 'string' ? key : ''))
