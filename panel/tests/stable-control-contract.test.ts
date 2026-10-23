@@ -38,11 +38,14 @@ describe('stable control contract (data-vmlx-*)', () => {
     const src = R('layout/ConsoleSidebar.tsx')
     expect(src).toContain('data-vmlx-control={`mode-${mode}`}')
     expect(src).toContain("data-vmlx-state={active ? 'active' : 'inactive'}")
-    for (const m of ['chat', 'server', 'models']) expect(src).toContain(`['${m}', `)
-    expect(src).not.toContain("['code', ")
+    for (const m of ['server', 'models', 'network']) expect(src).toContain(`['${m}', `)
+    // The six workspaces are tabs in the top strip, each tab-<id> with a state.
+    const tabs = R('layout/WorkspaceTabs.tsx')
+    expect(tabs).toContain('data-vmlx-control={`tab-${tab}`}')
+    expect(tabs).toContain("data-vmlx-state={selected ? 'active' : 'inactive'}")
     const sections = R('layout/ConsoleSubnavigation.tsx')
     expect(sections).toContain('data-vmlx-control={`section-${mode}`}')
-    for (const m of ['chat', 'image', 'server', 'api', 'tools', 'models']) {
+    for (const m of ['server', 'api', 'tools', 'models']) {
       expect(sections).toContain(`['${m}', t(`)
     }
   })

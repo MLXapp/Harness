@@ -6,11 +6,12 @@ interface SidebarProps {
   embedded?: boolean
   collapsed: boolean
   currentChatId: string | null
-  onChatSelect: (chatId: string, modelPath: string) => void
+  onChatSelect: (chatId: string, modelPath: string, codeDirectory?: string) => void
   onNewChat: () => void
+  filter?: 'chat' | 'code'
 }
 
-export function Sidebar({ embedded = false, collapsed, currentChatId, onChatSelect, onNewChat }: SidebarProps) {
+export function Sidebar({ embedded = false, collapsed, currentChatId, onChatSelect, onNewChat, filter = 'chat' }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('')
 
   return (
@@ -22,11 +23,13 @@ export function Sidebar({ embedded = false, collapsed, currentChatId, onChatSele
       <SidebarHeader
         onNewChat={onNewChat}
         onSearch={setSearchQuery}
+        title={filter === 'code' ? 'code' : 'chats'}
       />
       <ChatHistory
         currentChatId={currentChatId}
         onChatSelect={onChatSelect}
         searchQuery={searchQuery}
+        filter={filter}
       />
     </div>
   )

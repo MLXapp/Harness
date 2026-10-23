@@ -3087,5 +3087,39 @@
       "soon": "Your {chip} with {gb} GB will make {what} on this Mac when local {what} arrives. Until then it runs in the cloud",
       "cloudOnly": "Local {what} needs {need} GB or more; this {chip} has {gb} GB, so the cloud gives the best results"
     }
+  },
+  "code": {
+    "title": "Code with an agent on this Mac",
+    "subtitle": "It reads and edits your project, runs commands in a sandbox and asks before anything risky.",
+    "folder": "Project folder",
+    "chooseFolder": "Choose a folder…",
+    "access": "Access",
+    "recommended": "Recommended",
+    "mode": {
+      "read-only": "Read only",
+      "workspace": "Workspace write",
+      "full": "Full access"
+    },
+    "modeHelp": {
+      "read-only": "Reads files and searches. Asks before it writes a file or runs a command.",
+      "workspace": "Edits files in this folder and runs commands in a sandbox with no network. Asks before anything outside it.",
+      "full": "Edits anything and runs any command without asking. Use it only for projects you trust."
+    },
+    "models": "Model",
+    "modelsHelp": "You pick it in the composer and can switch any time. Strong choices for code:",
+    "localModel": "Qwen3 Coder on this Mac",
+    "localModelHelp": "Private and free; Models shows what fits your memory",
+    "start": "Start session",
+    "sessions": "Code sessions",
+    "placeholder": "Describe a change, a bug or a feature…",
+    "empty": {
+      "title": "What should we work on?",
+      "ideas": {
+        "0": "Explain how this project is put together",
+        "1": "Run the tests and fix what fails",
+        "2": "Find bugs and risky code",
+        "3": "Write a README for this project"
+      }
+    }
   }
 }

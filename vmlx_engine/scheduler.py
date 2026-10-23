@@ -4003,6 +4003,18 @@ class Scheduler:
         )
         if openai_processor is not None:
             processors.append(openai_processor)
+        # DRY reads the request's full prompt + committed output (not the
+        # KV-cache view a prefix-cache hit shortens), so warm and cold
+        # requests are penalized alike.
+        from .sampling_dry import dry_processor_from_params
+
+        dry = dry_processor_from_params(
+            params,
+            getattr(self, "_actual_tokenizer", None) or getattr(self, "tokenizer", None),
+            self.__dict__.setdefault("_dry_breaker_cache", {}),
+        )
+        if dry is not None:
+            processors.append(dry.bind(request))
         return processors or None
 
     def _request_seeded_sampler(self, request: Request):

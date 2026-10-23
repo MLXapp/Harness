@@ -3896,6 +3896,14 @@ def _forward_openai_token_controls(target: dict, request: Any) -> None:
     logit_bias = getattr(request, "logit_bias", None)
     if logit_bias is not None:
         target["logit_bias"] = dict(logit_bias)
+    # DRY ("Don't Repeat Yourself") repetition penalty; 0 = off.
+    for field_name in (
+        "dry_multiplier", "dry_base", "dry_allowed_length",
+        "dry_penalty_last_n", "dry_sequence_breakers",
+    ):
+        value = getattr(request, field_name, None)
+        if value is not None:
+            target[field_name] = list(value) if field_name == "dry_sequence_breakers" else value
 
 
 def _log_resolved_sampling_kwargs(

@@ -349,6 +349,13 @@ class ChatCompletionRequest(BaseModel):
     seed: int | None = None  # Per-request MLX sampling seed
     frequency_penalty: float | None = None
     presence_penalty: float | None = None
+    # DRY repetition penalty against verbatim loops (vmlx_engine.sampling_dry):
+    # dry_multiplier 0 = off; bounds follow Rapid-MLX / text-generation-webui.
+    dry_multiplier: float | None = Field(default=None, ge=0.0, le=10.0)
+    dry_base: float | None = Field(default=None, ge=1.0, le=8.0)
+    dry_allowed_length: int | None = Field(default=None, ge=1, le=100)
+    dry_penalty_last_n: int | None = Field(default=None, ge=-1, le=1_048_576)
+    dry_sequence_breakers: list[str] | None = None
     logit_bias: dict[str, float] | None = None
     # OpenAI-compatible per-token logprobs. Chat uses a boolean switch plus
     # optional top_logprobs count (0-20).
@@ -726,6 +733,13 @@ class CompletionRequest(BaseModel):
     seed: int | None = None  # Per-request MLX sampling seed
     frequency_penalty: float | None = None
     presence_penalty: float | None = None
+    # DRY repetition penalty against verbatim loops (vmlx_engine.sampling_dry):
+    # dry_multiplier 0 = off; bounds follow Rapid-MLX / text-generation-webui.
+    dry_multiplier: float | None = Field(default=None, ge=0.0, le=10.0)
+    dry_base: float | None = Field(default=None, ge=1.0, le=8.0)
+    dry_allowed_length: int | None = Field(default=None, ge=1, le=100)
+    dry_penalty_last_n: int | None = Field(default=None, ge=-1, le=1_048_576)
+    dry_sequence_breakers: list[str] | None = None
     logit_bias: dict[str, float] | None = None
     # Legacy OpenAI Completions logprobs count. None disables logprobs;
     # 0 returns sampled token logprobs without alternate top tokens; 1-20
@@ -1126,6 +1140,13 @@ class ResponsesRequest(BaseModel):
     seed: int | None = None  # Per-request MLX sampling seed
     frequency_penalty: float | None = None
     presence_penalty: float | None = None
+    # DRY repetition penalty against verbatim loops (vmlx_engine.sampling_dry):
+    # dry_multiplier 0 = off; bounds follow Rapid-MLX / text-generation-webui.
+    dry_multiplier: float | None = Field(default=None, ge=0.0, le=10.0)
+    dry_base: float | None = Field(default=None, ge=1.0, le=8.0)
+    dry_allowed_length: int | None = Field(default=None, ge=1, le=100)
+    dry_penalty_last_n: int | None = Field(default=None, ge=-1, le=1_048_576)
+    dry_sequence_breakers: list[str] | None = None
     max_output_tokens: int | None = None
     stop: str | list[str] | None = None
     stream: bool = False

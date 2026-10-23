@@ -234,27 +234,7 @@ export function reachableFeaturedModels(
   return out
 }
 
-/** Media models on WaveSpeed's API, for the Image / Video / Music tabs. */
-export interface FeaturedMediaModel {
-  name: string
-  purpose: 'image' | 'video' | 'music'
-  wavespeedId: string
-  price: string
-}
-
-export const FEATURED_MEDIA_MODELS: readonly FeaturedMediaModel[] = [
-  { name: 'GPT Image 2.5', purpose: 'image', wavespeedId: 'openai/gpt-image-2.5-sunburst/text-to-image', price: 'from $0.01 / image' },
-  { name: 'Nano Banana 2.1', purpose: 'image', wavespeedId: 'google/nano-banana-2.1/text-to-image', price: '$0.04 / image' },
-  { name: 'Seedream 5 Pro', purpose: 'image', wavespeedId: 'bytedance/seedream-v5.0-pro', price: '$0.045 / image' },
-  { name: 'FLUX 3', purpose: 'image', wavespeedId: 'black-forest-labs/flux-3/text-to-image', price: '$0.05 / image' },
-  { name: 'Seedance 2.5', purpose: 'video', wavespeedId: 'bytedance/seedance-2.5/text-to-video', price: 'from $0.36 / second' },
-  { name: 'Gemini Omni Flash', purpose: 'video', wavespeedId: 'google/gemini-omni-1.1-flash/text-to-video', price: '$0.10 / second' },
-  { name: 'Kling 3.0 Pro', purpose: 'video', wavespeedId: 'kwaivgi/kling-v3.0-pro/text-to-video', price: '$0.84 / 5 s' },
-  { name: 'Wan 3.0', purpose: 'video', wavespeedId: 'alibaba/wan-3.0/text-to-video', price: '$0.10 / second' },
-  { name: 'Lyria 3.5', purpose: 'music', wavespeedId: 'google/lyria-3.5/music', price: '$0.10 / song' },
-  { name: 'MiniMax Music 3', purpose: 'music', wavespeedId: 'minimax/music-3.0', price: '$0.15 / song' },
-  { name: 'ElevenLabs Music', purpose: 'music', wavespeedId: 'elevenlabs/music-v2.5', price: '$0.75 / minute' },
-]
+// Media models (Image, Video, Audio, Music tabs) live in shared/media/catalog.ts.
 
 // ── Local models for this Mac ──────────────────────────────────────────────
 

@@ -5,6 +5,7 @@ import { ModelSwitcher } from './ModelSwitcher'
 import { useChatModel } from './ChatModelContext'
 import { useVoiceInput } from './voiceInput'
 import { useTranslation } from '../../i18n'
+import { COMPOSER_FILL_EVENT, useWorkspaceKind } from '../code/workspaceKind'
 import { apiCapabilityModalities } from '../../../../shared/apiModelCapabilities'
 
 export type AttachmentKind = 'image' | 'video' | 'audio' | 'text'
@@ -115,6 +116,18 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
     return () => observer.disconnect()
   }, [])
   const [message, setMessage] = useState('')
+  const workspace = useWorkspaceKind()
+  // Starter prompts (Code sessions) fill the composer and focus it.
+  useEffect(() => {
+    const fill = (e: Event) => {
+      const text = (e as CustomEvent).detail?.text
+      if (typeof text !== 'string') return
+      setMessage(text)
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    }
+    window.addEventListener(COMPOSER_FILL_EVENT, fill)
+    return () => window.removeEventListener(COMPOSER_FILL_EVENT, fill)
+  }, [])
   const [attachments, setAttachments] = useState<MediaAttachment[]>([])
   const [runtimeModalities, setRuntimeModalities] = useState<string[] | null>(null)
   const [attachNotice, setAttachNotice] = useState<string | null>(null)
@@ -390,7 +403,7 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder={loading ? t('chat.input.placeholderWaiting') : t('chat.input.placeholderDefault')}
+          placeholder={loading ? t('chat.input.placeholderWaiting') : workspace === 'code' ? t('code.placeholder') : t('chat.input.placeholderDefault')}
           disabled={disabled && !loading}
           className="block w-full resize-none bg-transparent px-4 pb-1 pt-3 min-h-[48px] max-h-[240px] text-[15px] leading-[1.5] text-foreground placeholder:text-muted-foreground focus:outline-none"
           rows={1}

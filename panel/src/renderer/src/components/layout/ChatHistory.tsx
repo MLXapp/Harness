@@ -10,12 +10,16 @@ interface ChatSummary {
   createdAt: number
   updatedAt: number
   messageCount: number
+  /** Set when the chat is a Code session (its project folder). */
+  codeDirectory?: string
 }
 
 interface ChatHistoryProps {
   currentChatId: string | null
-  onChatSelect: (chatId: string, modelPath: string) => void
+  onChatSelect: (chatId: string, modelPath: string, codeDirectory?: string) => void
   searchQuery: string
+  /** Chat tab: chats; Code tab: Code sessions. */
+  filter?: 'chat' | 'code'
 }
 
 interface DateGroup {
@@ -51,7 +55,7 @@ function groupByDate(chats: ChatSummary[]): DateGroup[] {
     .map(([label, chats]) => ({ label, chats }))
 }
 
-export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHistoryProps) {
+export function ChatHistory({ currentChatId, onChatSelect, searchQuery, filter = 'chat' }: ChatHistoryProps) {
   const { t } = useTranslation()
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -73,6 +77,12 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
   }
 
   useEffect(() => { loadChats() }, [])
+  // A chat became (or stopped being) a Code session, or was created elsewhere.
+  useEffect(() => {
+    const reload = () => { void loadChats() }
+    window.addEventListener('vmlx:chats-changed', reload)
+    return () => window.removeEventListener('vmlx:chats-changed', reload)
+  }, [])
 
   // Refresh when a new chat is opened that we don't know about
   useEffect(() => {
@@ -132,10 +142,11 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
     }
   }
 
-  // Filter by search
+  // This tab's chats, then the search.
+  const inTab = chats.filter(c => (filter === 'code') === !!c.codeDirectory)
   const filtered = searchQuery
-    ? chats.filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
-    : chats
+    ? inTab.filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    : inTab
 
   const groups = groupByDate(filtered)
 
@@ -172,7 +183,7 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery }: ChatHi
           {group.chats.map(chat => (
             <div
               key={chat.id}
-              onClick={() => onChatSelect(chat.id, chat.modelPath)}
+              onClick={() => onChatSelect(chat.id, chat.modelPath, chat.codeDirectory)}
               className={`group flex min-h-[34px] items-center gap-2 px-2.5 py-1 mx-3 rounded-[10px] cursor-pointer transition-colors ${
                 chat.id === currentChatId
                   ? 'bg-[var(--sidebar-row)] text-foreground'

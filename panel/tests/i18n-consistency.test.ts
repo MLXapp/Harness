@@ -393,9 +393,6 @@ describe('i18n locale consistency', () => {
       'app.about.version',
       'app.about.braveKey',
       'app.about.hfToken',
-      'app.code.title',
-      'app.code.description',
-      'app.code.comingSoon',
       'chat.quickStart.title',
       'chat.quickStart.tipSettings',
     ]) {
