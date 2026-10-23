@@ -190,8 +190,10 @@ const api = {
       ipcRenderer.on('chat:approvalSettled', handler)
       return () => { ipcRenderer.removeListener('chat:approvalSettled', handler) }
     },
-    answerApproval: (id: string, answer: 'allow-once' | 'allow-always' | 'deny') =>
-      ipcRenderer.invoke('chat:answerApproval', id, answer),
+    aside: (chatId: string, question: string, endpoint?: { host: string; port: number }): Promise<{ success: boolean; text?: string; error?: string }> =>
+      ipcRenderer.invoke('chat:aside', chatId, question, endpoint),
+    answerApproval: (id: string, answer: 'allow-once' | 'allow-always' | 'deny', note?: string) =>
+      ipcRenderer.invoke('chat:answerApproval', id, answer, note),
     getPendingApprovals: (chatId: string) => ipcRenderer.invoke('chat:pendingApprovals', chatId),
     onContext: (callback: (data: { chatId: string; tokens: number; window: number; known: boolean }) => void) => {
       const listener = (_e: unknown, data: { chatId: string; tokens: number; window: number; known: boolean }) => callback(data)
@@ -457,6 +459,10 @@ const api = {
       ipcRenderer.on('tasks:changed', listener)
       return () => { ipcRenderer.removeListener('tasks:changed', listener) }
     },
+  },
+  code: {
+    openInApps: (): Promise<Array<{ id: string; name: string; bundleId: string; kind: 'finder' | 'terminal' | 'editor' }>> => ipcRenderer.invoke('code:openInApps'),
+    openIn: (appId: string, folder: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('code:openIn', appId, folder),
   },
   changes: {
     list: (chatId: string): Promise<import('../shared/changes').TurnChangeSet[]> => ipcRenderer.invoke('changes:list', chatId),

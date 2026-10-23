@@ -748,7 +748,10 @@
         "tool": "MLX Harness가 이 도구를 사용하도록 허용할까요?",
         "app": "MLX Harness가 앱에서 이 작업을 하도록 허용할까요?"
       },
-      "alwaysAllowApp": "이 채팅에서 이 앱들에 항상 허용"
+      "alwaysAllowApp": "이 채팅에서 이 앱들에 항상 허용",
+      "instead": "대신 할 일 알려주기",
+      "insteadPlaceholder": "대신 이렇게 해 줘…",
+      "insteadSend": "거부하고 보내기"
     },
     "switcher": {
       "title": "모델 전환 (⌘⇧M)",
@@ -3175,8 +3178,15 @@
       "auto": "자동으로 실행",
       "full": "전체 접근으로 실행",
       "dismiss": "닫기",
-      "go": "계획대로 진행해 주세요."
-    }
+      "go": "계획대로 진행해 주세요.",
+      "keepPlanning": "계획 계속",
+      "revisePlaceholder": "계획에서 무엇을 바꿀까요?",
+      "reviseSend": "계획 수정",
+      "revise": "계획을 수정해 주세요(아직 파일은 바꾸지 마세요): {note}"
+    },
+    "openIn": "{app}에서 열기",
+    "openInMore": "다른 앱에서 열기",
+    "openInFailed": "그 앱에서 폴더를 열지 못했습니다."
   },
   "apps": {
     "title": "Composio를 통한 내 앱",
@@ -3343,5 +3353,20 @@
     },
     "atLine": "{n}번째 줄",
     "editComment": "편집"
+  },
+  "aside": {
+    "menu": "따로 묻기…",
+    "title": "따로 묻기",
+    "hint": "채팅에 추가되지 않습니다",
+    "placeholder": "이 채팅에 대해 묻기…",
+    "ask": "묻기",
+    "failed": "답변을 받지 못했습니다. 모델이 실행 중인지 확인하세요.",
+    "empty": "답변이 오지 않았습니다. 다르게 물어보세요.",
+    "copy": "복사",
+    "copied": "복사됨",
+    "inChat": "채팅에서 묻기"
+  },
+  "needsYou": {
+    "menu": "다음 승인 요청"
   }
 }

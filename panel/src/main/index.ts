@@ -35,6 +35,7 @@ import { registerAppsHandlers } from './ipc/apps'
 import { registerMemoryHandlers } from './ipc/memory'
 import { registerTaskHandlers } from './ipc/tasks'
 import { registerChangesHandlers } from './ipc/changes'
+import { registerOpenInHandlers } from './ipc/openIn'
 import { registerMediaScheme, handleMediaProtocol } from './media/protocol'
 import { offerMlxNodeOnFirstRun } from './mlx-node'
 import { sessionManager } from './sessions'
@@ -291,6 +292,7 @@ function createWindow(): void {
     registerMemoryHandlers()
     registerTaskHandlers()
     registerChangesHandlers()
+    registerOpenInHandlers()
 
     // Download window — a real separate window for showing download progress
     ipcMain.handle('downloads:openWindow', () => {

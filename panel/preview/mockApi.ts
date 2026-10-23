@@ -284,7 +284,19 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       onApprovalRequest: on('chat:approvalRequest'),
       onApprovalSettled: on('chat:approvalSettled'),
       answerApproval: async () => ({ accepted: true }),
-      getPendingApprovals: async () => [],
+      // ?approval=sample: one command waiting for an OK in whichever chat asks.
+      getPendingApprovals: async (chatId: string) => new URLSearchParams(window.location.search).get('approval') === 'sample' ? [{
+        id: 'ap-1', chatId: chatId || 'chat-swift', toolName: 'run_command', kind: 'shell',
+        subject: 'npm install --save-dev vitest', reason: 'Add the test runner the plan uses.',
+        why: 'no-sandbox', allowAlways: true, expiresAt: Date.now() + 4 * 60_000,
+      }] : [],
+      // Ask aside (⌘;): a short answer that is not added to the chat.
+      aside: async (_chatId: string, question: string) => {
+        await new Promise(r => setTimeout(r, 600))
+        return { success: true, text: /test/i.test(question)
+          ? 'It runs the tests with Vitest: `npm test` once, `npx vitest` to watch. The plan adds one test file per screen.'
+          : 'The model is updating the header and the footer. Two files have changed so far; nothing has been committed.' }
+      },
       onContext: on('chat:context'),
       sandboxStatus: async () => ({ available: true, network: false }),
       getTodos: async () => [],
@@ -523,6 +535,15 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
         onChanged: (cb: () => void) => events.on('tasks:changed', cb as any),
       }
     })(),
+    code: {
+      openInApps: async () => [
+        { id: 'finder', name: 'Finder', bundleId: 'com.apple.finder', kind: 'finder' },
+        { id: 'terminal', name: 'Terminal', bundleId: 'com.apple.Terminal', kind: 'terminal' },
+        { id: 'xcode', name: 'Xcode', bundleId: 'com.apple.dt.Xcode', kind: 'editor' },
+        { id: 'vscode', name: 'Visual Studio Code', bundleId: 'com.microsoft.VSCode', kind: 'editor' },
+      ],
+      openIn: async () => ({ ok: true }),
+    },
     // ?code=sample: the second Swift reply changed two files (Changes review).
     changes: (() => {
       const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()

@@ -265,9 +265,11 @@ declare global {
         onApprovalSettled: (
           callback: (data: { id: string; chatId: string; outcome: string }) => void,
         ) => () => void;
+        aside?: (chatId: string, question: string, endpoint?: { host: string; port: number }) => Promise<{ success: boolean; text?: string; error?: string }>;
         answerApproval: (
           id: string,
           answer: "allow-once" | "allow-always" | "deny",
+          note?: string,
         ) => Promise<{ accepted: boolean }>;
         getPendingApprovals: (chatId: string) => Promise<ChatApprovalCard[]>;
         onContext?: (callback: (data: { chatId: string; tokens: number; window: number; known: boolean }) => void) => () => void;
@@ -469,6 +471,10 @@ declare global {
         runNow: (id: string) => Promise<boolean>;
         delete: (id: string) => Promise<boolean>;
         onChanged: (callback: () => void) => () => void;
+      };
+      code?: {
+        openInApps: () => Promise<Array<{ id: string; name: string; bundleId: string; kind: 'finder' | 'terminal' | 'editor' }>>;
+        openIn: (appId: string, folder: string) => Promise<{ ok: boolean; error?: string }>;
       };
       changes?: {
         list: (chatId: string) => Promise<import('./shared/changes').TurnChangeSet[]>;

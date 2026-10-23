@@ -55,6 +55,11 @@ export function installApplicationMenu(getWindow: () => BrowserWindow | null): v
     ] } as Electron.MenuItemConstructorOptions] : []),
     { role: 'fileMenu', submenu: [
       { label: t('chat.interface.newChat'), accelerator: 'CmdOrCtrl+N', click: go('new-chat') },
+      { type: 'separator' },
+      // A side question about the open chat, answered outside it.
+      { label: t('aside.menu'), accelerator: 'CmdOrCtrl+;', click: go('ask-aside') },
+      // The next chat waiting for your OK (Allow / Deny).
+      { label: t('needsYou.menu'), accelerator: 'Alt+CmdOrCtrl+J', click: go('next-approval') },
       ...(process.platform !== 'darwin' ? [preferences] : []),
       { type: 'separator' }, { role: 'close' },
     ] },

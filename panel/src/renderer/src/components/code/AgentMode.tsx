@@ -92,6 +92,9 @@ export function PlanHandoff({ loading, onSend }: { loading: boolean; onSend: (te
   const { t } = useTranslation()
   const ctx = useCodeMode()
   const [show, setShow] = useState(false)
+  const [revising, setRevising] = useState(false)
+  const [note, setNote] = useState('')
+  const noteRef = useRef<HTMLInputElement>(null)
   const was = useRef(loading)
   useEffect(() => {
     if (was.current && !loading && ctx?.mode === 'plan') setShow(true)
@@ -99,7 +102,15 @@ export function PlanHandoff({ loading, onSend }: { loading: boolean; onSend: (te
     was.current = loading
   }, [loading, ctx?.mode])
   useEffect(() => { if (ctx?.mode !== 'plan') setShow(false) }, [ctx?.mode])
+  useEffect(() => { if (!show) { setRevising(false); setNote('') } }, [show])
   if (!ctx) return null
+  // "Keep planning": say what to change; the agent revises the plan (still in Plan mode).
+  const revise = () => {
+    const text = note.trim()
+    if (!text) return
+    setShow(false)
+    onSend(t('code.handoff.revise', { note: text }))
+  }
   const run = async (mode: 'auto' | 'full') => {
     setShow(false)
     await ctx.setMode(mode)
@@ -116,11 +127,25 @@ export function PlanHandoff({ loading, onSend }: { loading: boolean; onSend: (te
         </button>
         <button type="button" data-vmlx-control="code-handoff-full" onClick={() => void run('full')}
           className="mlx-chip text-warning">{t('code.handoff.full')}</button>
+        <button type="button" data-vmlx-control="code-handoff-revise" aria-expanded={revising}
+          onClick={() => { setRevising(r => !r); requestAnimationFrame(() => noteRef.current?.focus()) }}
+          className={`mlx-chip ${revising ? 'is-on' : ''}`}>{t('code.handoff.keepPlanning')}</button>
         <button type="button" data-vmlx-control="code-handoff-dismiss" onClick={() => setShow(false)}
           aria-label={t('code.handoff.dismiss')} title={t('code.handoff.dismiss')}
           className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground">
           <X className="h-4 w-4" />
         </button>
+        <div className="basis-full">
+          <Reveal open={revising}>
+            <form className="flex items-center gap-2 pt-1" onSubmit={e => { e.preventDefault(); revise() }}>
+              <input ref={noteRef} value={note} onChange={e => setNote(e.target.value)} placeholder={t('code.handoff.revisePlaceholder')}
+                data-vmlx-control="code-handoff-note"
+                onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setRevising(false) } }}
+                className="h-8 min-w-0 flex-1 rounded-[9px] border border-input bg-background px-2.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring/50" />
+              <button type="submit" disabled={!note.trim()} className="mlx-chip disabled:opacity-50">{t('code.handoff.reviseSend')}</button>
+            </form>
+          </Reveal>
+        </div>
       </div>
     </Reveal>
   )

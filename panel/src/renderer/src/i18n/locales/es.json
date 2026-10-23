@@ -748,7 +748,10 @@
         "tool": "¿Permitir que MLX Harness use esta herramienta?",
         "app": "¿Permitir que MLX Harness haga esto en tus apps?"
       },
-      "alwaysAllowApp": "Permitir siempre en estas apps durante este chat"
+      "alwaysAllowApp": "Permitir siempre en estas apps durante este chat",
+      "instead": "Dile qué hacer en su lugar",
+      "insteadPlaceholder": "Haz esto en su lugar…",
+      "insteadSend": "Denegar y enviar"
     },
     "switcher": {
       "title": "Cambiar de modelo (⌘⇧M)",
@@ -3175,8 +3178,15 @@
       "auto": "Ejecutar en Automático",
       "full": "Ejecutar con acceso total",
       "dismiss": "Descartar",
-      "go": "Adelante con el plan."
-    }
+      "go": "Adelante con el plan.",
+      "keepPlanning": "Seguir planificando",
+      "revisePlaceholder": "¿Qué debería cambiar en el plan?",
+      "reviseSend": "Revisar el plan",
+      "revise": "Revisa el plan (todavía sin cambiar archivos): {note}"
+    },
+    "openIn": "Abrir en {app}",
+    "openInMore": "Abrir en otra app",
+    "openInFailed": "No se pudo abrir la carpeta en esa app."
   },
   "apps": {
     "title": "Tus apps, a través de Composio",
@@ -3343,5 +3353,20 @@
     },
     "atLine": "Línea {n}",
     "editComment": "Editar"
+  },
+  "aside": {
+    "menu": "Preguntar aparte…",
+    "title": "Preguntar aparte",
+    "hint": "No se añade al chat",
+    "placeholder": "Pregunta sobre este chat…",
+    "ask": "Preguntar",
+    "failed": "No se pudo obtener una respuesta. Comprueba que el modelo esté en marcha.",
+    "empty": "No llegó ninguna respuesta. Prueba a preguntarlo de otra forma.",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "inChat": "Preguntar en el chat"
+  },
+  "needsYou": {
+    "menu": "Siguiente solicitud de aprobación"
   }
 }
