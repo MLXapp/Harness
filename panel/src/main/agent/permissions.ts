@@ -373,6 +373,8 @@ export function decideToolPermission(input: PermissionInput): PermissionDecision
     return { action: 'allow', sandbox: false }
   }
 
+  // Scheduling sets up something that later runs on its own.
+  if (toolName === 'schedule_task') return ask('tool', 'schedule')
   // An unknown built-in: fail closed to asking.
   return ask('tool', preset)
 }

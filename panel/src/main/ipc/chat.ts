@@ -59,6 +59,8 @@ import { appsService } from "./apps";
 import { appsInCall, decideAppCall, wrapUntrusted } from "../apps/composioPolicy";
 import { discoverSkills, renderSkillIndex } from "../agent/skills";
 import { looksSecret, renderMemoryBlock } from "../memory/store";
+import { createTaskFromChat } from "./tasks";
+import { describeSchedule } from "../../shared/schedule";
 import { t as tMain } from "../i18n";
 import {
   looksLikeSandboxDenial,
@@ -1046,6 +1048,14 @@ async function resolveServerEndpoint(
 
   return { host: "127.0.0.1", port: DEFAULT_PORT };
 }
+
+/**
+ * Send a prompt as a new turn in a chat, from main (scheduled tasks). Set by
+ * registerChatHandlers. A local model must be running: a task never falls
+ * back to whatever other model happens to be up.
+ */
+export let runChatTurnFromMain: (chatId: string, prompt: string) => Promise<{ ok: boolean; error?: string }> =
+  async () => ({ ok: false, error: "Chat is not ready yet." });
 
 /** Successful turns shorter than this never notify (the user was probably watching). */
 const TURN_NOTIFY_MIN_SECONDS = 20;
@@ -5144,6 +5154,27 @@ export function registerChatHandlers(
                   }, 300000);
                 });
                 emitToolStatus("result", "ask_user", resultText, toolIteration, tc.id);
+              } else if (tc.function.name === "schedule_task") {
+                // A lasting change: asks (Workspace, Read only), refused in Plan mode.
+                const refusal = refusalOf(await gateToolCall(tc.function.name, toolArgs, tc.id, true, fullContent));
+                if (refusal) {
+                  resultText = refusal;
+                  emitToolStatus("error", tc.function.name, resultText, toolIteration, tc.id);
+                } else {
+                  const created = createTaskFromChat(chatId, {
+                    title: String(toolArgs.title ?? ""),
+                    prompt: String(toolArgs.prompt ?? ""),
+                    schedule: toolArgs.schedule,
+                  });
+                  if (created.ok) {
+                    const next = created.task.nextRun ? new Date(created.task.nextRun).toLocaleString() : "never";
+                    resultText = `Scheduled "${created.task.title}" (${describeSchedule(created.task.schedule)}). Next run: ${next}. It runs in its own chat; the user can pause or delete it in Preferences → Tasks.`;
+                    emitToolStatus("result", tc.function.name, resultText, toolIteration, tc.id);
+                  } else {
+                    resultText = `Not scheduled: ${created.error}`;
+                    emitToolStatus("error", tc.function.name, resultText, toolIteration, tc.id);
+                  }
+                }
               } else if (tc.function.name === "remember" || tc.function.name === "recall" || tc.function.name === "forget") {
                 const r = runMemoryTool(tc.function.name, toolArgs, chatId);
                 resultText = r.text;
@@ -6657,6 +6688,27 @@ export function registerChatHandlers(
     return parseStoredTodos(db.getChatAgentState(chatId).todosJson);
   });
 
+  runChatTurnFromMain = async (chatId: string, prompt: string) => {
+    const chat = db.getChat(chatId);
+    if (!chat) return { ok: false, error: "The task's chat was deleted." };
+    const modelPath = String(chat.modelPath || chat.modelId || "");
+    if (!modelPath) return { ok: false, error: "The task's chat has no model." };
+    let endpoint: { host: string; port: number } | undefined;
+    if (!modelPath.startsWith("provider://")) {
+      const session = sessionManager.getSessionByModelPath(modelPath.replace(/\/+$/, ""));
+      if (!session || !["running", "loading", "standby"].includes(session.status)) {
+        return { ok: false, error: "Its model was not running. Start the model (or switch the task's chat to a cloud model)." };
+      }
+      endpoint = { host: session.host, port: session.port };
+    }
+    try {
+      const res = await handleSendMessage(null, chatId, prompt, endpoint);
+      if (res && res.success === false) return { ok: false, error: String(res.error || "Failed") };
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: String(err?.message ?? err) };
+    }
+  };
   ipcMain.handle("chat:steer", (_, chatId: string, id: string, text: string) => {
     if (typeof chatId !== "string" || typeof text !== "string" || !text.trim()) return { accepted: false };
     if (!activeRequests.has(chatId)) return { accepted: false };

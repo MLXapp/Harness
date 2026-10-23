@@ -1,4 +1,6 @@
-import { Boxes, Globe, PanelLeftClose, Server, Settings, SquarePen, type LucideIcon } from 'lucide-react'
+import { Boxes, CalendarClock, Globe, PanelLeftClose, Server, Settings, SquarePen, type LucideIcon } from 'lucide-react'
+import { Reveal } from '../ui/Reveal'
+import { useTasks } from '../preferences/TasksPreference'
 import { useAppState } from '../../contexts/AppStateContext'
 import { useTranslation } from '../../i18n'
 import { consolePageForMode, isWorkspaceTab, type ConsolePage } from '../../lib/consoleNavigation'
@@ -115,6 +117,7 @@ export function ConsoleSidebar({ onChatSelect, onNewChat }: ConsoleSidebarProps)
             }} />
         </div>
 
+        <TasksLink onOpen={() => openPreferences('tasks')} />
         <button data-vmlx-control="console-preferences" title={t('console.preferences')}
           aria-label={t('console.preferences')}
           className="shrink-0 mlx-hair-t h-12 px-[21px] flex items-center gap-3 text-[13.5px] text-left text-muted-foreground hover:text-foreground hover:bg-[var(--sidebar-hover)] whitespace-nowrap"
@@ -124,5 +127,23 @@ export function ConsoleSidebar({ onChatSelect, onNewChat }: ConsoleSidebarProps)
         </button>
       </div>
     </aside>
+  )
+}
+
+/** Shown only while scheduled tasks exist: how many, and whether one runs. */
+function TasksLink({ onOpen }: { onOpen: () => void }) {
+  const { t } = useTranslation()
+  const tasks = useTasks()
+  const count = tasks?.length ?? 0
+  const running = tasks?.some(x => x.running) ?? false
+  return (
+    <Reveal open={count > 0}>
+      <button type="button" data-vmlx-control="console-tasks" onClick={onOpen}
+        className="mlx-hair-t flex h-11 w-full items-center gap-3 px-[21px] text-left text-[13.5px] text-muted-foreground hover:bg-[var(--sidebar-hover)] hover:text-foreground">
+        <CalendarClock className="h-[18px] w-[18px] shrink-0" strokeWidth={1.8} />
+        <span className="flex-1">{t('tasks.sidebar')}</span>
+        {running ? <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--acc)] animate-pulse" /> : <span className="text-[12px] tabular-nums">{count}</span>}
+      </button>
+    </Reveal>
   )
 }

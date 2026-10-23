@@ -461,6 +461,14 @@ declare global {
       chrome?: {
         vibrancy: () => boolean;
       };
+      tasks?: {
+        list: () => Promise<Array<import('./shared/schedule').ScheduledTask & { running: boolean }>>;
+        create: (sourceChatId: string, input: { title: string; prompt: string; schedule: import('./shared/schedule').Schedule }) => Promise<{ ok: boolean; error?: string }>;
+        setEnabled: (id: string, on: boolean) => Promise<unknown>;
+        runNow: (id: string) => Promise<boolean>;
+        delete: (id: string) => Promise<boolean>;
+        onChanged: (callback: () => void) => () => void;
+      };
       memory?: {
         list: () => Promise<Array<{ id: string; text: string; createdAt: number; updatedAt: number; sourceChatId?: string }>>;
         enabled: () => Promise<boolean>;

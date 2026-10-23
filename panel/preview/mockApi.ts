@@ -505,6 +505,21 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       readText: async () => 'sk-preview-0123456789abcdef',
     },
 
+    tasks: (() => {
+      const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()
+      let items: any[] = params.get('tasks') === 'sample' ? [
+        { id: 't1', title: 'Morning brief', prompt: 'Summarize my unread mail and today\'s calendar.', chatId: 'chat-trip', schedule: { kind: 'daily', time: '08:00' }, enabled: true, nextRun: Date.now() + 9 * 3600000, lastRun: Date.now() - 15 * 3600000, lastStatus: 'ok', lastNote: 'Ran at 09:14 instead of 08:00: the Mac was asleep or MLX Harness was closed.', createdAt: Date.now() - 3 * 86400000, running: false },
+        { id: 't2', title: 'Check the build', prompt: 'Run the tests and tell me what fails.', chatId: 'chat-swift', schedule: { kind: 'interval', minutes: 120 }, enabled: false, nextRun: null, createdAt: Date.now() - 86400000, running: false },
+      ] : []
+      return {
+        list: async () => items,
+        create: async (_c: string, input: any) => { items = [{ id: `t${Date.now()}`, ...input, chatId: 'chat-trip', enabled: true, nextRun: Date.now() + 3600000, createdAt: Date.now(), running: false }, ...items]; events.emit('tasks:changed'); return { ok: true } },
+        setEnabled: async (id: string, on: boolean) => { items = items.map(i => (i.id === id ? { ...i, enabled: on } : i)); events.emit('tasks:changed'); return true },
+        runNow: async () => true,
+        delete: async (id: string) => { items = items.filter(i => i.id !== id); events.emit('tasks:changed'); return true },
+        onChanged: (cb: () => void) => events.on('tasks:changed', cb as any),
+      }
+    })(),
     memory: (() => {
       let on = true
       let items = [
