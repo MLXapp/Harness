@@ -7,7 +7,8 @@
  * features that only run inside Electron: the window renders and its preload
  * API answers over IPC, memory and scheduled-task stores, the agent browser
  * (own session, isolated-world scripts, refs, clicks, local-address blocking)
- * and the MLX Node yield watcher. It writes a JSON report and exits 0 (all
+ * the Changes record/revert path through the tool hook, and the MLX Node
+ * yield watcher. It writes a JSON report and exits 0 (all
  * passed), 1 (a check failed) or 2 (timed out). Nothing is left behind: the
  * memory entry it writes is deleted again.
  */
@@ -84,6 +85,10 @@ export async function runSelfTest(out: string, getWindow: () => BrowserWindow | 
       out.memoryEnabled = typeof (await api.memory.enabled()) === 'boolean'
       out.apps = typeof (await api.apps.status()) === 'object'
       out.steer = typeof api.chat.steer === 'function'
+      out.aside = typeof api.chat.aside === 'function'
+      out.changes = Array.isArray(await api.changes.list('self-test-none'))
+      out.openIn = Array.isArray(await api.code.openInApps())
+      out.checkApp = typeof api.apps.checkApp === 'function'
       return out
     })()`)
     for (const [k, v] of Object.entries(r)) assert(v === true, `${k} did not answer`)
@@ -100,6 +105,32 @@ export async function runSelfTest(out: string, getWindow: () => BrowserWindow | 
       store.delete(entry.id)
     }
     assert(!store.get(entry.id), 'the note was not deleted')
+  })
+
+  await check('Changes: a turn\'s edit is recorded through the tool hook and reverted', async () => {
+    const { mkdtempSync, readFileSync, rmSync, writeFileSync: write } = await import('fs')
+    const { join } = await import('path')
+    const { tmpdir } = await import('os')
+    const { TurnChanges } = await import('./agent/turnChanges')
+    const { executeBuiltinTool } = await import('./tools/executor')
+    const base = mkdtempSync(join(tmpdir(), 'mlx-selftest-changes-'))
+    try {
+      const project = join(base, 'project')
+      const { mkdirSync } = await import('fs')
+      mkdirSync(project)
+      write(join(project, 'a.txt'), 'one\n')
+      const tc = new TurnChanges(() => join(base, 'store'))
+      tc.begin('self-test', 'm1', project)
+      const r = await executeBuiltinTool('write_file', { path: 'a.txt', content: 'two\n' }, project, undefined,
+        { beforeChange: (full: string) => tc.noteBefore('self-test', full) })
+      assert(!r.is_error, `write_file failed: ${String(r.content).slice(0, 200)}`)
+      const set = tc.finish('self-test', 'm1')
+      assert(set && set.files.length === 1 && set.files[0].kind === 'modified', `not recorded: ${JSON.stringify(set)}`)
+      const back = tc.revert('self-test', 'm1')
+      assert(back.reverted.length === 1 && readFileSync(join(project, 'a.txt'), 'utf8') === 'one\n', `not reverted: ${JSON.stringify(back)}`)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
   })
 
   await check('scheduled tasks store and scheduler load', async () => {
