@@ -3129,9 +3129,9 @@
         "audio": "speech",
         "music": "music"
       },
-      "runsHere": "Your {chip} with {gb} GB makes {what} right here: private and free",
-      "soon": "Your {chip} with {gb} GB will make {what} on this Mac when local {what} arrives. Until then it runs in the cloud",
-      "cloudOnly": "Local {what} needs {need} GB or more; this {chip} has {gb} GB, so the cloud gives the best results"
+      "runsHere": "Your {chip} with {gb} GB makes {what} right here: private and free.",
+      "soon": "Your {chip} with {gb} GB will make {what} on this Mac when local {what} arrives. Until then it runs in the cloud.",
+      "cloudOnly": "Local {what} needs {need} GB or more; this {chip} has {gb} GB, so the cloud gives the best results."
     }
   },
   "code": {
@@ -3210,7 +3210,9 @@
     "offTitle": "Turn on apps (Gmail, Calendar, Slack…) in this chat",
     "setupTitle": "Connect apps (Gmail, Calendar, Slack…)",
     "connectedApp": "Connected",
-    "directNote": "Models on this Mac get the main actions of the apps you connected here directly (easier for small models); cloud models search all of Composio."
+    "directNote": "Models on this Mac get the main actions of the apps you connected here directly (easier for small models); cloud models search all of Composio.",
+    "nowConnected": "Connected. Its actions are ready to use.",
+    "checkAgain": "Check Again"
   },
   "skills": {
     "intro": "Skills are folders with a SKILL.md: instructions (and sometimes scripts) for a kind of work, in the same format as Claude Code. The agent sees each skill's name and description and reads the instructions only when a task needs them. Scripts run with the normal tools, so they ask like any command.",
@@ -3267,7 +3269,28 @@
       "weekly": "{days} at {time}",
       "hours": "Every {n} h",
       "minutes": "Every {n} min"
-    }
+    },
+    "note": {
+      "late": "Ran at {ran} instead of {due}: the Mac was asleep or MLX Harness was closed.",
+      "retrying": "Its model wasn't running. Trying again every 5 minutes for an hour.",
+      "retries-out": "Its model didn't start within an hour. Start the model, or switch the task's chat to a cloud model.",
+      "interrupted": "Interrupted: MLX Harness closed during the run.",
+      "past": "Its time has passed. Make a new task with a new time.",
+      "chat-deleted": "Its chat was deleted.",
+      "no-model": "Its chat has no model.",
+      "cloud-lost": "Its chat lost its cloud model. Open the chat and pick a model.",
+      "model-not-running": "Its model wasn't running.",
+      "failed": "The run failed. Open the chat to see why."
+    },
+    "error": {
+      "past": "That time has already passed.",
+      "max": "There are already 50 tasks. Delete some first.",
+      "nested": "A scheduled task's chat can't make more tasks. Open another chat.",
+      "no-prompt": "The task needs a prompt.",
+      "no-chat": "Open a chat with the model the task should use first."
+    },
+    "deleteConfirm": "Delete this task? Its chat stays in your history.",
+    "deleteYes": "Delete Task"
   },
   "browser": {
     "bigger": "Larger",
@@ -3281,5 +3304,44 @@
       "help": "While a model is loaded in MLX Harness, MLX Node stops its network jobs and frees its memory, then carries on within minutes after the model stops.",
       "update": "Needs MLX Node 0.9.6 or newer (this Mac has {version})."
     }
+  },
+  "changes": {
+    "title": "Changes",
+    "files": "{n} files changed",
+    "filesOne": "1 file changed",
+    "review": "Review",
+    "allReverted": "reverted",
+    "someReverted": "{n} reverted",
+    "revertAll": "Revert All",
+    "revertFile": "Revert File",
+    "reverted": "Reverted",
+    "revertedN": "Put {n} files back as they were before this reply.",
+    "revertedNOne": "Put the file back as it was before this reply.",
+    "failed": "{n} files couldn't be put back.",
+    "failedOne": "The file couldn't be put back.",
+    "conflict": "{n} files changed after this reply. Reverting them loses those later edits.",
+    "conflictOne": "This file changed after this reply. Reverting it loses those later edits.",
+    "revertAnyway": "Revert Anyway",
+    "reveal": "Show in Finder",
+    "cantRevert": "Its earlier version wasn't kept (over 5 MB).",
+    "opaque": "This file isn't text (or is over 5 MB), so its lines aren't shown.",
+    "noLines": "No line changes (only the file's metadata changed).",
+    "changedSince": "This file changed after the reply: the diff shows it as it is now.",
+    "comment": "Comment on this line",
+    "commentPlaceholder": "What should change here?",
+    "addComment": "Add",
+    "removeComment": "Remove",
+    "commentsHint": "Your comments go to the agent as one message.",
+    "discard": "Discard",
+    "send": "Send {n} Comments",
+    "sendOne": "Send Comment",
+    "commentsIntro": "Review comments on your changes. Please address each one:",
+    "kind": {
+      "added": "New file",
+      "modified": "Changed",
+      "deleted": "Deleted"
+    },
+    "atLine": "Line {n}",
+    "editComment": "Edit"
   }
 }

@@ -2,6 +2,7 @@
 import './app-identity'
 import './user-data-dir'
 import { closeAllAgentBrowserWindows } from './browser/electronDriver'
+import { registerMainWindow } from './mainWindowRef'
 import { getPowerMode } from './powerMode'
 import { app, BrowserWindow, ipcMain, dialog, shell, session, nativeTheme, clipboard } from 'electron'
 import { join } from 'path'
@@ -33,6 +34,7 @@ import { registerMediaHandlers, mediaRoot } from './ipc/media'
 import { registerAppsHandlers } from './ipc/apps'
 import { registerMemoryHandlers } from './ipc/memory'
 import { registerTaskHandlers } from './ipc/tasks'
+import { registerChangesHandlers } from './ipc/changes'
 import { registerMediaScheme, handleMediaProtocol } from './media/protocol'
 import { offerMlxNodeOnFirstRun } from './mlx-node'
 import { sessionManager } from './sessions'
@@ -288,6 +290,7 @@ function createWindow(): void {
     registerAppsHandlers()
     registerMemoryHandlers()
     registerTaskHandlers()
+    registerChangesHandlers()
 
     // Download window — a real separate window for showing download progress
     ipcMain.handle('downloads:openWindow', () => {
@@ -504,6 +507,8 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, '../../out/renderer/index.html'))
   }
 }
+
+registerMainWindow(() => mainWindow, () => createWindow())
 
 // mlx-media:// (generated images, video and audio) must be privileged before ready.
 registerMediaScheme()

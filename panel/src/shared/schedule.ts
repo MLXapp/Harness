@@ -94,8 +94,21 @@ export interface ScheduledTask {
   nextRun: number | null
   lastRun?: number
   lastStatus?: 'ok' | 'error' | 'running'
+  /** Raw error text from the run (English; the window shows `note` when set). */
   lastNote?: string
+  /** What to tell the user about the last run, translated in the window. */
+  note?: TaskNote
   /** Retries after "not run" (model not up), reset after a run. */
   retries?: number
   createdAt: number
 }
+
+/**
+ * Codes for what happened, so Preferences → Tasks can say it in the app's
+ * language. `error` codes come from the turn runner; `error` text is kept for
+ * anything without a code.
+ */
+export type TaskNoteCode =
+  | 'late' | 'retrying' | 'retries-out' | 'interrupted' | 'past'
+  | 'chat-deleted' | 'no-model' | 'cloud-lost' | 'model-not-running' | 'failed'
+export interface TaskNote { code: TaskNoteCode; ran?: number; due?: number; error?: string }

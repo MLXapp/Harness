@@ -184,11 +184,13 @@ export function ChatModeToolbar({ activeChatId, activeSessionId, onOverridesChan
         {displaySession && !providerBinding && (
           <div className="flex min-w-0 items-center gap-1 mlx-view-in">
             {statusLabel && (
-              <span className="flex items-center gap-1.5 px-1.5 text-[13px] text-muted-foreground">
+              <span className="flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap px-1.5 text-[13px] text-muted-foreground"
+                title={statusLabel} role="status" aria-label={statusLabel}>
                 <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full transition-colors ${
                   isRunning ? 'bg-success' : isStandby ? 'bg-blue-400' : isError ? 'bg-destructive' : 'bg-muted-foreground'
                 }`} />
-                {statusLabel}
+                {/* Narrow windows keep just the dot (the label is its tooltip). */}
+                <span className="mlx-tb-label mlx-tb-status">{statusLabel}</span>
               </span>
             )}
             {isError && (

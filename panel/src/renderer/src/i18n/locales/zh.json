@@ -3129,9 +3129,9 @@
         "audio": "语音",
         "music": "音乐"
       },
-      "runsHere": "你的 {chip}（{gb} GB）可直接在本机生成{what}：私密且免费",
-      "soon": "本地{what}上线后，你的 {chip}（{gb} GB）即可在本机生成。在此之前将在云端运行",
-      "cloudOnly": "本地{what}需要 {need} GB 以上内存；这台 {chip} 只有 {gb} GB，云端效果最好"
+      "runsHere": "你的 {chip}（{gb} GB）可以在本机生成{what}：私密且免费。",
+      "soon": "本地{what}上线后，你的 {chip}（{gb} GB）就能在本机生成{what}。在此之前将在云端生成。",
+      "cloudOnly": "本地{what}需要 {need} GB 以上内存；这台 {chip} 只有 {gb} GB，云端效果最好。"
     }
   },
   "code": {
@@ -3210,7 +3210,9 @@
     "offTitle": "在此对话中开启应用（Gmail、日历、Slack…）",
     "setupTitle": "连接应用（Gmail、日历、Slack…）",
     "connectedApp": "已连接",
-    "directNote": "这台 Mac 上的模型会直接获得你在此连接的应用的主要操作（对小模型更容易）；云端模型会搜索整个 Composio。"
+    "directNote": "这台 Mac 上的模型会直接获得你在此连接的应用的主要操作（对小模型更容易）；云端模型会搜索整个 Composio。",
+    "nowConnected": "已连接。可以使用它的操作了。",
+    "checkAgain": "再次检查"
   },
   "skills": {
     "intro": "技能是包含 SKILL.md 的文件夹：针对某类工作的说明（有时附带脚本），格式与 Claude Code 相同。智能体只看到名称和描述，需要时才读取说明。脚本通过普通工具运行，因此会像其他命令一样先询问。",
@@ -3267,7 +3269,28 @@
       "weekly": "{days} {time}",
       "hours": "每 {n} 小时",
       "minutes": "每 {n} 分钟"
-    }
+    },
+    "note": {
+      "late": "在 {ran} 运行（原定 {due}）：Mac 处于睡眠状态或 MLX Harness 未打开。",
+      "retrying": "它的模型未运行。将在一小时内每 5 分钟重试一次。",
+      "retries-out": "一小时内模型未启动。请启动模型，或将任务的聊天切换到云端模型。",
+      "interrupted": "已中断：运行期间 MLX Harness 被关闭。",
+      "past": "时间已过。请用新的时间创建一个新任务。",
+      "chat-deleted": "它的聊天已被删除。",
+      "no-model": "它的聊天没有模型。",
+      "cloud-lost": "它的聊天丢失了云端模型。请打开聊天并选择模型。",
+      "model-not-running": "它的模型未运行。",
+      "failed": "运行失败。打开聊天查看原因。"
+    },
+    "error": {
+      "past": "该时间已经过去。",
+      "max": "已有 50 个任务。请先删除一些。",
+      "nested": "计划任务的聊天不能再创建任务。请打开另一个聊天。",
+      "no-prompt": "任务需要提示词。",
+      "no-chat": "请先打开使用该任务模型的聊天。"
+    },
+    "deleteConfirm": "删除此任务？它的聊天会保留在历史记录中。",
+    "deleteYes": "删除任务"
   },
   "browser": {
     "bigger": "放大",
@@ -3281,5 +3304,44 @@
       "help": "MLX Harness 中加载模型期间，MLX Node 会停止网络任务并释放内存，模型停止后几分钟内继续运行。",
       "update": "需要 MLX Node 0.9.6 或更高版本（这台 Mac 为 {version}）。"
     }
+  },
+  "changes": {
+    "title": "更改",
+    "files": "更改了 {n} 个文件",
+    "filesOne": "更改了 1 个文件",
+    "review": "查看",
+    "allReverted": "已还原",
+    "someReverted": "已还原 {n} 个",
+    "revertAll": "全部还原",
+    "revertFile": "还原文件",
+    "reverted": "已还原",
+    "revertedN": "已将 {n} 个文件恢复到此回复之前的样子。",
+    "revertedNOne": "已将该文件恢复到此回复之前的样子。",
+    "failed": "有 {n} 个文件无法还原。",
+    "failedOne": "该文件无法还原。",
+    "conflict": "有 {n} 个文件在此回复之后又被修改。还原会丢失之后的编辑。",
+    "conflictOne": "此文件在此回复之后又被修改。还原会丢失之后的编辑。",
+    "revertAnyway": "仍然还原",
+    "reveal": "在访达中显示",
+    "cantRevert": "未保留其早先的版本（超过 5 MB）。",
+    "opaque": "此文件不是文本（或超过 5 MB），因此不显示其内容行。",
+    "noLines": "没有行的变化（只改了文件的元数据）。",
+    "changedSince": "此文件在回复之后又被修改：差异显示的是它现在的样子。",
+    "comment": "评论这一行",
+    "commentPlaceholder": "这里应该怎么改？",
+    "addComment": "添加",
+    "removeComment": "移除",
+    "commentsHint": "你的评论会作为一条消息发给智能体。",
+    "discard": "丢弃",
+    "send": "发送 {n} 条评论",
+    "sendOne": "发送评论",
+    "commentsIntro": "关于你的更改的审阅评论，请逐条处理：",
+    "kind": {
+      "added": "新文件",
+      "modified": "已修改",
+      "deleted": "已删除"
+    },
+    "atLine": "第 {n} 行",
+    "editComment": "编辑"
   }
 }

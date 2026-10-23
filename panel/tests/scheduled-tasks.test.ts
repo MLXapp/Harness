@@ -42,7 +42,8 @@ describe('scheduler', () => {
     expect(runs).toEqual(['c1:Summarize'])
     const after = store.get(t.id)!
     expect(after.lastStatus).toBe('ok')
-    expect(after.lastNote).toMatch(/instead of 08:00/)
+    // Said in the app's language: a code with the two times.
+    expect(after.note).toEqual({ code: 'late', ran: local(2026, 10, 25, 9, 30), due: local(2026, 10, 23, 8, 0) })
     expect(after.nextRun).toBe(local(2026, 10, 26, 8, 0))
     await s.tick(); await new Promise(r => setTimeout(r, 0))
     expect(runs).toHaveLength(1)
@@ -58,6 +59,30 @@ describe('scheduler', () => {
     expect(after.enabled).toBe(false)
     expect(after.lastStatus).toBe('error')
     expect(after.lastNote).toContain('not running')
+  })
+  it('retries quietly while the model is down, never turns a paused task on, and a past once-task stays off', async () => {
+    let now = local(2026, 10, 23, 7, 0)
+    const finished: string[] = []
+    const store = new TaskStore(new Database(':memory:'))
+    const s = new TaskScheduler({
+      store: () => store, now: () => now,
+      runTurn: async () => ({ ok: false, retry: true, code: 'model-not-running', error: 'Its model was not running.' }),
+      onFinished: t => finished.push(t.id),
+    })
+    const on = s.create({ title: 'a', prompt: 'p', chatId: 'c1', schedule: { kind: 'daily', time: '08:00' } })
+    await s.run(on.id)
+    expect(store.get(on.id)).toMatchObject({ enabled: true, retries: 1, note: { code: 'retrying' } })
+    expect(finished).toEqual([]) // no notification while it retries
+    const paused = s.create({ title: 'b', prompt: 'p', chatId: 'c2', schedule: { kind: 'daily', time: '08:00' } })
+    s.setEnabled(paused.id, false)
+    await s.run(paused.id) // "Run now" on a paused task
+    expect(store.get(paused.id)).toMatchObject({ enabled: false, note: { code: 'model-not-running' } })
+    expect(finished).toEqual([paused.id])
+    const once = s.create({ title: 'c', prompt: 'p', chatId: 'c3', schedule: { kind: 'once', at: now + 60_000 } })
+    s.setEnabled(once.id, false)
+    now += 120_000
+    s.setEnabled(once.id, true)
+    expect(store.get(once.id)).toMatchObject({ enabled: false, note: { code: 'past' } })
   })
   it('is wired: the tool asks, runs in its own chat, and the app starts the scheduler', () => {
     const chat = readFileSync('src/main/ipc/chat.ts', 'utf8')

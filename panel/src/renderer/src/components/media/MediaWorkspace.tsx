@@ -208,8 +208,9 @@ function MacNote({ kind, possible, mac }: { kind: MediaKind; possible: { runsHer
   const minGB = Math.min(...local.map(m => (m.where === 'local' ? m.minMemoryGB : Infinity)))
   const key = possible.runsHere ? 'runsHere' : possible.couldRunHere ? 'soon' : 'cloudOnly'
   return (
-    <div data-vmlx-section="media-mac-note" className="mt-5 flex items-center gap-2 rounded-full bg-[rgb(var(--bg-2-rgb))] px-3.5 py-1.5 text-[13px] text-muted-foreground shadow-[var(--elev-1)]">
-      <span className={`h-1.5 w-1.5 rounded-full ${possible.runsHere ? 'bg-success' : possible.couldRunHere ? 'bg-warning' : 'bg-[var(--sys-blue)]'}`} />
+    <div data-vmlx-section="media-mac-note" className="mt-5 inline-flex max-w-full items-start gap-2 rounded-[14px] bg-[rgb(var(--bg-2-rgb))] px-3.5 py-1.5 text-left text-[13px] leading-[19px] text-muted-foreground shadow-[var(--elev-1)]">
+      {/* The dot sits on the first line, also when the sentence wraps. */}
+      <span className={`mt-[6.5px] h-1.5 w-1.5 shrink-0 rounded-full ${possible.runsHere ? 'bg-success' : possible.couldRunHere ? 'bg-warning' : 'bg-[var(--sys-blue)]'}`} />
       <span>{t(`media.mac.${key}`, { chip, gb: mac.memoryGB, need: Number.isFinite(minGB) ? minGB : 16, what: t(`media.mac.what.${kind}`) })}</span>
     </div>
   )

@@ -60,10 +60,29 @@ export function PreferencesSheet() {
 
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dispatch({ type: 'CLOSE_PREFERENCES' }) }
+    const before = document.activeElement as HTMLElement | null
+    const onKey = (e: KeyboardEvent) => {
+      // A field that handled Esc itself (cancel an edit) keeps the sheet open.
+      if (e.key === 'Escape' && !e.defaultPrevented) { dispatch({ type: 'CLOSE_PREFERENCES' }); return }
+      // Tab stays inside the sheet.
+      if (e.key === 'Tab' && panelRef.current) {
+        const items = [...panelRef.current.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')]
+          .filter(el => el.offsetParent !== null && !el.closest('[inert]'))
+        if (items.length === 0) return
+        const first = items[0], last = items[items.length - 1]
+        const at = document.activeElement
+        if (e.shiftKey && (at === first || at === panelRef.current)) { e.preventDefault(); last.focus() }
+        else if (!e.shiftKey && at === last) { e.preventDefault(); first.focus() }
+        else if (!panelRef.current.contains(at)) { e.preventDefault(); first.focus() }
+      }
+    }
     window.addEventListener('keydown', onKey)
     panelRef.current?.focus()
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      // Back to where the user was.
+      if (before && document.contains(before)) requestAnimationFrame(() => before.focus())
+    }
   }, [open, dispatch])
 
   if (!mounted) return null

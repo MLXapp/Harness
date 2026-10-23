@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Sparkles, Loader2, X } from 'lucide-react'
 import { Reveal } from '../ui/Reveal'
 import { BrowserLiveView } from './BrowserLiveView'
+import { ChangesProvider } from './ChangesReview'
 import { MessageList } from './MessageList'
 import { ApprovalCards } from './ApprovalCards'
 import { InputBox, MediaAttachment } from './InputBox'
@@ -234,12 +235,15 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
     const offUnused = window.api.chat.onSteerUnused?.(data => {
       if (data.chatId !== chatIdRef.current) {
         // Another chat is open: keep them in that chat's queue for when it opens.
-        try { writeQueue(data.chatId, [...data.items, ...readQueue(data.chatId)]) } catch { /* storage off */ }
+        if (data.items.length > 0) {
+          try { writeQueue(data.chatId, [...data.items, ...readQueue(data.chatId)]) } catch { /* storage off */ }
+        }
         return
       }
-      const ids = new Set(data.items.map(i => i.id))
-      setSteering(st => st.filter(m => !ids.has(m.id)))
-      setQueued(q => [...data.items, ...q])
+      // The turn is over: chips that never joined go (their text, if any,
+      // comes back as queued messages).
+      setSteering(st => st.filter(m => m.joined))
+      if (data.items.length > 0) setQueued(q => [...data.items, ...q])
     })
     return () => { offJoined?.(); offUnused?.() }
   }, [chatId])
@@ -398,7 +402,12 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
       // Add placeholder assistant message so the typing indicator renders
       setMessages(prev => {
         if (prev.find(m => m.id === data.messageId)) return prev
-        return [...prev, {
+        // A turn started outside this view (a scheduled task) brings its prompt.
+        const u = data.userMessage
+        const withUser = u && typeof u.id === 'string' && !prev.some(m => m.id === u.id)
+          ? [...prev, { id: u.id, chatId: data.chatId, role: 'user' as const, content: String(u.content ?? ''), timestamp: Number(u.timestamp) || Date.now() }]
+          : prev
+        return [...withUser, {
           id: data.messageId,
           chatId: data.chatId,
           role: 'assistant' as const,
@@ -851,6 +860,7 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
 
   sendRef.current = (content: string) => handleSend(content)
   return (
+    <ChangesProvider chatId={chatId} onSendComments={text => { void handleSend(text) }}>
     <div className="relative flex flex-col h-full min-h-0">
       <BrowserLiveView chatId={chatId} />
       <MessageList
@@ -997,6 +1007,7 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
         sessionId={sessionId}
       />
     </div>
+    </ChangesProvider>
   )
 }
 

@@ -15,7 +15,10 @@ describe('steering a running turn', () => {
   })
   it('is stored with the turn and unused steers go back to the queue, stale locks too', () => {
     expect(chat).toContain('db.appendToUserMessage(userMessage.id, addition)')
-    expect(chat).toContain('win.webContents.send("chat:steerUnused", { chatId, items: unused });')
+    expect(chat).toContain('w.webContents.send("chat:steerUnused", { chatId, items });')
+    // Stop and stale-lock clears return them too.
+    const abort = chat.slice(chat.indexOf('ipcMain.handle("chat:abort"'), chat.indexOf('ipcMain.handle("chat:isStreaming"'))
+    expect(abort).toContain('returnUnusedSteers(chatId);')
     expect(chat).toContain('if (!activeRequests.has(chatId)) return { accepted: false };')
     const start = chat.indexOf('repeatCallTracker.newTurn(chatId);')
     expect(chat.slice(start, start + 200)).toContain('returnUnusedSteers(chatId, getWindow);')
@@ -26,6 +29,7 @@ describe('steering a running turn', () => {
     const ui = readFileSync('src/renderer/src/components/chat/ChatInterface.tsx', 'utf8')
     expect(ui).toContain('if (!options?.queue && window.api.chat.steer) {')
     expect(ui).toContain('writeQueue(data.chatId, [...data.items, ...readQueue(data.chatId)])')
+    expect(ui).toContain('setSteering(st => st.filter(m => m.joined))')
   })
 })
 

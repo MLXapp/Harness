@@ -523,6 +523,34 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
         onChanged: (cb: () => void) => events.on('tasks:changed', cb as any),
       }
     })(),
+    // ?code=sample: the second Swift reply changed two files (Changes review).
+    changes: (() => {
+      const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()
+      const dir = '/Users/alex/Projects/harness-site'
+      const before = 'struct NoteRow: View {\n  let note: Note\n  var body: some View {\n    HStack {\n      Text(note.title)\n      Spacer()\n    }\n  }\n}\n'
+      const after = 'struct NoteRow: View {\n  let note: Note\n  var body: some View {\n    HStack {\n      Text(note.title)\n        .font(.headline)\n      Spacer()\n    }\n    .contextMenu {\n      Button("Pin") { togglePin(note) }\n      Button("Delete", role: .destructive) { delete(note) }\n    }\n  }\n}\n'
+      let set: any = params.get('code') === 'sample' ? {
+        chatId: 'chat-swift', messageId: 'm4', at: Date.now() - 60000, workingDir: dir,
+        files: [
+          { path: `${dir}/Sources/NoteRow.swift`, shown: 'Sources/NoteRow.swift', kind: 'modified', added: 5, removed: 0, afterHash: 'x', revertible: true },
+          { path: `${dir}/Sources/NoteActions.swift`, shown: 'Sources/NoteActions.swift', kind: 'added', added: 12, removed: 0, afterHash: 'y', revertible: true },
+        ],
+      } : null
+      return {
+        list: async (chatId: string) => (set && set.chatId === chatId ? [set] : []),
+        file: async (_c: string, _m: string, path: string) => (path.endsWith('NoteRow.swift')
+          ? { before, after, opaque: false, changedSince: false }
+          : { before: '', after: 'import SwiftUI\n\nfunc togglePin(_ note: Note) {\n  note.pinned.toggle()\n}\n\nfunc delete(_ note: Note) {\n  withAnimation {\n    store.remove(note)\n  }\n}\n', opaque: false, changedSince: false }),
+        revert: async (_c: string, _m: string, paths: string[]) => {
+          const all = paths.length ? paths : set.files.map((f: any) => f.path)
+          set = { ...set, files: set.files.map((f: any) => (all.includes(f.path) ? { ...f, reverted: true } : f)) }
+          events.emit('changes:turn', set)
+          return { reverted: all, conflicts: [], failed: [] }
+        },
+        reveal: async () => true,
+        onTurn: (cb: (s: any) => void) => events.on('changes:turn', cb as any),
+      }
+    })(),
     memory: (() => {
       let on = true
       let items = [

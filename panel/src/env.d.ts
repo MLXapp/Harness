@@ -470,6 +470,13 @@ declare global {
         delete: (id: string) => Promise<boolean>;
         onChanged: (callback: () => void) => () => void;
       };
+      changes?: {
+        list: (chatId: string) => Promise<import('./shared/changes').TurnChangeSet[]>;
+        file: (chatId: string, messageId: string, path: string) => Promise<import('./shared/changes').FileTexts | null>;
+        revert: (chatId: string, messageId: string, paths: string[], force?: boolean) => Promise<import('./shared/changes').RevertResult>;
+        reveal: (chatId: string, messageId: string, path: string) => Promise<boolean>;
+        onTurn: (callback: (set: import('./shared/changes').TurnChangeSet) => void) => () => void;
+      };
       memory?: {
         list: () => Promise<Array<{ id: string; text: string; createdAt: number; updatedAt: number; sourceChatId?: string }>>;
         enabled: () => Promise<boolean>;
@@ -491,6 +498,7 @@ declare global {
         cancel: () => Promise<import('./shared/apps').AppsStatusView>;
         disconnect: () => Promise<import('./shared/apps').AppsStatusView>;
         connectApp: (toolkit: string) => Promise<{ ok: boolean; opened: number; message?: string }>;
+        checkApp: (toolkit: string) => Promise<{ ok: boolean; connected: boolean; message?: string }>;
         rules: () => Promise<Record<string, import('./shared/apps').AppRule>>;
         setRule: (toolkit: string, rule: import('./shared/apps').AppRule) => Promise<Record<string, import('./shared/apps').AppRule>>;
         chatEnabled: (chatId: string) => Promise<boolean>;

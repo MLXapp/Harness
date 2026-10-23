@@ -4,7 +4,7 @@
  * ask first (the default), always run, or are blocked. Reads always run.
  */
 import { useEffect, useState } from 'react'
-import { ExternalLink } from 'lucide-react'
+import { Check, ExternalLink } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import type { AppRule, AppsStatusView } from '../../../../shared/apps'
 import { Reveal } from '../ui/Reveal'
@@ -41,16 +41,38 @@ export function AppsPreference() {
   const connected = status?.state === 'connected'
   const waiting = status?.state === 'waiting-for-browser' || status?.state === 'connecting'
 
+  const [pending, setPending] = useState<string[]>([])
+  const refreshStatus = () => { void window.api.apps.status().then(s => window.dispatchEvent(new CustomEvent('vmlx:apps-status', { detail: s }))).catch(() => undefined) }
   const connectApp = async (id: string) => {
     setBusy(id)
     try {
       const r = await window.api.apps.connectApp(id)
       setNote(n => ({ ...n, [id]: r.ok ? (r.opened ? t('apps.finishInBrowser') : t('apps.alreadyConnected')) : (r.message || t('apps.connectFailed')) }))
-      void window.api.apps.status().then(s => window.dispatchEvent(new CustomEvent('vmlx:apps-status', { detail: s })))
+      if (r.ok && r.opened) setPending(p => [...new Set([...p, id])])
+      refreshStatus()
+    } catch (err: any) {
+      setNote(n => ({ ...n, [id]: String(err?.message ?? t('apps.connectFailed')) }))
     } finally {
       setBusy(null)
     }
   }
+  // Back from the browser: see whether the sign-in finished.
+  const check = async (id: string) => {
+    try {
+      const r = await window.api.apps.checkApp(id)
+      if (r.connected) {
+        setPending(p => p.filter(x => x !== id))
+        setNote(n => ({ ...n, [id]: t('apps.nowConnected') }))
+        refreshStatus()
+      }
+    } catch { /* stays pending */ }
+  }
+  useEffect(() => {
+    if (pending.length === 0) return
+    const onFocus = () => { for (const id of pending) void check(id) }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [pending]) // eslint-disable-line react-hooks/exhaustive-deps
   const setRule = async (id: string, rule: AppRule) => setRules(await window.api.apps.setRule(id, rule))
 
   return (
@@ -110,7 +132,6 @@ export function AppsPreference() {
               <div key={app.id} className="flex min-h-[52px] flex-wrap items-center gap-3 px-4 py-2" data-vmlx-app-row={app.id}>
                 <span className="flex min-w-[120px] flex-1 items-center gap-2 text-[13.5px] font-medium">
                   {app.name}
-                  {app.connected && <span className="h-1.5 w-1.5 rounded-full bg-success" title={t('apps.connectedApp')} aria-label={t('apps.connectedApp')} />}
                 </span>
                 <div role="radiogroup" aria-label={t('apps.ruleLabel', { name: app.name })}
                   className="relative grid grid-cols-3 w-[228px] rounded-[9px] bg-[var(--seg-track)] p-[2px]">
@@ -124,9 +145,17 @@ export function AppsPreference() {
                     </button>
                   ))}
                 </div>
-                <Btn size="md" disabled={busy === app.id || rule === 'blocked'} data-vmlx-control={`apps-connect-${app.id}`} onClick={() => void connectApp(app.id)}>
-                  {busy === app.id ? <Spinner /> : <ExternalLink className="h-3.5 w-3.5" />}{t('apps.connectApp')}
-                </Btn>
+                {app.connected && !pending.includes(app.id) ? (
+                  <span className="inline-flex h-7 items-center gap-1.5 px-1 text-[12.5px] text-muted-foreground">
+                    <Check className="h-3.5 w-3.5 text-success" />{t('apps.connectedApp')}
+                  </span>
+                ) : pending.includes(app.id) ? (
+                  <Btn size="md" data-vmlx-control={`apps-check-${app.id}`} onClick={() => void check(app.id)}>{t('apps.checkAgain')}</Btn>
+                ) : (
+                  <Btn size="md" disabled={busy === app.id || rule === 'blocked'} data-vmlx-control={`apps-connect-${app.id}`} onClick={() => void connectApp(app.id)}>
+                    {busy === app.id ? <Spinner /> : <ExternalLink className="h-3.5 w-3.5" />}{t('apps.connectApp')}
+                  </Btn>
+                )}
                 <Reveal open={!!note[app.id]} className="basis-full">
                   <p className="text-[12px] text-muted-foreground">{note[app.id]}</p>
                 </Reveal>

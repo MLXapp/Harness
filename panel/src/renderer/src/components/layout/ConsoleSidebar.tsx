@@ -57,6 +57,8 @@ export function ConsoleSidebar({ onChatSelect, onNewChat }: ConsoleSidebarProps)
 
   return (
     <aside data-vmlx-section="console-sidebar" aria-hidden={collapsed || undefined}
+      // Hidden: out of the Tab order too, not just out of sight.
+      {...(collapsed ? { inert: '' } : {})}
       className={`mlx-sidebar shrink-0 min-h-0 overflow-hidden transition-[width] duration-300 ease-mlx ${collapsed ? 'w-0' : 'w-[272px] max-[900px]:w-[236px]'}`}>
       <div className={`h-full w-[272px] max-[900px]:w-[236px] flex flex-col transition-opacity duration-300 ease-mlx ${collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         {/* Top strip: traffic lights (left, drawn by macOS) and the hide button. */}

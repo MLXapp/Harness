@@ -8,11 +8,12 @@
  * Credentials never cross to the renderer.
  */
 
-import { BrowserWindow, ipcMain, shell } from 'electron'
+import { ipcMain, shell } from 'electron'
 import { db } from '../database'
 import { decryptSecret, encryptValue } from '../secretStorage'
 import { AppsService, type AppsStatus } from '../apps/appsService'
 import { FEATURED_APPS, appName, type AppRule } from '../apps/composioPolicy'
+import { appWindows } from '../browser/electronDriver'
 import { discoverSkills } from '../agent/skills'
 import { mkdirSync } from 'fs'
 import { homedir } from 'os'
@@ -66,9 +67,7 @@ export function appsService(): AppsService {
 }
 
 function broadcast(status: AppsStatus): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('apps:status', status)
-  }
+  for (const win of appWindows()) win.webContents.send('apps:status', status)
 }
 
 export function registerAppsHandlers(): void {
@@ -91,6 +90,10 @@ export function registerAppsHandlers(): void {
   ipcMain.handle('apps:connectApp', async (_e, toolkit: string) => {
     if (typeof toolkit !== 'string' || !/^[a-z0-9_]{2,40}$/.test(toolkit)) return { ok: false, opened: 0, message: 'Unknown app.' }
     try { return await apps.connectApp(toolkit) } catch (err: any) { return { ok: false, opened: 0, message: String(err?.message ?? err) } }
+  })
+  ipcMain.handle('apps:checkApp', async (_e, toolkit: string) => {
+    if (typeof toolkit !== 'string' || !/^[a-z0-9_]{2,40}$/.test(toolkit)) return { ok: false, connected: false }
+    try { return await apps.checkApp(toolkit) } catch (err: any) { return { ok: false, connected: false, message: String(err?.message ?? err) } }
   })
   ipcMain.handle('apps:rules', () => apps.rules())
   ipcMain.handle('apps:setRule', (_e, toolkit: string, rule: AppRule) => {

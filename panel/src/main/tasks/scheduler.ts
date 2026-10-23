@@ -9,7 +9,7 @@
 
 import type Database from 'better-sqlite3'
 import { randomBytes } from 'crypto'
-import { describeSchedule, dueAction, nextRun, type Schedule, type ScheduledTask } from '../../shared/schedule'
+import { describeSchedule, dueAction, nextRun, type Schedule, type ScheduledTask, type TaskNote, type TaskNoteCode } from '../../shared/schedule'
 
 export function ensureTaskSchema(db: Database.Database): void {
   db.exec(`
@@ -51,14 +51,13 @@ export interface SchedulerDeps {
   store: () => TaskStore
   /** Send the prompt as a new turn in the chat; resolves when the turn ends. */
   /** `retry`: not run at all (e.g. its model was not up): try again soon. */
-  runTurn: (chatId: string, prompt: string) => Promise<{ ok: boolean; error?: string; retry?: boolean }>
+  runTurn: (chatId: string, prompt: string) => Promise<{ ok: boolean; error?: string; retry?: boolean; code?: string }>
   now?: () => number
   onChange?: () => void
+  /** A run ended for good (not while it waits to try again). */
   onFinished?: (task: ScheduledTask) => void
   maxConcurrent?: number
 }
-
-const fmtTime = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 
 export class TaskScheduler {
   private timer: ReturnType<typeof setInterval> | null = null
@@ -88,6 +87,13 @@ export class TaskScheduler {
   setEnabled(id: string, enabled: boolean): ScheduledTask | null {
     const t = this.deps.store().get(id)
     if (!t) return null
+    // A one-time task whose time has passed cannot be switched back on.
+    if (enabled && t.schedule.kind === 'once' && t.schedule.at <= this.now()) {
+      t.note = { code: 'past' }
+      this.deps.store().save(t)
+      this.deps.onChange?.()
+      return t
+    }
     t.enabled = enabled
     // Re-enabling starts from now: no catch-up for the paused time.
     if (enabled) t.nextRun = nextRun(t.schedule, this.now())
@@ -119,26 +125,28 @@ export class TaskScheduler {
       if (this.running.size >= max) break
       const action = dueAction(t.nextRun, now)
       if (action === 'wait') continue
-      void this.run(t.id, action === 'run-late' ? `Ran at ${fmtTime(now)} instead of ${fmtTime(t.nextRun!)}: the Mac was asleep or MLX Harness was closed.` : undefined)
+      void this.run(t.id, action === 'run-late' ? { code: 'late', ran: now, due: t.nextRun! } : undefined)
     }
   }
 
   /** Run one task now (also "Run now"). */
-  async run(id: string, lateNote?: string): Promise<ScheduledTask | null> {
+  async run(id: string, lateNote?: TaskNote): Promise<ScheduledTask | null> {
     const store = this.deps.store()
     const t = store.get(id)
     if (!t || this.running.has(id)) return t
     this.running.add(id)
+    const wasEnabled = t.enabled
     const started = this.now()
     t.lastRun = started
     t.lastStatus = 'running'
-    t.lastNote = lateNote
+    t.lastNote = undefined
+    t.note = lateNote
     // The next run is planned from now, so a late run never causes a burst.
     t.nextRun = nextRun(t.schedule, started)
     if (t.schedule.kind === 'once') t.enabled = false
     store.save(t)
     this.deps.onChange?.()
-    let result: { ok: boolean; error?: string; retry?: boolean }
+    let result: { ok: boolean; error?: string; retry?: boolean; code?: string }
     try {
       result = await this.deps.runTurn(t.chatId, t.prompt)
     } catch (err: any) {
@@ -149,25 +157,31 @@ export class TaskScheduler {
     // Deleted while it ran: stays deleted.
     if (!done) { this.deps.onChange?.(); return null }
     done.lastStatus = result.ok ? 'ok' : 'error'
-    done.lastNote = result.ok ? lateNote : `${result.error ?? 'Failed'}${lateNote ? ` · ${lateNote}` : ''}`
+    done.lastNote = result.ok ? undefined : result.error
+    const code = (result.code ?? 'failed') as TaskNoteCode
+    done.note = result.ok ? lateNote : { code, ...(result.error ? { error: result.error } : {}) }
     // Not run at all (its model was not up yet): try again in 5 minutes, up
-    // to an hour, instead of losing the run.
-    if (result.retry) {
+    // to an hour, quietly, instead of losing the run. Only for a task that
+    // is switched on: "Run now" on a paused task never turns it back on.
+    let final = true
+    if (result.retry && wasEnabled) {
       const tries = (done.retries ?? 0) + 1
       if (tries <= 12) {
         done.retries = tries
         done.nextRun = this.now() + 5 * 60_000
         done.enabled = true
-        done.lastNote = `${result.error ?? 'Not run'} Trying again in 5 min.`
+        done.note = { code: 'retrying', error: result.error }
+        final = false
       } else {
         done.retries = 0
+        done.note = { code: 'retries-out', error: result.error }
       }
     } else {
       done.retries = 0
     }
     store.save(done)
     this.deps.onChange?.()
-    this.deps.onFinished?.(done)
+    if (final) this.deps.onFinished?.(done)
     return done
   }
 
@@ -179,7 +193,8 @@ export class TaskScheduler {
     for (const t of store.list()) {
       if (t.lastStatus !== 'running') continue
       t.lastStatus = 'error'
-      t.lastNote = 'Interrupted: MLX Harness closed during the run.'
+      t.lastNote = undefined
+      t.note = { code: 'interrupted' }
       store.save(t)
     }
   }
