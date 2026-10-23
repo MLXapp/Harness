@@ -298,6 +298,7 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       setPlanMode: async (chatId: string, on: boolean) => { if (on) planChats.add(chatId); else planChats.delete(chatId); return on },
       getPlanMode: async (chatId: string) => planChats.has(chatId),
       steer: async () => ({ accepted: true }),
+      onBrowserFrame: on('browser:frame'),
       onSteered: on('chat:steered'),
       onSteerUnused: on('chat:steerUnused'),
       clearOverrides: async (chatId: string) => { overrides.delete(chatId); return { success: true } },

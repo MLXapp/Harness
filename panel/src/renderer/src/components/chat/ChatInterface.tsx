@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Sparkles, Loader2, X } from 'lucide-react'
 import { Reveal } from '../ui/Reveal'
+import { BrowserLiveView } from './BrowserLiveView'
 import { MessageList } from './MessageList'
 import { ApprovalCards } from './ApprovalCards'
 import { InputBox, MediaAttachment } from './InputBox'
@@ -846,7 +847,8 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
 
   sendRef.current = (content: string) => handleSend(content)
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="relative flex flex-col h-full min-h-0">
+      <BrowserLiveView chatId={chatId} />
       <MessageList
         messages={messages}
         streamingMessageId={streamingMessageId}

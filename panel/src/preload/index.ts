@@ -222,6 +222,11 @@ const api = {
       ipcRenderer.invoke('chat:setOverrides', chatId, overrides),
     getOverrides: (chatId: string) => ipcRenderer.invoke('chat:getOverrides', chatId),
     setPlanMode: (chatId: string, on: boolean): Promise<boolean> => ipcRenderer.invoke('chat:setPlanMode', chatId, on),
+    onBrowserFrame: (callback: (data: { chatId: string; url: string; frame: string | null; open: boolean }) => void) => {
+      const listener = (_e: unknown, data: { chatId: string; url: string; frame: string | null; open: boolean }) => callback(data)
+      ipcRenderer.on('browser:frame', listener)
+      return () => { ipcRenderer.removeListener('browser:frame', listener) }
+    },
     steer: (chatId: string, id: string, text: string): Promise<{ accepted: boolean }> => ipcRenderer.invoke('chat:steer', chatId, id, text),
     onSteered: (callback: (data: { chatId: string; ids: string[]; messageId?: string; content?: string | null }) => void) => {
       const listener = (_e: unknown, data: { chatId: string; ids: string[]; messageId?: string; content?: string | null }) => callback(data)

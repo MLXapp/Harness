@@ -61,6 +61,9 @@ import { discoverSkills, renderSkillIndex } from "../agent/skills";
 import { looksSecret, renderMemoryBlock } from "../memory/store";
 import { createTaskFromChat } from "./tasks";
 import { describeSchedule } from "../../shared/schedule";
+import { AgentBrowser } from "../browser/agentBrowser";
+import { createElectronDriver } from "../browser/electronDriver";
+import { BROWSER_TOOL_NAME, describeBrowserAction } from "../browser/toolDefinition";
 import { t as tMain } from "../i18n";
 import {
   looksLikeSandboxDenial,
@@ -713,6 +716,12 @@ function tokenCalibratorFor(chatId: string): TokenCalibrator {
 const alwaysAllowedCommands = new Map<string, Set<string>>();
 /** Code sessions in Plan mode (reading tools only), until switched off. */
 const planModeChats = new Set<string>();
+let sharedAgentBrowser: AgentBrowser | null = null;
+/** One agent browser for the app (its own Electron session, hidden window). */
+function agentBrowser(getWindow: () => BrowserWindow | null): AgentBrowser {
+  if (!sharedAgentBrowser) sharedAgentBrowser = new AgentBrowser(createElectronDriver(getWindow), { allowLocal: false });
+  return sharedAgentBrowser;
+}
 /** Chats whose context holds data read from an app (Composio) in this app run. */
 const chatsWithAppData = new Set<string>();
 /**
@@ -813,7 +822,7 @@ const SHELL_TOOLS = new Set([
   "get_process_output",
 ]);
 const DDG_SEARCH_TOOLS = new Set(["ddg_search"]);
-const FETCH_TOOLS = new Set(["fetch_url"]);
+const FETCH_TOOLS = new Set(["fetch_url", "browser"]);
 const GIT_TOOLS = new Set(["git"]);
 const UTILITY_TOOLS = new Set([
   "count_tokens",
@@ -2178,6 +2187,8 @@ export function registerChatHandlers(
         toolCallId: string | undefined,
         isBuiltin: boolean,
         modelText: string,
+        /** A clearer line for the approval card than the raw arguments. */
+        subjectOverride?: string,
       ): Promise<{ ok: true; sandboxProfile: string | null } | { ok: false; message: string }> => {
         const decision = decideToolPermission({
           preset: permissionPreset,
@@ -2208,7 +2219,10 @@ export function registerChatHandlers(
               toolCallId,
               toolName,
               kind: decision.kind,
-              subject: decision.subject.length > 8000 ? `${decision.subject.slice(0, 8000)}…` : decision.subject,
+              subject: (() => {
+                const subject = subjectOverride || decision.subject;
+                return subject.length > 8000 ? `${subject.slice(0, 8000)}…` : subject;
+              })(),
               reason: decision.justification ?? statedIntent(modelText),
               why: decision.why,
               allowAlways: decision.allowAlways,
@@ -5154,6 +5168,32 @@ export function registerChatHandlers(
                   }, 300000);
                 });
                 emitToolStatus("result", "ask_user", resultText, toolIteration, tc.id);
+              } else if (tc.function.name === BROWSER_TOOL_NAME && !getDisabledTools(overrides || {}).has(BROWSER_TOOL_NAME)) {
+                // Browser: looking runs (asks once app data is in the chat);
+                // clicking, typing and choosing ask unless Full access.
+                const browser = agentBrowser(getWindow);
+                const refusal = refusalOf(
+                  await gateToolCall(tc.function.name, toolArgs, tc.id, true, fullContent, describeBrowserAction(toolArgs, browser.lastSnapshotText)),
+                );
+                if (refusal) {
+                  resultText = refusal;
+                  emitToolStatus("error", tc.function.name, resultText, toolIteration, tc.id);
+                } else {
+                  const r = await browser.execute(toolArgs);
+                  resultText = boundToolResultText(r.text, MAX_RAW_TOOL_RESULT_CHARS);
+                  // Live view: a picture of the page after each action.
+                  void browser.frame().then((frame) => {
+                    const win = getWindow();
+                    if (win && !win.isDestroyed()) {
+                      win.webContents.send("browser:frame", { chatId, url: browser.lastUrl, frame, open: browser.isOpen });
+                    }
+                  });
+                  if (r.imageDataUrl) {
+                    if (chatIsMultimodal || isRemote) pendingImageDataUrls.push(r.imageDataUrl);
+                    else resultText += "\n\n[The screenshot was not sent because this local model is text-only.]";
+                  }
+                  emitToolStatus(r.isError ? "error" : "result", tc.function.name, resultText, toolIteration, tc.id);
+                }
               } else if (tc.function.name === "schedule_task") {
                 // A lasting change: asks (Workspace, Read only), refused in Plan mode.
                 const refusal = refusalOf(await gateToolCall(tc.function.name, toolArgs, tc.id, true, fullContent));

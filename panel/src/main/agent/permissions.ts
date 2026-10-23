@@ -1,3 +1,5 @@
+import { browserActionKind } from '../browser/toolDefinition'
+
 /**
  * Permission presets for the coding agent, per chat.
  *
@@ -192,7 +194,7 @@ export interface PermissionInput {
 }
 
 /** Tools that send something to the web: they ask once app data is in the turn. */
-export const EGRESS_TOOLS: ReadonlySet<string> = new Set(['fetch_url', 'web_search', 'ddg_search'])
+export const EGRESS_TOOLS: ReadonlySet<string> = new Set(['fetch_url', 'web_search', 'ddg_search', 'browser'])
 
 /** The tool result for a call Plan mode refused. */
 export const PLAN_MODE_REFUSAL =
@@ -205,6 +207,7 @@ export const PLAN_MODE_NOTE =
 /** A call Plan mode lets through: reading built-ins, read-only git, read-named MCP tools. */
 export function planModeAllows(toolName: string, args: Record<string, unknown>, isBuiltin: boolean): boolean {
   if (!isBuiltin) return looksReadOnlyToolName(toolName)
+  if (toolName === 'browser') return browserActionKind(args) === 'read'
   if (READ_TOOLS.has(toolName)) return true
   if (toolName === 'git') return classifyGitCommand(String(args.command ?? '')) === 'read'
   return false
@@ -373,6 +376,10 @@ export function decideToolPermission(input: PermissionInput): PermissionDecision
     return { action: 'allow', sandbox: false }
   }
 
+  // Browser: looking runs; clicking, typing and choosing on a page ask.
+  if (toolName === 'browser') {
+    return browserActionKind(args) === 'read' ? { action: 'allow', sandbox: false } : ask('tool', 'browser-act')
+  }
   // Scheduling sets up something that later runs on its own.
   if (toolName === 'schedule_task') return ask('tool', 'schedule')
   // An unknown built-in: fail closed to asking.

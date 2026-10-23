@@ -6,6 +6,8 @@
 
 import { TODO_WRITE_DESCRIPTION } from '../agent/todos'
 
+import { BROWSER_TOOL } from '../browser/toolDefinition'
+
 export interface ToolDefinition {
   type: 'function'
   function: {
@@ -772,7 +774,8 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
         required: ['title', 'prompt', 'schedule']
       }
     }
-  }
+  },
+  BROWSER_TOOL
 ]
 
 const BUILTIN_TOOL_NAMES = new Set(BUILTIN_TOOLS.map(t => t.function.name))
