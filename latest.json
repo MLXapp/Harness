@@ -1,14 +1,14 @@
 {
-  "version": "0.2.1",
-  "url": "https://github.com/MLXapp/Harness/releases/download/v0.2.1/MLX-Harness-0.2.1-arm64.dmg",
-  "sha256": "b3c408660de179e50c2e0d869df65933c29ac954ce30500df323eb20faf93ebf",
-  "size": 587984891,
-  "date": "2026-10-21",
+  "version": "0.3.0",
+  "url": "https://github.com/MLXapp/Harness/releases/download/v0.3.0/MLX-Harness-0.3.0-arm64.dmg",
+  "sha256": "d342ead51d70983907c84a7744afb3c0f2c673a0b075e3fa73301aa3396c0eb2",
+  "size": 591584943,
+  "date": "2026-10-23",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/Harness/releases/download/v0.2.1/MLX-Harness-0.2.1-arm64.dmg",
-      "sha256": "b3c408660de179e50c2e0d869df65933c29ac954ce30500df323eb20faf93ebf"
+      "url": "https://github.com/MLXapp/Harness/releases/download/v0.3.0/MLX-Harness-0.3.0-arm64.dmg",
+      "sha256": "d342ead51d70983907c84a7744afb3c0f2c673a0b075e3fa73301aa3396c0eb2"
     }
   },
-  "notes": "MLX Harness 0.2.1: everything now carries the MLX Harness name, including its home on GitHub (MLXapp/harness). Your chats, settings and keys stay as they are."
+  "notes": "MLX Harness 0.3.0: a browser the agent can use, memory across chats, scheduled tasks, adding to a reply while it runs, simpler app tools for local models, and MLX Node steps aside while a local model runs."
 }
