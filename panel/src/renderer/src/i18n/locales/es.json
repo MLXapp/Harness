@@ -3179,7 +3179,7 @@
     "waitingBrowser": "Termina de iniciar sesión en el navegador…",
     "connecting": "Conectando…",
     "yourApps": "Tus apps",
-    "rulesHelp": "Leer siempre funciona. Preguntar: los envíos y cambios necesitan tu OK. Siempre: se ejecutan sin preguntar (borrar sigue preguntando). Bloqueada: nunca se usa.",
+    "rulesHelp": "Leer siempre funciona. Preguntar: los envíos y cambios necesitan tu OK. Siempre: se ejecutan sin preguntar, salvo borrar y todo lo que llegue después de que el chat haya leído datos de apps (un correo podría estar pidiéndolo). Bloqueada: nunca se usa.",
     "rule": {
       "ask": "Preguntar",
       "always": "Siempre",

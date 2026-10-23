@@ -9,7 +9,7 @@
  * (remote code execution on someone else's machine, with the user's app data).
  */
 
-import { looksReadOnlyToolName } from '../agent/permissions'
+import { appActionReadOnly, toolWords } from '../agent/permissions'
 
 export const COMPOSIO_CONNECT_URL = 'https://connect.composio.dev/mcp'
 
@@ -35,23 +35,37 @@ export function isBlockedTool(name: string): boolean {
 export type { AppRule } from '../../shared/apps'
 import type { AppRule } from '../../shared/apps'
 
-/** "GMAIL_SEND_EMAIL" → "gmail"; "GOOGLESHEETS_BATCH_UPDATE" → "googlesheets". */
-export function toolkitOf(slug: string): string {
-  return String(slug || '').split('_')[0].toLowerCase()
+/**
+ * "GMAIL_SEND_EMAIL" → "gmail"; "MICROSOFT_TEAMS_SEND_MESSAGE" → "microsoft_teams"
+ * when that toolkit is known (the longest known prefix wins), else the first word.
+ */
+export function toolkitOf(slug: string, known: Iterable<string> = []): string {
+  const lower = String(slug || '').toLowerCase()
+  let best = ''
+  for (const k of [...KNOWN_TOOLKITS, ...known]) {
+    if (k.length > best.length && (lower === k || lower.startsWith(`${k}_`))) best = k
+  }
+  return best || lower.split('_')[0]
+}
+
+function actionPart(slug: string, known: Iterable<string> = []): string {
+  const tk = toolkitOf(slug, known)
+  return String(slug || '').slice(tk.length).replace(/^_/, '')
 }
 
 /** "GMAIL_SEND_EMAIL" → "Send email". */
-export function actionLabel(slug: string): string {
-  const words = String(slug || '').split('_').slice(1).join(' ').toLowerCase()
+export function actionLabel(slug: string, known: Iterable<string> = []): string {
+  const words = actionPart(slug, known).split('_').join(' ').toLowerCase()
   return words ? words[0].toUpperCase() + words.slice(1) : slug
 }
 
 const DELETE_WORDS = /(^|_)(DELETE|REMOVE|TRASH|PURGE|DESTROY|ERASE|WIPE)(_|$)/
 
-/** An app action that only reads: its verb (after the toolkit) is a read verb. */
-export function isReadAction(slug: string): boolean {
-  const rest = String(slug || '').split('_').slice(1).join('_')
-  return rest.length > 0 && looksReadOnlyToolName(rest)
+/** An app action that only reads (and never deletes): its verb is a read verb and no word means a change. */
+export function isReadAction(slug: string, known: Iterable<string> = []): boolean {
+  if (isDeleteAction(slug)) return false
+  const rest = actionPart(slug, known)
+  return rest.length > 0 && appActionReadOnly(toolWords(rest))
 }
 
 export function isDeleteAction(slug: string): boolean {
@@ -60,14 +74,19 @@ export function isDeleteAction(slug: string): boolean {
 
 export interface ExecuteItem { tool_slug: string; arguments: Record<string, unknown> }
 
-export function executeItems(args: Record<string, unknown>): ExecuteItem[] {
-  const tools = Array.isArray(args.tools) ? args.tools : []
-  return tools
-    .filter((t): t is Record<string, unknown> => !!t && typeof t === 'object')
-    .map(t => ({
-      tool_slug: typeof t.tool_slug === 'string' ? t.tool_slug : '',
-      arguments: t.arguments && typeof t.arguments === 'object' ? (t.arguments as Record<string, unknown>) : {},
-    }))
+export function executeItems(args: Record<string, unknown>): ExecuteItem[] | null {
+  // Anything but a non-empty list of {tool_slug, arguments} objects is refused:
+  // the check must never depend on how the server reads an odd shape.
+  if (!Array.isArray(args.tools) || args.tools.length === 0) return null
+  const out: ExecuteItem[] = []
+  for (const t of args.tools) {
+    if (!t || typeof t !== 'object' || Array.isArray(t)) return null
+    const r = t as Record<string, unknown>
+    if (typeof r.tool_slug !== 'string' || !/^[A-Z0-9_]{3,120}$/i.test(r.tool_slug)) return null
+    if (r.arguments !== undefined && (typeof r.arguments !== 'object' || r.arguments === null || Array.isArray(r.arguments))) return null
+    out.push({ tool_slug: r.tool_slug, arguments: (r.arguments as Record<string, unknown>) ?? {} })
+  }
+  return out
 }
 
 export type AppDecision =
@@ -81,12 +100,12 @@ export type AppDecision =
  * "Always" (a delete action always asks); anything else asks with the actions
  * and their fields shown; a blocked app is refused.
  */
-export function decideAppCall(name: string, args: Record<string, unknown>, rules: Readonly<Record<string, AppRule>>, opts: { plan?: boolean } = {}): AppDecision {
+export function decideAppCall(name: string, args: Record<string, unknown>, rules: Readonly<Record<string, AppRule>>, opts: { plan?: boolean; untrusted?: boolean } = {}): AppDecision {
   if (isBlockedTool(name) || !isOfferedTool(name)) {
     return { action: 'deny', message: `${name} is not available in MLX Harness. Use COMPOSIO_MULTI_EXECUTE_TOOL with app tools instead.` }
   }
   if (name === 'COMPOSIO_MANAGE_CONNECTIONS') {
-    if (args.reinitiate_all === true) {
+    if (args.reinitiate_all !== undefined && args.reinitiate_all !== false && args.reinitiate_all !== 'false') {
       const apps = Array.isArray(args.toolkits) ? args.toolkits.map(String) : []
       return { action: 'ask', apps, summary: `Reconnect ${apps.join(', ') || 'apps'} (replaces the current connections)`, allowAlways: false }
     }
@@ -95,28 +114,38 @@ export function decideAppCall(name: string, args: Record<string, unknown>, rules
   if (name !== 'COMPOSIO_MULTI_EXECUTE_TOOL') return { action: 'allow' }
 
   const items = executeItems(args)
-  if (items.length === 0) return { action: 'allow' }
-  const blocked = items.find(i => rules[toolkitOf(i.tool_slug)] === 'blocked')
-  if (blocked) {
-    return { action: 'deny', message: `The user blocked ${toolkitOf(blocked.tool_slug)} in Preferences → Apps, so ${blocked.tool_slug} was not run.` }
+  if (!items) {
+    return { action: 'deny', message: 'Not run: `tools` must be a non-empty list of {"tool_slug": "...", "arguments": {...}} objects.' }
   }
-  const writes = items.filter(i => !isReadAction(i.tool_slug))
+  const nested = items.find(i => /^COMPOSIO_/i.test(i.tool_slug))
+  if (nested) return { action: 'deny', message: `${nested.tool_slug} cannot be run through COMPOSIO_MULTI_EXECUTE_TOOL in MLX Harness.` }
+  const known = Object.keys(rules)
+  const tk = (slug: string) => toolkitOf(slug, known)
+  const blocked = items.find(i => rules[tk(i.tool_slug)] === 'blocked')
+  if (blocked) {
+    return { action: 'deny', message: `The user blocked ${appName(tk(blocked.tool_slug))} in Preferences → Apps, so ${blocked.tool_slug} was not run.` }
+  }
+  const writes = items.filter(i => !isReadAction(i.tool_slug, known))
   if (writes.length === 0) return { action: 'allow' }
   if (opts.plan) {
     return { action: 'deny', message: 'Not run: Plan mode is on, so app actions that send or change something are refused. Describe what you would do in the plan.' }
   }
-  const needsAsk = writes.filter(i => rules[toolkitOf(i.tool_slug)] !== 'always' || isDeleteAction(i.tool_slug))
+  // "Always" never covers deletes, nor anything once app data (text other
+  // people wrote) is in the chat: that text could be asking for the send.
+  const needsAsk = writes.filter(i => opts.untrusted || rules[tk(i.tool_slug)] !== 'always' || isDeleteAction(i.tool_slug))
   if (needsAsk.length === 0) return { action: 'allow' }
-  const apps = [...new Set(needsAsk.map(i => toolkitOf(i.tool_slug)))]
+  const apps = [...new Set(needsAsk.map(i => tk(i.tool_slug)))]
   return {
     action: 'ask',
     apps,
-    summary: needsAsk.map(i => `${appName(toolkitOf(i.tool_slug))} · ${actionLabel(i.tool_slug)}\n${fieldsPreview(i.arguments)}`).join('\n\n'),
-    allowAlways: !needsAsk.some(i => isDeleteAction(i.tool_slug)),
+    summary: needsAsk.map(i => `${appName(tk(i.tool_slug))} · ${actionLabel(i.tool_slug, known)}\n${fieldsPreview(i.arguments)}`).join('\n\n'),
+    allowAlways: !opts.untrusted && !needsAsk.some(i => isDeleteAction(i.tool_slug)),
   }
 }
 
 const NAMES: Record<string, string> = {
+  microsoft_teams: 'Microsoft Teams', google_maps: 'Google Maps', one_drive: 'OneDrive', googlemeet: 'Google Meet',
+  googletasks: 'Google Tasks', google_analytics: 'Google Analytics', zoho_crm: 'Zoho CRM', google_classroom: 'Google Classroom',
   gmail: 'Gmail', googlecalendar: 'Google Calendar', googledrive: 'Google Drive', googlesheets: 'Google Sheets',
   googledocs: 'Google Docs', slack: 'Slack', notion: 'Notion', github: 'GitHub', linear: 'Linear', outlook: 'Outlook',
   hubspot: 'HubSpot', jira: 'Jira', trello: 'Trello', asana: 'Asana', discord: 'Discord', twitter: 'X',
@@ -127,15 +156,24 @@ export function appName(toolkit: string): string {
   return NAMES[toolkit] ?? (toolkit ? toolkit[0].toUpperCase() + toolkit.slice(1) : toolkit)
 }
 
-/** The fields of an action as "key: value" lines, long values cut. */
-export function fieldsPreview(args: Record<string, unknown>, maxValue = 600, maxLines = 14): string {
-  const lines: string[] = []
-  for (const [k, v] of Object.entries(args)) {
-    if (lines.length >= maxLines) { lines.push('…'); break }
-    let text = typeof v === 'string' ? v : JSON.stringify(v)
-    if (text === undefined) continue
-    if (text.length > maxValue) text = `${text.slice(0, maxValue)}… (${text.length - maxValue} more characters)`
-    lines.push(`${k}: ${text}`)
+const RECIPIENT_KEY = /(^|_)(to|cc|bcc|recipients?|recipient_email|emails?|email_address|channel|channel_id|user|user_id|users|phone|phone_number|number|address|attendees|guests|owner|assignee|repo|repository|url|webhook)(_|$)/i
+
+/**
+ * The fields of an action as "key: value" lines. Who and where it goes (to,
+ * cc, bcc, channel, attendees …) comes first and is never cut; other values
+ * are cut only past several thousand characters.
+ */
+export function fieldsPreview(args: Record<string, unknown>, maxValue = 4000, maxLines = 40): string {
+  const entries = Object.entries(args).filter(([, v]) => v !== undefined)
+  const first = entries.filter(([k]) => RECIPIENT_KEY.test(k))
+  const rest = entries.filter(([k]) => !RECIPIENT_KEY.test(k))
+  const text = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v))
+  const lines = first.map(([k, v]) => `${k}: ${text(v)}`)
+  for (const [k, v] of rest) {
+    if (lines.length >= maxLines) { lines.push(`… ${entries.length - lines.length} more fields`); break }
+    let t = text(v)
+    if (t.length > maxValue) t = `${t.slice(0, maxValue)}… (${t.length - maxValue} more characters)`
+    lines.push(`${k}: ${t}`)
   }
   return lines.join('\n') || '(no fields)'
 }
@@ -196,10 +234,13 @@ export function mcpResultText(result: unknown, maxChars = 60_000): { text: strin
 
 /** The apps a turn's tool results came from (for the card and the wrapper). */
 export function appsInCall(name: string, args: Record<string, unknown>): string[] {
-  if (name === 'COMPOSIO_MULTI_EXECUTE_TOOL') return [...new Set(executeItems(args).map(i => appName(toolkitOf(i.tool_slug))))]
+  if (name === 'COMPOSIO_MULTI_EXECUTE_TOOL') return [...new Set((executeItems(args) ?? []).map(i => appName(toolkitOf(i.tool_slug))))]
   if (name === 'COMPOSIO_MANAGE_CONNECTIONS' && Array.isArray(args.toolkits)) return args.toolkits.map(t => appName(String(t).toLowerCase()))
   return []
 }
+
+/** Toolkits whose slug has an underscore, plus every named one. */
+const KNOWN_TOOLKITS: string[] = Object.keys(NAMES)
 
 /** Featured apps in Preferences → Apps (toolkit slugs). */
 export const FEATURED_APPS = [

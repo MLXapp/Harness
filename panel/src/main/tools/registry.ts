@@ -695,6 +695,20 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
         required: ['todos']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'use_skill',
+      description: 'Load a skill (instructions for a kind of work) by its name from the Skills list in the system prompt, then follow it. Only offered when skills exist.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'The skill name, exactly as listed' }
+        },
+        required: ['name']
+      }
+    }
   }
 ]
 

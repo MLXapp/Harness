@@ -57,6 +57,7 @@ import {
 import { ApprovalBroker, type ApprovalCard } from "../agent/approvals";
 import { appsService } from "./apps";
 import { appsInCall, decideAppCall, wrapUntrusted } from "../apps/composioPolicy";
+import { discoverSkills, renderSkillIndex } from "../agent/skills";
 import { t as tMain } from "../i18n";
 import {
   looksLikeSandboxDenial,
@@ -709,6 +710,8 @@ function tokenCalibratorFor(chatId: string): TokenCalibrator {
 const alwaysAllowedCommands = new Map<string, Set<string>>();
 /** Code sessions in Plan mode (reading tools only), until switched off. */
 const planModeChats = new Set<string>();
+/** Chats whose context holds data read from an app (Composio) in this app run. */
+const chatsWithAppData = new Set<string>();
 
 /** Add the Plan mode note to the end of this turn's user message (request only). */
 function withPlanModeNote(messages: any[]): void {
@@ -813,6 +816,9 @@ const UTILITY_TOOLS = new Set([
 /** Build set of disabled tool names based on per-category toggle overrides */
 function getDisabledTools(overrides: any): Set<string> {
   const disabled = new Set<string>();
+  // use_skill only when there are skills to load (catalog stays stable while
+  // the skill folders are unchanged).
+  if (discoverSkills(overrides?.workingDirectory || undefined).length === 0) disabled.add("use_skill");
   if (overrides.fileToolsEnabled === false)
     FILE_TOOLS.forEach((t) => disabled.add(t));
   if (overrides.searchToolsEnabled === false)
@@ -2095,9 +2101,10 @@ export function registerChatHandlers(
       const permissionPreset = normalizePermissionPreset(overrides?.permissionPreset);
       // Plan mode (Code sessions): reading tools only, and a note asking for a plan.
       const planMode = planModeChats.has(chatId) && overrides?.builtinToolsEnabled === true;
-      // Set once an app's data is in this turn: web tools then ask first, so
-      // text inside an email cannot quietly send data elsewhere.
-      let appDataInTurn = false;
+      // Set once an app's data is in this chat (it stays in the context for
+      // later turns too): web and MCP tools then ask first, and app sends ask
+      // even with "Always", so text inside an email cannot quietly send data.
+      let appDataInTurn = chatsWithAppData.has(chatId);
       // Escalations the user refused this turn: the same one is not asked twice.
       const refusedEscalations = new Set<string>();
       /**
@@ -2246,7 +2253,13 @@ export function registerChatHandlers(
         !exactTextOnlyNoToolTurn &&
         restrictedToolNamesForCurrentTurn.length === 0 &&
         appsService().chatEnabled(chatId)
-          ? await appsService().listTools().catch(() => [])
+          ? await Promise.race([
+              appsService().listTools().catch(() => appsService().cachedTools()),
+              // Never hold a turn on the network: after 4 s use what is cached.
+              new Promise<ReturnType<ReturnType<typeof appsService>["cachedTools"]>>((resolve) =>
+                setTimeout(() => resolve(appsService().cachedTools()), 4000),
+              ),
+            ])
           : [];
       const attachToolsForCurrentTurn =
         attachBuiltinToolsForCurrentTurn || appToolsForTurn.length > 0;
@@ -2352,6 +2365,22 @@ export function registerChatHandlers(
             (projectInstructions.omitted.length ? `; omitted ${projectInstructions.omitted.join(", ")}` : "") +
             (projectInstructions.truncated.length ? `; truncated ${projectInstructions.truncated.join(", ")}` : ""),
         );
+      }
+      // Skills: names and one-line descriptions only; bodies load on use.
+      // Like project instructions, this follows the persistent settings only,
+      // never this turn's wording, so the cached system prompt stays the same.
+      const skillIndex =
+        overrides?.builtinToolsEnabled === true && !chatUsesZayaAppleScriptToolBundle && !leanToolPreset &&
+        !getDisabledTools(overrides || {}).has("use_skill")
+          ? renderSkillIndex(discoverSkills(overrides?.workingDirectory || undefined))
+          : null;
+      if (skillIndex) {
+        const head = requestMessages[0];
+        if (head?.role === "system" && typeof head.content === "string") {
+          head.content = `${head.content}\n\n${skillIndex}`;
+        } else {
+          requestMessages.unshift({ role: "system", content: skillIndex });
+        }
       }
       if (toolCapabilityEpoch) {
         requestMessages.push({
@@ -5052,13 +5081,22 @@ export function registerChatHandlers(
                 }
               } else if (appsService().owns(tc.function.name)) {
                 const apps = appsService();
-                const decision = decideAppCall(tc.function.name, toolArgs, apps.rules(), { plan: planMode });
+                // Only in a chat whose Apps switch is on and whose request
+                // offered this tool: a name in a web page or a file must not
+                // reach the user's apps from another chat.
+                const offeredThisTurn = appToolsForTurn.some((t) => t.function.name === tc.function.name);
+                const decision = offeredThisTurn
+                  ? decideAppCall(tc.function.name, toolArgs, apps.rules(), { plan: planMode, untrusted: appDataInTurn })
+                  : { action: "deny" as const, message: `Apps are off in this chat, so ${tc.function.name} was not run.` };
                 const appsHere = appsInCall(tc.function.name, toolArgs);
                 const alwaysKey = alwaysAllowKey(`app:${decision.action === "ask" ? decision.apps.slice().sort().join(",") : ""}`, "");
                 let appRefusal: string | null = null;
                 if (decision.action === "deny") {
                   appRefusal = decision.message;
-                } else if (decision.action === "ask" && !alwaysAllowedCommands.get(chatId)?.has(alwaysKey)) {
+                } else if (
+                  decision.action === "ask" &&
+                  !(decision.allowAlways && alwaysAllowedCommands.get(chatId)?.has(alwaysKey))
+                ) {
                   const broker = approvalBroker;
                   const outcome = broker
                     ? await broker.request({
@@ -5090,6 +5128,7 @@ export function registerChatHandlers(
                 } else {
                   const appResult = await apps.call(tc.function.name, toolArgs, abortController.signal);
                   appDataInTurn = true;
+                  chatsWithAppData.add(chatId);
                   resultText = wrapUntrusted(appResult.text, appsHere.join(", ") || undefined);
                   emitToolStatus(appResult.isError ? "error" : "result", tc.function.name, appResult.text, toolIteration, tc.id);
                 }

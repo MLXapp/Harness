@@ -65,46 +65,57 @@ export function repeatReminderText(toolName: string, count: number, canonical: s
 }
 
 /**
- * Loop guard (pattern from Atomic Agent, MIT): from the 5th identical call in
- * a session the call is no longer run; the model gets a short refusal instead.
- * Small local models otherwise retry the same failing call until the tool
- * budget is gone. After VETOES_BEFORE_ANSWER refusals in one turn the model is
- * told to stop using tools and answer.
+ * Loop guard (pattern from Atomic Agent, MIT): from the 5th identical call
+ * within one user turn the call is no longer run; the model gets a short
+ * refusal instead. Small local models otherwise retry the same failing call
+ * until the tool budget is gone. After VETOES_BEFORE_ANSWER refusals in a turn
+ * every further tool call in that turn is refused too, so the model answers.
+ * A new user turn starts all of this from zero (the advisory notes above keep
+ * counting per chat).
  */
 export const VETO_AT = 5
 export const VETOES_BEFORE_ANSWER = 3
 
 export function vetoText(toolName: string, count: number, finalNotice: boolean): string {
   return (
-    `[Not run: this would be call #${count} of ${toolName} with exactly the same arguments, and the earlier ones did not change anything. ` +
+    `[Not run: this would be call #${count} of ${toolName} with exactly the same arguments in this turn, and the earlier ones did not change anything. ` +
     'Use the results you already have, change the arguments, or try a different tool.' +
-    (finalNotice ? ' Tools are paused for the rest of this turn: answer the user now with what you have, and say what is still unknown.' : '') +
+    (finalNotice ? ' No more tools run in this turn: answer the user now with what you have, and say what is still unknown.' : '') +
     ']'
   )
 }
 
+export const PAUSED_TEXT =
+  '[Not run: tools are paused for the rest of this turn after repeated identical calls. Answer the user now with what you have, and say what is still unknown.]'
+
 export class RepeatCallTracker {
   private readonly sessions = new Map<string, Map<string, number>>()
+  private readonly turnCounts = new Map<string, Map<string, number>>()
   private readonly vetoes = new Map<string, number>()
 
   /**
    * Before running a call: null when it may run, else the refusal text to
-   * return instead (the call is counted either way).
+   * return instead. Counts this call for the current turn.
    */
   veto(sessionId: string, toolName: string, args: unknown): { text: string; stopTools: boolean } | null {
-    const canonical = canonicalArguments(args)
-    const prior = this.sessions.get(sessionId)?.get(`${toolName}\u0000${canonical}`) ?? 0
-    if (prior + 1 < VETO_AT) return null
-    this.record(sessionId, toolName, args)
-    const n = (this.vetoes.get(sessionId) ?? 0) + 1
-    this.vetoes.set(sessionId, n)
-    const stopTools = n >= VETOES_BEFORE_ANSWER
-    return { text: vetoText(toolName, prior + 1, stopTools), stopTools }
+    const done = (this.vetoes.get(sessionId) ?? 0) >= VETOES_BEFORE_ANSWER
+    if (done) return { text: PAUSED_TEXT, stopTools: true }
+    const key = `${toolName}\u0000${canonicalArguments(args)}`
+    let counts = this.turnCounts.get(sessionId)
+    if (!counts) this.turnCounts.set(sessionId, (counts = new Map()))
+    const n = (counts.get(key) ?? 0) + 1
+    counts.set(key, n)
+    if (n < VETO_AT) return null
+    const v = (this.vetoes.get(sessionId) ?? 0) + 1
+    this.vetoes.set(sessionId, v)
+    const stopTools = v >= VETOES_BEFORE_ANSWER
+    return { text: vetoText(toolName, n, stopTools), stopTools }
   }
 
-  /** A new user turn: refusals count again from zero (call counts stay). */
+  /** A new user turn: refusals and per-turn counts start from zero. */
   newTurn(sessionId: string): void {
     this.vetoes.delete(sessionId)
+    this.turnCounts.delete(sessionId)
   }
 
   /** Count one executed call and return the advisory note to append, if any. */
@@ -124,6 +135,7 @@ export class RepeatCallTracker {
   clear(sessionId: string): void {
     this.sessions.delete(sessionId)
     this.vetoes.delete(sessionId)
+    this.turnCounts.delete(sessionId)
   }
 }
 

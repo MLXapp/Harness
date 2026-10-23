@@ -51,6 +51,7 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
   'fetch_url',
   'ask_user',
   'todo_write',
+  'use_skill',
 ])
 
 /** File-writing tools; the executor confines their paths to the working directory. */
@@ -230,24 +231,58 @@ export function readEscalation(args: Record<string, unknown>):
   return { requested: true, justification: just.trim().split('\n')[0].trim().slice(0, 300) }
 }
 
-const READ_VERBS = new Set(['get', 'list', 'search', 'read', 'fetch', 'find', 'query', 'describe', 'show', 'view', 'lookup', 'count', 'retrieve', 'browse', 'check', 'status', 'info', 'stat', 'inspect'])
-const WRITE_WORDS = /^(create|update|delete|remove|send|post|write|edit|set|put|patch|insert|upload|move|rename|add|archive|publish|reply|forward|execute|run|exec|invoke|trigger|merge|close|cancel|approve|pay|transfer|book|purchase|order|install|kill|drop|reset|modify|push|commit|share|invite|subscribe|unsubscribe|mark|star|label|assign)(s|d|ed|ing)?$/
+const READ_VERBS = new Set(['get', 'list', 'search', 'read', 'find', 'describe', 'show', 'view', 'lookup', 'count', 'retrieve', 'browse', 'inspect'])
+const WRITE_WORDS = new RegExp('^(' + [
+  'create', 'update', 'delete', 'remove', 'send', 'post', 'write', 'edit', 'set', 'put', 'patch', 'insert', 'upsert', 'upload',
+  'move', 'rename', 'add', 'archive', 'unarchive', 'publish', 'unpublish', 'reply', 'forward', 'execute', 'run', 'exec', 'invoke',
+  'call', 'trigger', 'merge', 'close', 'reopen', 'cancel', 'approve', 'accept', 'reject', 'decline', 'pay', 'refund', 'charge',
+  'transfer', 'book', 'purchase', 'order', 'install', 'uninstall', 'kill', 'drop', 'reset', 'modify', 'push', 'commit', 'share',
+  'unshare', 'invite', 'subscribe', 'unsubscribe', 'mark', 'star', 'unstar', 'label', 'assign', 'unassign', 'replace', 'save',
+  'submit', 'restart', 'start', 'stop', 'clear', 'apply', 'enable', 'disable', 'revoke', 'grant', 'sync', 'deploy', 'schedule',
+  'toggle', 'lock', 'unlock', 'block', 'unblock', 'mute', 'unmute', 'follow', 'unfollow', 'like', 'unlike', 'comment', 'react',
+  'pin', 'unpin', 'kick', 'ban', 'trash', 'purge', 'destroy', 'erase', 'wipe', 'import', 'generate', 'make', 'new', 'change',
+  'configure', 'register', 'login', 'logout', 'checkin', 'check', 'join', 'leave', 'mint', 'swap', 'sign', 'approve', 'tag',
+  'move', 'copy', 'duplicate', 'restore', 'revert', 'rollback', 'scale', 'resize', 'reboot', 'shutdown', 'terminate', 'suspend',
+  'resume', 'query', 'fetch', 'sql', 'eval', 'script', 'shell', 'command', 'and',
+].join('|') + ')(s|d|ed|ing|es)?$')
 
-/**
- * An MCP tool whose name starts with a read verb ("get_issue",
- * "github__list_repos", "searchFiles") and contains no write word. Anything
- * else counts as possibly changing something.
- */
-export function looksReadOnlyToolName(name: string): boolean {
-  const words = name
+export function toolWords(name: string): string[] {
+  return name
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean)
-  if (words.length === 0) return false
-  if (words.some(w => WRITE_WORDS.test(w) && !READ_VERBS.has(w))) return false
-  // The verb is the first word, or the first after a server prefix.
-  return READ_VERBS.has(words[0]) || (words.length > 1 && READ_VERBS.has(words[1]))
+}
+
+/**
+ * Words naming an action that only reads: the first is a read verb and no
+ * word anywhere could mean a change ("search_and_replace", "fetch_and_save",
+ * "status__restart" all fail). Ambiguous verbs (query, fetch, check, run)
+ * count as changes. Single-word names ("fetch", "query") never qualify.
+ */
+export function wordsReadOnly(words: string[], readVerbs: ReadonlySet<string> = READ_VERBS, verbLast = false): boolean {
+  if (words.length < 2) return false
+  const verbAt = readVerbs.has(words[0]) ? 0 : verbLast && readVerbs.has(words[words.length - 1]) ? words.length - 1 : -1
+  if (verbAt < 0) return false
+  return !words.some((w, i) => i !== verbAt && WRITE_WORDS.test(w) && !readVerbs.has(w))
+}
+
+/** App actions (Composio slugs without the toolkit) also read with fetch/query, verb first or last. */
+const APP_READ_VERBS: ReadonlySet<string> = new Set([...READ_VERBS, 'fetch', 'query'])
+export function appActionReadOnly(words: string[]): boolean {
+  return wordsReadOnly(words, APP_READ_VERBS, true)
+}
+
+/**
+ * An MCP tool whose name reads ("get_issue", "searchFiles", or after a
+ * server prefix "github__list_repos" / "github.list_repos"). Anything else
+ * counts as possibly changing something, so it asks.
+ */
+export function looksReadOnlyToolName(name: string): boolean {
+  const sep = name.includes('__') ? '__' : name.includes('.') ? '.' : null
+  const action = sep ? name.slice(name.lastIndexOf(sep) + sep.length) : name
+  if (sep && toolWords(name.slice(0, name.lastIndexOf(sep))).some(w => WRITE_WORDS.test(w))) return false
+  return wordsReadOnly(toolWords(action))
 }
 
 /**
@@ -263,8 +298,10 @@ export function decideToolPermission(input: PermissionInput): PermissionDecision
   // Exfiltration guard: after an app's data entered the turn, text inside it
   // could ask the model to send that data to a URL. Web tools ask first
   // (except with Full access, where the user chose no prompts).
-  if (input.untrustedData && input.isBuiltin && EGRESS_TOOLS.has(toolName) && preset !== 'full') {
-    return { action: 'ask', kind: 'tool', subject, why: 'exfil', allowAlways: false }
+  if (input.untrustedData && preset !== 'full') {
+    if (input.isBuiltin && EGRESS_TOOLS.has(toolName)) return { action: 'ask', kind: 'tool', subject, why: 'exfil', allowAlways: false }
+    // Any MCP tool may reach the network; with app data in the chat it asks.
+    if (!input.isBuiltin) return { action: 'ask', kind: 'mcp', subject, why: 'exfil', allowAlways: false }
   }
   if (input.plan) {
     return planModeAllows(toolName, args, input.isBuiltin)
