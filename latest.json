@@ -1,14 +1,14 @@
 {
-  "version": "0.3.0",
-  "url": "https://github.com/MLXapp/Harness/releases/download/v0.3.0/MLX-Harness-0.3.0-arm64.dmg",
-  "sha256": "d342ead51d70983907c84a7744afb3c0f2c673a0b075e3fa73301aa3396c0eb2",
-  "size": 591584943,
+  "version": "0.3.1",
+  "url": "https://github.com/MLXapp/Harness/releases/download/v0.3.1/MLX-Harness-0.3.1-arm64.dmg",
+  "sha256": "ea4f575a5960fb8f068ecba08d1146439a5e5e859b595ef220d549b1e3c048b8",
+  "size": 591366747,
   "date": "2026-10-23",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/Harness/releases/download/v0.3.0/MLX-Harness-0.3.0-arm64.dmg",
-      "sha256": "d342ead51d70983907c84a7744afb3c0f2c673a0b075e3fa73301aa3396c0eb2"
+      "url": "https://github.com/MLXapp/Harness/releases/download/v0.3.1/MLX-Harness-0.3.1-arm64.dmg",
+      "sha256": "ea4f575a5960fb8f068ecba08d1146439a5e5e859b595ef220d549b1e3c048b8"
     }
   },
-  "notes": "MLX Harness 0.3.0: a browser the agent can use, memory across chats, scheduled tasks, adding to a reply while it runs, simpler app tools for local models, and MLX Node steps aside while a local model runs."
+  "notes": "MLX Harness 0.3.1 ships with MLX Node 0.9.6, which pauses mining while Harness runs a model on your Mac."
 }
