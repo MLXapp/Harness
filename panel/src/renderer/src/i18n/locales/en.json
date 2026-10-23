@@ -3179,7 +3179,7 @@
     "waitingBrowser": "Finish signing in in your browser…",
     "connecting": "Connecting…",
     "yourApps": "Your apps",
-    "rulesHelp": "Reading always runs. Ask first: sends and changes need your OK. Always: they run without asking (deletes still ask). Blocked: never used.",
+    "rulesHelp": "Reading always runs. Ask first: sends and changes need your OK. Always: they run without asking, except deletes and anything after the chat has read app data (an email could be asking for it). Blocked: never used.",
     "rule": {
       "ask": "Ask first",
       "always": "Always",

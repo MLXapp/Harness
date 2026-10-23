@@ -31,6 +31,25 @@ function dropEdgeBlanks(lines: string[]): string[] {
 const leading = (s: string) => /^[ \t]*/.exec(s)?.[0] ?? ''
 
 /**
+ * The matched lines keep the search's relative indentation (one constant
+ * offset, same kind of whitespace). Otherwise a block boundary could move:
+ * in Python or YAML that silently changes what the code does.
+ */
+function sameShape(fileLines: string[], searchLines: string[]): boolean {
+  const f = fileLines.filter(l => l.trim() !== '')
+  const w = searchLines.filter(l => l.trim() !== '')
+  if (f.length !== w.length || f.length === 0) return false
+  const delta = leading(f[0]).length - leading(w[0]).length
+  for (let i = 0; i < f.length; i++) {
+    const fi = leading(f[i])
+    const wi = leading(w[i])
+    if (fi.length - wi.length !== delta) return false
+    if ((fi.includes('\t') && wi.includes(' ')) || (fi.includes(' ') && wi.includes('\t') && wi.length > 0)) return false
+  }
+  return true
+}
+
+/**
  * Find `search` in `content` line by line. `start`/`end` are line indexes
  * into content (end exclusive).
  */
@@ -68,7 +87,7 @@ export function findLoose(content: string, search: string): LooseMatch {
       j++
       k++
     }
-    if (j === core.length) hits2.push({ start: i, end: k })
+    if (j === core.length && sameShape(file.slice(i, k), want)) hits2.push({ start: i, end: k })
   }
   if (hits2.length > 1) return { kind: 'ambiguous', count: hits2.length, level: 'indent' }
   if (hits2.length === 0) return { kind: 'none' }

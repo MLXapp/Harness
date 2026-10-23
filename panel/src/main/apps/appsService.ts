@@ -224,7 +224,6 @@ export class AppsService {
     this.signIn?.abort()
     const abort = new AbortController()
     this.signIn = abort
-    this.deps.storage.writeKey(null)
     await this.close()
     this.setStatus({ state: 'connecting', via: 'oauth' })
     const state = randomBytes(16).toString('hex')
@@ -238,18 +237,23 @@ export class AppsService {
       try {
         await client.connect(transport)
         callback.close()
-        this.client = client
       } catch (err) {
         if (!(err instanceof UnauthorizedError)) throw err
-        const code = await callback.code
-        await transport.finishAuth(code)
-        this.client = await this.open(provider)
+        await transport.finishAuth(await callback.code)
       }
+      await client.close().catch(() => undefined)
+      // Signed in through the browser: that replaces a saved key. Then
+      // reconnect with the background provider, so a later lapsed sign-in
+      // never opens the browser by itself.
+      this.deps.storage.writeKey(null)
+      this.client = await this.open()
       this.tools = null
       const tools = await this.listTools()
       this.setStatus({ state: 'connected', via: 'oauth', toolCount: tools.length })
     } catch (err: any) {
       callback.close()
+      // A newer sign-in started meanwhile: leave its status alone.
+      if (this.signIn !== abort) return this.status_
       this.setStatus(abort.signal.aborted
         ? { state: 'off', via: null }
         : { state: 'error', via: null, error: err?.code === 'EADDRINUSE' ? 'Another app is using the sign-in port. Close it and try again.' : String(err?.message ?? err) })
@@ -327,7 +331,16 @@ export class AppsService {
   async call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<{ text: string; isError: boolean; json: unknown }> {
     const client = await this.ensure()
     if (!client) return { text: 'Apps are not connected. The user can connect them in Preferences → Apps.', isError: true, json: undefined }
-    const result = await client.callTool({ name, arguments: sanitizeArguments(name, args) }, undefined, { signal, timeout: 120_000 })
+    let result: unknown
+    try {
+      result = await client.callTool({ name, arguments: sanitizeArguments(name, args) }, undefined, { signal, timeout: 120_000 })
+    } catch (err: any) {
+      if (signal?.aborted) throw err
+      // Transport or session trouble: drop the client so the next call
+      // reconnects instead of failing until the app restarts.
+      if (this.client === client) await this.close()
+      return { text: `The app call failed: ${String(err?.message ?? err)}`, isError: true, json: undefined }
+    }
     return mcpResultText(result)
   }
 

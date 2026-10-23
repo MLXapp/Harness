@@ -27,12 +27,18 @@ describe('findLoose', () => {
     expect(m).toMatchObject({ kind: 'unique', start: 0, end: 2, level: 'trailing' })
   })
 
-  it('matches across a different indent and re-indents the replacement', () => {
-    const m = findLoose(FILE, 'return a - b\n}')
+  it('matches across a uniform indent offset and re-indents the replacement', () => {
+    const m = findLoose(FILE, '  return a - b')
     expect(m.kind).toBe('unique')
     if (m.kind !== 'unique') return
     expect(m.level).toBe('indent')
-    expect(m.reindent('return b - a\n}')).toBe('    return b - a\n    }')
+    expect(m.reindent('  return b - a\n  // swapped')).toBe('    return b - a\n    // swapped')
+  })
+
+  it('never matches when the relative indentation differs (a block boundary would move)', () => {
+    const py = 'if x:\n    a()\n    b()\n'
+    expect(findLoose(py, 'if x:\n    a()\nb()').kind).toBe('none')
+    expect(findLoose(FILE, 'return a - b\n}').kind).toBe('none')
   })
 
   it('ignores blank lines inside the search when the file has none', () => {
@@ -131,6 +137,25 @@ describe('undo safety', () => {
     expect(existsSync(join(work, 'gone.txt'))).toBe(false)
     await executeBuiltinTool('restore_file', { path: 'gone.txt' }, work)
     expect(readFileSync(join(work, 'gone.txt'), 'utf8')).toBe('keep me')
+  })
+
+  it('restore_file refuses a target whose folder became a link outside', async () => {
+    process.env.MLX_HARNESS_BACKUP_DIR = dir('mlx-bak-')
+    const { executeBuiltinTool } = await import('../src/main/tools/executor')
+    const { mkdirSync, renameSync, symlinkSync } = await import('node:fs')
+    const work = dir()
+    const outside = dir('mlx-outside-')
+    mkdirSync(join(work, 'sub'))
+    writeFileSync(join(work, 'sub', 'evil.plist'), 'payload')
+    await executeBuiltinTool('write_file', { path: 'sub/evil.plist', content: 'changed' }, work)
+    renameSync(join(work, 'sub'), join(work, 'sub-old'))
+    symlinkSync(outside, join(work, 'sub'))
+    const listed = await executeBuiltinTool('restore_file', {}, work)
+    const id = /^(\S+)\s+sub\/evil\.plist/m.exec(listed.content)?.[1]
+    expect(id).toBeTruthy()
+    const r = await executeBuiltinTool('restore_file', { id }, work)
+    expect(r.is_error).toBe(true)
+    expect(existsSync(join(outside, 'evil.plist'))).toBe(false)
   })
 
   it('moves never overwrite', async () => {

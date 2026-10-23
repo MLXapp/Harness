@@ -21,16 +21,15 @@ describe('repeat-call reminder', () => {
     expect(canonicalArguments({ b: 1, a: { d: 1, c: 2 } })).toBe('{"a":{"c":2,"d":1},"b":1}')
   })
 
-  it('vetoes the 5th identical call and pauses tools after 3 vetoes in a turn', () => {
+  it('vetoes the 5th identical call in a turn, then pauses tools; a new turn starts over', () => {
     const tracker = new RepeatCallTracker()
     const args = { command: 'npm test' }
-    const run = () => {
-      const v = tracker.veto('s', 'run_command', args)
-      if (!v) tracker.record('s', 'run_command', args)
+    const run = (a: unknown = args) => {
+      const v = tracker.veto('s', 'run_command', a)
+      if (!v) tracker.record('s', 'run_command', a)
       return v
     }
-    const first = Array.from({ length: 4 }, run)
-    expect(first.every(v => v === null)).toBe(true)
+    expect(Array.from({ length: 4 }, () => run()).every(v => v === null)).toBe(true)
     const v5 = run()
     expect(v5?.text).toContain('Not run: this would be call #5')
     expect(v5?.stopTools).toBe(false)
@@ -38,9 +37,11 @@ describe('repeat-call reminder', () => {
     const v7 = run()
     expect(v7?.stopTools).toBe(true)
     expect(v7?.text).toContain('answer the user now')
+    // Paused: even a different call is refused for the rest of the turn.
+    expect(run({ command: 'npm run build' })?.text).toContain('tools are paused')
     tracker.newTurn('s')
-    expect(run()?.stopTools).toBe(false)
-    expect(tracker.veto('s', 'run_command', { command: 'npm run build' })).toBeNull()
+    expect(run()).toBeNull()
+    expect(run({ command: 'npm run build' })).toBeNull()
   })
 
   it('appends the note after the result', () => {

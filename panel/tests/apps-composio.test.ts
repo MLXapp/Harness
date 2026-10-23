@@ -9,7 +9,7 @@ import {
   appsInCall, connectionLinks, decideAppCall, isReadAction, mcpResultText, sanitizeArguments, toolkitOf, wrapUntrusted,
 } from '../src/main/apps/composioPolicy'
 import { AppsService, type AppsStorage } from '../src/main/apps/appsService'
-import { decideToolPermission } from '../src/main/agent/permissions'
+import { decideToolPermission, looksReadOnlyToolName } from '../src/main/agent/permissions'
 
 describe('app call policy', () => {
   const exec = (...slugs: string[]) => ({ tools: slugs.map(tool_slug => ({ tool_slug, arguments: { to: 'a@b.c', body: 'hi' } })), sync_response_to_workbench: true })
@@ -40,6 +40,36 @@ describe('app call policy', () => {
     expect(decideAppCall('COMPOSIO_MULTI_EXECUTE_TOOL', exec('GMAIL_FETCH_EMAILS'), {}, { plan: true }).action).toBe('allow')
   })
 
+  it('refuses shapes it cannot read and nested meta tools', () => {
+    for (const tools of ['[{"tool_slug":"GMAIL_SEND_EMAIL"}]', { tool_slug: 'GMAIL_SEND_EMAIL' }, [null], [{ tool_slug: 1 }], []]) {
+      expect(decideAppCall('COMPOSIO_MULTI_EXECUTE_TOOL', { tools } as any, {}).action).toBe('deny')
+    }
+    expect(decideAppCall('COMPOSIO_MULTI_EXECUTE_TOOL', exec('COMPOSIO_REMOTE_BASH_TOOL'), {}).action).toBe('deny')
+  })
+
+  it('a read-and-delete action is a delete; app data in the chat overrides Always', () => {
+    expect(decideAppCall('COMPOSIO_MULTI_EXECUTE_TOOL', exec('GMAIL_SEARCH_AND_TRASH'), {}).action).toBe('ask')
+    expect(isReadAction('GOOGLESHEETS_FIND_REPLACE')).toBe(false)
+    const d = decideAppCall('COMPOSIO_MULTI_EXECUTE_TOOL', exec('SLACK_SEND_MESSAGE'), { slack: 'always' }, { untrusted: true })
+    expect(d).toMatchObject({ action: 'ask', allowAlways: false })
+  })
+
+  it('rules apply to toolkits with underscores', () => {
+    expect(toolkitOf('MICROSOFT_TEAMS_SEND_MESSAGE')).toBe('microsoft_teams')
+    expect(decideAppCall('COMPOSIO_MULTI_EXECUTE_TOOL', exec('MICROSOFT_TEAMS_SEND_MESSAGE'), { microsoft_teams: 'blocked' }).action).toBe('deny')
+    expect(toolkitOf('ACME_CRM_LIST_DEALS', ['acme_crm'])).toBe('acme_crm')
+  })
+
+  it('shows recipients first and never cuts them', () => {
+    const many: Record<string, unknown> = {}
+    for (let i = 0; i < 50; i++) many[`filler${i}`] = 'x'
+    const d = decideAppCall('COMPOSIO_MULTI_EXECUTE_TOOL', { tools: [{ tool_slug: 'GMAIL_SEND_EMAIL', arguments: { ...many, bcc: 'spy@evil.test', recipient_email: 'a@b.c' } }] }, {})
+    if (d.action !== 'ask') throw new Error('expected ask')
+    const lines = d.summary.split('\n')
+    expect(lines[1]).toBe('bcc: spy@evil.test')
+    expect(lines[2]).toBe('recipient_email: a@b.c')
+  })
+
   it('reconnecting every app asks', () => {
     expect(decideAppCall('COMPOSIO_MANAGE_CONNECTIONS', { toolkits: ['gmail'], reinitiate_all: true }, {}).action).toBe('ask')
   })
@@ -54,6 +84,20 @@ describe('app call policy', () => {
     expect(connectionLinks({ data: { results: { gmail: { status: 'initiated', redirect_url: 'https://connect.composio.dev/link/abc' }, slack: { redirect_url: 'http://insecure' } } } }))
       .toEqual([{ toolkit: 'gmail', url: 'https://connect.composio.dev/link/abc' }])
     expect(mcpResultText({ content: [{ type: 'text', text: '{"ok":1}' }] })).toMatchObject({ text: '{"ok":1}', isError: false, json: { ok: 1 } })
+  })
+
+  it('read-looking MCP names that can change things ask', () => {
+    for (const n of ['find_and_replace', 'search_and_replace', 'save_search', 'submit_query', 'fetch_and_save', 'status__restart_service', 'check_in', 'query', 'fetch']) {
+      expect(looksReadOnlyToolName(n), n).toBe(false)
+    }
+    for (const n of ['list_issues', 'github__list_repos', 'searchFiles', 'get_settings', 'notion.search_pages']) {
+      expect(looksReadOnlyToolName(n), n).toBe(true)
+    }
+  })
+
+  it('MCP tools ask once app data is in the chat', () => {
+    expect(decideToolPermission({ preset: 'workspace', toolName: 'github__list_repos', args: {}, isBuiltin: false, sandboxAvailable: true, untrustedData: true }))
+      .toMatchObject({ action: 'ask', why: 'exfil' })
   })
 
   it('web tools ask once app data is in the turn (not with Full access)', () => {

@@ -10,9 +10,10 @@ import * as electron from 'electron'
 import { db } from '../database'
 import { attachChildProcessStreamErrorGuard } from '../childProcessStreamGuards'
 import { looksLikeSandboxDenial, sandboxExec, seatbeltSupport } from '../agent/seatbelt'
-import { sandboxEscalationMarker } from '../agent/permissions'
+import { isProtectedGitPath, sandboxEscalationMarker } from '../agent/permissions'
 import { findLoose, nearestFragment, spliceLines } from '../agent/editMatch'
 import { FileBackups, ago, shownPath } from '../agent/fileBackups'
+import { discoverSkills, loadSkill } from '../agent/skills'
 import { tmpdir } from 'os'
 
 /** An Electron export, or undefined outside Electron (a mocked module throws on missing exports). */
@@ -286,6 +287,10 @@ export async function executeBuiltinTool(
         result = createDirectory(args.path, workingDir); break
       case 'delete_file':
         result = await deleteFile(args.path, workingDir); break
+      case 'use_skill': {
+        const loaded = loadSkill(discoverSkills(workingDir), args.name)
+        result = { content: loaded.text, is_error: !loaded.ok }; break
+      }
       case 'restore_file':
         result = restoreFile(args.path, args.id, workingDir); break
       case 'move_file':
@@ -699,6 +704,9 @@ async function deleteFile(path: string, workingDir: string): Promise<ToolResult>
     return { content: `Deleted directory: ${path}`, is_error: false }
   }
   const saved = fileBackups.save(fullPath, workingDir, 'delete_file')
+  if (!('saved' in saved) && saved.skipped !== 'created') {
+    return { content: `Not deleted: ${path} could not be moved to the Trash or copied aside first (${saved.skipped}). Ask the user to delete it.`, is_error: true }
+  }
   unlinkSync(fullPath)
   const note = 'saved' in saved ? ' (a copy was kept; restore_file can put it back)' : ''
   return { content: `Deleted file: ${path}${note}`, is_error: false }
@@ -732,6 +740,23 @@ function restoreFile(path: string | undefined, id: string | undefined, workingDi
     if (list.length === 0) return { content: 'No saved copies for this folder yet.', is_error: false }
     const rows = list.map(e => `${e.id}  ${shownPath(e.path, workingDir)}  (${ago(e.at)}, before ${e.reason}, ${formatBytes(e.size)})`)
     return { content: `Saved copies, newest first:\n${rows.join('\n')}\n\nCall restore_file with path (newest copy of that file) or id.`, is_error: false }
+  }
+  // The target is checked again now: a folder on the way may have become a
+  // link since the copy was made, and a restore must stay in the working
+  // folder like any other write.
+  const all = fileBackups.list(workingDir)
+  const target = id ? all.find(e => e.id === id) : all.find(e => e.path === fullPath)
+  if (target) {
+    let resolved: string
+    try { resolved = resolvePath(workingDir, target.path) } catch (err) {
+      return { content: `Not restored: ${(err as Error).message}`, is_error: true }
+    }
+    if (resolved !== target.path) {
+      return { content: `Not restored: ${shownPath(target.path, workingDir)} now points somewhere else (a folder on the way was replaced by a link).`, is_error: true }
+    }
+    if (isProtectedGitPath(relative(realpathSync(workingDir), target.path))) {
+      return { content: 'Not restored: git hooks and git config are not restored by the agent.', is_error: true }
+    }
   }
   const result = fileBackups.restore(workingDir, { id, fullPath })
   if (!result.ok) {

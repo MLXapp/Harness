@@ -11,7 +11,7 @@ import { createHash } from 'crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, join, relative, isAbsolute } from 'path'
 
-export const BACKUP_LIMIT = 20
+export const BACKUP_LIMIT = 50
 export const BACKUP_MAX_BYTES = 5 * 1024 * 1024
 
 export interface BackupEntry {
