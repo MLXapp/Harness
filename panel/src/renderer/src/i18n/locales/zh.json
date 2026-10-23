@@ -787,6 +787,9 @@
       "apple": "Apple 听写",
       "whisper": "Whisper",
       "hint": "Apple 听写使用 macOS 的系统听写。Whisper 在这台 Mac 上用模型录音并转写。"
+    },
+    "context": {
+      "title": "上下文：{used} / {window} 个 token（{pct}%）。达到 {at}% 时会总结较早的消息。点击立即总结。"
     }
   },
   "sessions": {

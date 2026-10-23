@@ -787,6 +787,9 @@
       "apple": "Apple Dictation",
       "whisper": "Whisper",
       "hint": "Apple Dictation uses macOS system dictation. Whisper records and transcribes with a model on this Mac."
+    },
+    "context": {
+      "title": "Context: {used} of {window} tokens ({pct}%). Older messages are summarized at {at}%. Click to summarize now."
     }
   },
   "sessions": {

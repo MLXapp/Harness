@@ -270,6 +270,7 @@ declare global {
           answer: "allow-once" | "allow-always" | "deny",
         ) => Promise<{ accepted: boolean }>;
         getPendingApprovals: (chatId: string) => Promise<ChatApprovalCard[]>;
+        onContext?: (callback: (data: { chatId: string; tokens: number; window: number; known: boolean }) => void) => () => void;
         sandboxStatus: () => Promise<{ available: boolean; network: boolean }>;
         compact: (
           chatId: string,

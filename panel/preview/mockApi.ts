@@ -285,6 +285,7 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       onApprovalSettled: on('chat:approvalSettled'),
       answerApproval: async () => ({ accepted: true }),
       getPendingApprovals: async () => [],
+      onContext: on('chat:context'),
       sandboxStatus: async () => ({ available: true, network: false }),
       getTodos: async () => [],
       onOpenFromNotification: on('chat:openFromNotification'),
