@@ -2881,7 +2881,9 @@
       "title": "アカウントまたは OpenAI 互換サーバを接続",
       "body": "Claude、DeepSeek、OpenAI、Gemini、WaveSpeed AI はキーだけで使えます。それらのモデルは、この Mac のモデルと並んでモデルボタンに表示されます。",
       "connect": "アカウントを接続…"
-    }
+    },
+    "media": "画像・動画・音声・音楽向け",
+    "mediaHint": "上のWaveSpeed AIもここで使えます。結果はこのMacに保存されます。"
   },
   "onboarding": {
     "label": "MLX Harness のセットアップ",

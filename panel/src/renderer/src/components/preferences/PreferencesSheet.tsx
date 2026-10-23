@@ -95,7 +95,7 @@ export function PreferencesSheet() {
           </div>
           <div key={section} className="mlx-prefs-body mlx-view-in">
             {section === 'general' && <GeneralSection />}
-            {section === 'accounts' && <AccountsPreference />}
+            {section === 'accounts' && <AccountsPreference embedded />}
             {section === 'node' && <MlxNodePreference />}
             {section === 'keys' && <ApiKeysSection />}
             {section === 'about' && <AboutSection />}

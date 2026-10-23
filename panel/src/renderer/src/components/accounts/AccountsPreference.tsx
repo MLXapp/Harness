@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, RefreshCw } from 'lucide-react'
 import { useTranslation } from '../../i18n'
-import { FEATURED_ACCOUNTS } from '../../../../shared/curated'
+import { FEATURED_ACCOUNTS, MEDIA_ACCOUNTS, type FeaturedAccount } from '../../../../shared/curated'
 import { LOCAL_SERVERS } from '../../../../shared/providers/catalog'
 import { otherProviders } from '../../../../shared/accountSetup'
 import { shownModels } from '../../../../shared/providers/pickerGroups'
@@ -42,7 +42,7 @@ function RemoveConfirm({ open, name, onCancel, onConfirm }: { open: boolean; nam
   )
 }
 
-export function AccountsPreference() {
+export function AccountsPreference({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useTranslation()
   const { providers, localServers, probing, probe, reload, error } = useProviders({ probe: true })
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
@@ -96,23 +96,14 @@ export function AccountsPreference() {
   }
 
   const providerRowMenu = (provider: ProviderView, featured: boolean) => [
-    ...(featured ? [{ label: t('accounts.replaceKey'), onSelect: () => openConnectAccount(FEATURED_ACCOUNTS.find(a => a.catalogId === provider.id)!.id) }] : []),
+    ...(featured ? [{ label: t('accounts.replaceKey'), onSelect: () => openConnectAccount([...FEATURED_ACCOUNTS, ...MEDIA_ACCOUNTS].find(a => a.catalogId === provider.id)!.id) }] : []),
     { label: t('accounts.chooseModels'), onSelect: () => chooseModels(provider) },
     ...(!featured ? [{ label: t('accounts.edit'), onSelect: () => { setAdding(false); setEditing(provider.id) } }] : []),
     'separator' as const,
     { label: t('accounts.removeEllipsis'), destructive: true, onSelect: () => setConfirmRemove(provider.id) },
   ]
 
-  return (
-    <section data-vmlx-section="accounts" className="space-y-6">
-      <div className="space-y-1">
-        <h2 className="text-[20px] font-bold leading-6">{t('accounts.title')}</h2>
-        <p className="text-[13px] leading-[18px] text-muted-foreground">{t('accounts.subtitle')}</p>
-      </div>
-
-      {/* The five */}
-      <Group>
-        {FEATURED_ACCOUNTS.map(account => {
+  const accountRow = (account: FeaturedAccount) => {
           const provider = providers.find(p => p.id === account.catalogId)
           const connected = !!provider?.configured
           const shown = provider ? shownModels(provider.models).length : 0
@@ -149,7 +140,24 @@ export function AccountsPreference() {
               )}
             </div>
           )
-        })}
+  }
+
+  return (
+    <section data-vmlx-section="accounts" className="space-y-6">
+      <div className="space-y-1">
+        {/* Inside Preferences the sheet already titles the section. */}
+        {!embedded && <h2 className="text-[20px] font-bold leading-6">{t('accounts.title')}</h2>}
+        <p className="text-[13px] leading-[18px] text-muted-foreground">{t('accounts.subtitle')}</p>
+      </div>
+
+      {/* The five */}
+      <Group>
+        {FEATURED_ACCOUNTS.map(account => accountRow(account))}
+      </Group>
+
+      {/* Media accounts (Atlas Cloud; WaveSpeed AI is above and serves media too) */}
+      <Group title={t('accounts.media')} footer={t('accounts.mediaHint')}>
+        {MEDIA_ACCOUNTS.filter(a => !FEATURED_ACCOUNTS.includes(a)).map(account => accountRow(account))}
       </Group>
 
       {/* On this Mac */}
@@ -237,7 +245,7 @@ export function AccountsPreference() {
             <Reveal open={adding}>
               <ProviderEditor
                 key={adding ? 'adding' : 'idle'}
-                catalog={catalog.filter(c => !FEATURED_ACCOUNTS.some(a => a.catalogId === c.id))}
+                catalog={catalog.filter(c => ![...FEATURED_ACCOUNTS, ...MEDIA_ACCOUNTS].some(a => a.catalogId === c.id))}
                 takenIds={takenIds}
                 onSaved={() => { setAdding(false); void reload() }}
                 onCancel={() => setAdding(false)}
