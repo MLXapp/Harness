@@ -356,6 +356,16 @@ export function getToolSummary(
       return { label: "Tree", context: args.path || "." };
     case "delete_file":
       return { label: "Trash", context: args.path || "" };
+    case "remember":
+      return { label: "Remember", context: truncateStr(args.text, 70) };
+    case "recall":
+      return { label: "Recall", context: truncateStr(args.query, 50) };
+    case "forget":
+      return { label: "Forget", context: args.id || "" };
+    case "use_skill":
+      return { label: "Skill", context: args.name || "" };
+    case "browser":
+      return { label: "Browser", context: args.action === "open" ? truncateStr(args.url, 60) : [args.action, args.ref].filter(Boolean).join(" ") };
     case "restore_file":
       return { label: "Restore", context: args.path || args.id || "" };
     case "move_file":

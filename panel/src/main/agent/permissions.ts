@@ -52,6 +52,11 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
   'ask_user',
   'todo_write',
   'use_skill',
+  // Memory is the app's own store: every change shows as a tool row and in
+  // Preferences → Memory, and can be undone there.
+  'remember',
+  'recall',
+  'forget',
 ])
 
 /** File-writing tools; the executor confines their paths to the working directory. */

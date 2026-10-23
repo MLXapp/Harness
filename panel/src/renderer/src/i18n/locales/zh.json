@@ -3000,7 +3000,8 @@
       "keys": "API 密钥",
       "about": "关于",
       "apps": "应用",
-      "skills": "技能"
+      "skills": "技能",
+      "memory": "记忆"
     }
   },
   "media": {
@@ -3209,5 +3210,21 @@
     "openFolder": "打开文件夹",
     "none": "还没有技能。请在 ~/.mlx-harness/skills 中添加含 SKILL.md 的文件夹；~/.claude/skills 中的技能也会被找到。",
     "footer": "项目自带的技能（其文件夹中的 .claude/skills 或 .agents/skills）会在该项目的代码会话中使用，并优先于同名的个人技能。"
+  },
+  "memory": {
+    "toggle": "跨对话记住内容",
+    "help": "智能体可以保存你告诉它的简短信息（偏好、项目、你喜欢的做事方式），并在之后的对话中使用。每次更改都会显示在对话和这里。从不保存密码、密钥或卡号。仅存储在这台 Mac 上。",
+    "saved": "已保存（{n}）",
+    "add": "添加",
+    "addPlaceholder": "智能体应始终知道的事…",
+    "addSave": "保存",
+    "none": "还没有保存任何内容。在任意对话中告诉智能体“记住……”，或在这里添加。",
+    "edit": "编辑",
+    "forget": "忘记",
+    "clear": "全部忘记",
+    "clearConfirm": "删除所有已保存的条目吗？",
+    "clearYes": "全部忘记",
+    "secret": "未保存：这看起来像密码、密钥或卡号。",
+    "failed": "无法保存，请重试。"
   }
 }
