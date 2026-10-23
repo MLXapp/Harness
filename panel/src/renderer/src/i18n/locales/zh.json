@@ -790,6 +790,11 @@
     },
     "context": {
       "title": "上下文：{used} / {window} 个 token（{pct}%）。达到 {at}% 时会总结较早的消息。点击立即总结。"
+    },
+    "queue": {
+      "label": "接下来",
+      "remove": "从队列中移除",
+      "placeholder": "输入下一条消息，本次回复结束后发送…"
     }
   },
   "sessions": {

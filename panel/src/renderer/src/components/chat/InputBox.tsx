@@ -184,6 +184,8 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
   }, [loading, disabled])
 
   const handleSend = () => {
+    // While a reply runs, only text is queued; attachments wait in the composer.
+    if (loading && (attachments.length > 0 || !message.trim())) return
     if ((message.trim() || attachments.length > 0) && !disabled && !noModel) {
       onSend(message, attachments.length > 0 ? attachments : undefined)
       setMessage('')
@@ -407,7 +409,7 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder={loading ? t('chat.input.placeholderWaiting') : workspace === 'code' ? t('code.placeholder') : t('chat.input.placeholderDefault')}
+          placeholder={loading ? t('chat.queue.placeholder') : workspace === 'code' ? t('code.placeholder') : t('chat.input.placeholderDefault')}
           disabled={disabled && !loading}
           className="block w-full resize-none bg-transparent px-4 pb-1 pt-3 min-h-[48px] max-h-[240px] text-[15px] leading-[1.5] text-foreground placeholder:text-muted-foreground focus:outline-none"
           rows={1}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Sparkles, Loader2 } from 'lucide-react'
+import { Sparkles, Loader2, X } from 'lucide-react'
+import { Reveal } from '../ui/Reveal'
 import { MessageList } from './MessageList'
 import { ApprovalCards } from './ApprovalCards'
 import { InputBox, MediaAttachment } from './InputBox'
@@ -208,6 +209,30 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
   chatIdRef.current = chatId
 
   const [loading, setLoading] = useState(false)
+  // Messages typed while a reply is running: sent one by one when it ends.
+  // Kept per chat in this browser profile so closing the window keeps them.
+  const [queued, setQueued] = useState<QueuedMessage[]>([])
+  const queueLoaded = useRef<string | null>(null)
+  useEffect(() => {
+    queueLoaded.current = null
+    setQueued(chatId ? readQueue(chatId) : [])
+    queueLoaded.current = chatId ?? null
+  }, [chatId])
+  useEffect(() => {
+    if (chatId && queueLoaded.current === chatId) writeQueue(chatId, queued)
+  }, [chatId, queued])
+  const sendRef = useRef<(content: string) => Promise<void>>(async () => undefined)
+  useEffect(() => {
+    if (loading || queued.length === 0) return
+    if (!sessionEndpoint && sessionId) return
+    // A beat after the reply ends, so its final render lands first.
+    const id = window.setTimeout(() => {
+      const [next, ...rest] = queued
+      setQueued(rest)
+      void sendRef.current(next.text)
+    }, 350)
+    return () => window.clearTimeout(id)
+  }, [loading, queued, sessionEndpoint, sessionId])
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
   const [currentMetrics, setCurrentMetrics] = useState<MessageMetrics | null>(null)
   // Reasoning state: track per-message reasoning content and done status
@@ -605,6 +630,12 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
 
   const handleSend = async (content: string, attachments?: MediaAttachment[]) => {
     if (!chatId || (!content.trim() && (!attachments || attachments.length === 0))) return
+    if (loading) {
+      if (content.trim() && (!attachments || attachments.length === 0)) {
+        setQueued(q => [...q, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, text: content }])
+      }
+      return
+    }
     if (content.trim() === '/compact' && (!attachments || attachments.length === 0)) {
       await handleCompact()
       return
@@ -782,6 +813,7 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
     )
   }
 
+  sendRef.current = (content: string) => handleSend(content)
   return (
     <div className="flex flex-col h-full min-h-0">
       <MessageList
@@ -918,14 +950,58 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
           </button>
         </div>
       )}
+      <QueuedMessages items={queued} onRemove={id => setQueued(q => q.filter(m => m.id !== id))} />
       <InputBox
         onSend={handleSend}
         onAbort={handleAbort}
-        disabled={loading || (!sessionEndpoint && !!sessionId)}
+        disabled={!sessionEndpoint && !!sessionId}
         loading={loading}
         sessionEndpoint={sessionEndpoint}
         sessionId={sessionId}
       />
     </div>
+  )
+}
+
+interface QueuedMessage { id: string; text: string }
+
+const QUEUE_KEY = (chatId: string) => `mlx.queue.${chatId}`
+
+function readQueue(chatId: string): QueuedMessage[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(QUEUE_KEY(chatId)) || '[]')
+    return Array.isArray(list) ? list.filter(m => m && typeof m.id === 'string' && typeof m.text === 'string').slice(0, 20) : []
+  } catch {
+    return []
+  }
+}
+
+function writeQueue(chatId: string, items: QueuedMessage[]): void {
+  try {
+    if (items.length) localStorage.setItem(QUEUE_KEY(chatId), JSON.stringify(items))
+    else localStorage.removeItem(QUEUE_KEY(chatId))
+  } catch { /* storage blocked */ }
+}
+
+/** Messages waiting for the running reply to end, above the composer. */
+function QueuedMessages({ items, onRemove }: { items: QueuedMessage[]; onRemove: (id: string) => void }) {
+  const { t } = useTranslation()
+  return (
+    <Reveal open={items.length > 0}>
+      <div data-vmlx-section="chat-queue" className="mx-auto w-full max-w-[868px] px-6 pb-1.5">
+        <div className="flex flex-col gap-1">
+          {items.map(m => (
+            <div key={m.id} className="mlx-queued mlx-fade-in">
+              <span className="shrink-0 text-[11.5px] font-medium text-muted-foreground">{t('chat.queue.label')}</span>
+              <span className="min-w-0 flex-1 truncate text-[13px]">{m.text}</span>
+              <button type="button" onClick={() => onRemove(m.id)} aria-label={t('chat.queue.remove')} title={t('chat.queue.remove')}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Reveal>
   )
 }

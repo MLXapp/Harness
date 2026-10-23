@@ -790,6 +790,11 @@
     },
     "context": {
       "title": "Contexto: {used} de {window} tokens ({pct} %). Los mensajes antiguos se resumen al {at} %. Haz clic para resumir ahora."
+    },
+    "queue": {
+      "label": "Después",
+      "remove": "Quitar de la cola",
+      "placeholder": "Escribe el siguiente mensaje; se enviará cuando termine esta respuesta…"
     }
   },
   "sessions": {
