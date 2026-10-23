@@ -34,7 +34,7 @@ describe('todo_write wiring', () => {
   it('is registered last (stable prefix), handled per chat in the tool loop, and summarized in the UI', async () => {
     const { readFileSync } = await import('node:fs')
     const { BUILTIN_TOOLS, isBuiltinTool } = await import('../src/main/tools/registry')
-    expect(BUILTIN_TOOLS.slice(-6).map(t => t.function.name)).toEqual(['todo_write', 'use_skill', 'remember', 'recall', 'forget', 'schedule_task'])
+    expect(BUILTIN_TOOLS.slice(-7).map(t => t.function.name)).toEqual(['todo_write', 'use_skill', 'remember', 'recall', 'forget', 'schedule_task', 'browser'])
     expect(isBuiltinTool('todo_write')).toBe(true)
     const chat = readFileSync('src/main/ipc/chat.ts', 'utf8')
     const branch = chat.slice(chat.indexOf('} else if (tc.function.name === "todo_write") {'), chat.indexOf('} else if (isBuiltinTool(tc.function.name)) {'))

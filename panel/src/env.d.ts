@@ -291,6 +291,7 @@ declare global {
         getOverrides: (chatId: string) => Promise<any>;
         setPlanMode: (chatId: string, on: boolean) => Promise<boolean>;
         steer?: (chatId: string, id: string, text: string) => Promise<{ accepted: boolean }>;
+        onBrowserFrame?: (callback: (data: { chatId: string; url: string; frame: string | null; open: boolean }) => void) => () => void;
         onSteered?: (callback: (data: { chatId: string; ids: string[]; messageId?: string; content?: string | null }) => void) => () => void;
         onSteerUnused?: (callback: (data: { chatId: string; items: Array<{ id: string; text: string }> }) => void) => () => void;
         getPlanMode: (chatId: string) => Promise<boolean>;

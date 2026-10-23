@@ -731,3 +731,10 @@ html.vibrancy .mlx-sidebar { background: var(--sidebar-wash), var(--sidebar-glas
   min-height: 34px; padding: 4px 6px 4px 14px; border-radius: 12px;
   background: rgb(var(--bg-2-rgb)); box-shadow: var(--elev-1);
 }
+
+/* Live view of the agent's browser. */
+.mlx-live {
+  border-radius: 14px; overflow: hidden;
+  background: rgb(var(--bg-2-rgb)); box-shadow: var(--elev-3);
+  transition: width 300ms var(--ease);
+}

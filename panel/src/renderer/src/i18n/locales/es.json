@@ -728,7 +728,8 @@
         "mcp-write": "Esta herramienta puede cambiar cosas fuera de MLX Harness, así que pregunta antes.",
         "app-write": "Esto envía o cambia algo en tus apps. Revisa los campos antes de permitirlo.",
         "exfil": "Hay datos de apps en este chat, así que las peticiones web preguntan antes: el texto de un correo podría intentar enviarlos a otro sitio.",
-        "schedule": "Esto configura algo que se ejecutará solo más adelante."
+        "schedule": "Esto configura algo que se ejecutará solo más adelante.",
+        "browser-act": "Esto hace clic, escribe o elige en una página web en el navegador de MLX Harness."
       },
       "reason": "Motivo del modelo",
       "allowOnce": "Permitir una vez",
@@ -3264,5 +3265,11 @@
       "hours": "Cada {n} h",
       "minutes": "Cada {n} min"
     }
+  },
+  "browser": {
+    "bigger": "Más grande",
+    "smaller": "Más pequeño",
+    "hide": "Ocultar",
+    "alt": "El navegador del agente en {host}"
   }
 }

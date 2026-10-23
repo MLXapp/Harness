@@ -189,3 +189,16 @@ describe('Plan mode', () => {
   })
 })
 
+
+describe('browser tool permissions', () => {
+  const d = (preset: string, args: Record<string, unknown>, extra: Partial<PermissionInput> = {}) =>
+    decideToolPermission({ preset, toolName: 'browser', args, isBuiltin: true, sandboxAvailable: true, ...extra })
+  it('looking runs, acting asks (not with Full access), Plan refuses acting', () => {
+    expect(d('workspace', { action: 'open', url: 'https://example.com' }).action).toBe('allow')
+    expect(d('workspace', { action: 'click', ref: 'e3' })).toMatchObject({ action: 'ask', why: 'browser-act' })
+    expect(d('full', { action: 'type', ref: 'e3', text: 'x' }).action).toBe('allow')
+    expect(d('workspace', { action: 'click', ref: 'e3' }, { plan: true }).action).toBe('deny')
+    expect(d('workspace', { action: 'snapshot' }, { plan: true }).action).toBe('allow')
+    expect(d('workspace', { action: 'open', url: 'https://x.y' }, { untrustedData: true })).toMatchObject({ action: 'ask', why: 'exfil' })
+  })
+})
