@@ -59,10 +59,11 @@ import { appsService } from "./apps";
 import { appsInCall, decideAppCall, wrapUntrusted } from "../apps/composioPolicy";
 import { discoverSkills, renderSkillIndex } from "../agent/skills";
 import { looksSecret, renderMemoryBlock } from "../memory/store";
+import { joinSteer } from "../agent/steer";
 import { createTaskFromChat } from "./tasks";
-import { describeSchedule } from "../../shared/schedule";
+import { describeSchedule, parseSchedule } from "../../shared/schedule";
 import { AgentBrowser } from "../browser/agentBrowser";
-import { createElectronDriver } from "../browser/electronDriver";
+import { appWindows, createElectronDriver } from "../browser/electronDriver";
 import { BROWSER_TOOL_NAME, describeBrowserAction } from "../browser/toolDefinition";
 import { t as tMain } from "../i18n";
 import {
@@ -716,12 +717,31 @@ function tokenCalibratorFor(chatId: string): TokenCalibrator {
 const alwaysAllowedCommands = new Map<string, Set<string>>();
 /** Code sessions in Plan mode (reading tools only), until switched off. */
 const planModeChats = new Set<string>();
-let sharedAgentBrowser: AgentBrowser | null = null;
-/** One agent browser for the app (its own Electron session, hidden window). */
-function agentBrowser(getWindow: () => BrowserWindow | null): AgentBrowser {
-  if (!sharedAgentBrowser) sharedAgentBrowser = new AgentBrowser(createElectronDriver(getWindow), { allowLocal: false });
-  return sharedAgentBrowser;
+/**
+ * One agent browser per chat (and so per scheduled task, which has its own
+ * chat): its own in-memory session and hidden window, so one chat's sign-ins
+ * and pages never reach another. The least recently used closes past 4.
+ */
+const agentBrowsers = new Map<string, AgentBrowser>();
+const MAX_AGENT_BROWSERS = 4;
+function agentBrowser(chatId: string): AgentBrowser {
+  let b = agentBrowsers.get(chatId);
+  if (b) {
+    agentBrowsers.delete(chatId);
+    agentBrowsers.set(chatId, b);
+    return b;
+  }
+  b = new AgentBrowser(createElectronDriver(undefined, { allowLocal: false }), { allowLocal: false });
+  agentBrowsers.set(chatId, b);
+  while (agentBrowsers.size > MAX_AGENT_BROWSERS) {
+    const [oldest, ob] = agentBrowsers.entries().next().value as [string, AgentBrowser];
+    agentBrowsers.delete(oldest);
+    void ob.close();
+  }
+  return b;
 }
+/** Chats whose context holds web pages or MCP results in this app run. */
+const chatsWithExternalData = new Set<string>();
 /** Chats whose context holds data read from an app (Composio) in this app run. */
 const chatsWithAppData = new Set<string>();
 /**
@@ -731,7 +751,19 @@ const chatsWithAppData = new Set<string>();
  */
 const steerQueues = new Map<string, Array<{ id: string; text: string }>>();
 const STEER_NOTE = "[The user added this while you were working. Take it into account from here on:]";
-const STEER_ADDED_PREFIX = "[Added while working]";
+/** U+2063 (invisible) marks the real additions, so typed text never splits. */
+const STEER_ADDED_PREFIX = "\u2063[Added while working]";
+
+/** Steers a turn never picked up go back to the renderer's queue for that chat. */
+function returnUnusedSteers(chatId: string, getWindow: () => BrowserWindow | null): void {
+  const unused = steerQueues.get(chatId);
+  steerQueues.delete(chatId);
+  if (!unused || unused.length === 0) return;
+  try {
+    const win = getWindow();
+    if (win && !win.isDestroyed()) win.webContents.send("chat:steerUnused", { chatId, items: unused });
+  } catch (_) {}
+}
 
 /** Add the Plan mode note to the end of this turn's user message (request only). */
 function withPlanModeNote(messages: any[]): void {
@@ -823,6 +855,8 @@ const SHELL_TOOLS = new Set([
 ]);
 const DDG_SEARCH_TOOLS = new Set(["ddg_search"]);
 const FETCH_TOOLS = new Set(["fetch_url", "browser"]);
+/** Tools whose results are text from outside (pages, search results). */
+const EXTERNAL_DATA_TOOLS = new Set(["fetch_url", "browser", "web_search", "ddg_search"]);
 const GIT_TOOLS = new Set(["git"]);
 const UTILITY_TOOLS = new Set([
   "count_tokens",
@@ -840,11 +874,31 @@ function memoryEnabled(): boolean {
 }
 
 /** remember / recall / forget against the app's memory store. */
+/**
+ * The memory block a chat sees stays the same while the chat is in use, so a
+ * note saved elsewhere does not invalidate its cached prompt mid-session. It
+ * catches up after 10 idle minutes (the cache is cold by then anyway); the
+ * chat's own remember/forget calls show in their tool results.
+ */
+const memoryBlockByChat = new Map<string, { block: string | null; lastTurn: number }>();
+const MEMORY_REFRESH_IDLE_MS = 10 * 60_000;
+function frozenMemoryBlock(chatId: string, current: string | null): string | null {
+  const now = Date.now();
+  const seen = memoryBlockByChat.get(chatId);
+  if (seen && (seen.block === current || now - seen.lastTurn < MEMORY_REFRESH_IDLE_MS)) {
+    seen.lastTurn = now;
+    return seen.block;
+  }
+  memoryBlockByChat.set(chatId, { block: current, lastTurn: now });
+  if (memoryBlockByChat.size > 200) memoryBlockByChat.delete(memoryBlockByChat.keys().next().value as string);
+  return current;
+}
+
 function runMemoryTool(name: string, args: Record<string, any>, chatId: string): { text: string; isError: boolean } {
   if (!memoryEnabled()) return { text: "Memory is off in Preferences → Memory.", isError: true };
   const store = db.memory;
   const notify = () => {
-    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send("memory:changed");
+    for (const w of appWindows()) w.webContents.send("memory:changed");
   };
   try {
     if (name === "remember") {
@@ -1694,7 +1748,8 @@ export function registerChatHandlers(
       // generation timeout — exactly the premature timeout the user hit. It
       // is armed immediately before the inference fetch below.
       repeatCallTracker.newTurn(chatId);
-      steerQueues.delete(chatId);
+      // Left over from a turn that was cleared as stale: back to the queue.
+      returnUnusedSteers(chatId, getWindow);
       activeRequests.set(chatId, {
         controller: abortController,
         startedAt: Date.now(),
@@ -2171,6 +2226,8 @@ export function registerChatHandlers(
       // later turns too): web and MCP tools then ask first, and app sends ask
       // even with "Always", so text inside an email cannot quietly send data.
       let appDataInTurn = chatsWithAppData.has(chatId);
+      /** Web pages or MCP results came into this turn (memory writes ask). */
+      let externalDataInTurn = appDataInTurn || chatsWithExternalData.has(chatId);
       // Escalations the user refused this turn: the same one is not asked twice.
       const refusedEscalations = new Set<string>();
       /**
@@ -2200,7 +2257,13 @@ export function registerChatHandlers(
           refusedEscalations,
           plan: planMode,
           untrustedData: appDataInTurn,
+          externalData: externalDataInTurn,
         });
+        // From here on the turn holds what this tool brings back.
+        if (!isBuiltin || EXTERNAL_DATA_TOOLS.has(toolName)) {
+          externalDataInTurn = true;
+          chatsWithExternalData.add(chatId);
+        }
         if (decision.action === "deny") return { ok: false, message: decision.message };
         if (decision.action === "allow") {
           if (!decision.sandbox) return { ok: true, sandboxProfile: null };
@@ -2221,7 +2284,7 @@ export function registerChatHandlers(
               kind: decision.kind,
               subject: (() => {
                 const subject = subjectOverride || decision.subject;
-                return subject.length > 8000 ? `${subject.slice(0, 8000)}…` : subject;
+                return subject.length > 10000 ? `${subject.slice(0, 10000)}…` : subject;
               })(),
               reason: decision.justification ?? statedIntent(modelText),
               why: decision.why,
@@ -2462,7 +2525,7 @@ export function registerChatHandlers(
       // persistent settings and the stored entries only).
       const memoryBlock =
         overrides?.builtinToolsEnabled === true && !chatUsesZayaAppleScriptToolBundle && !leanToolPreset && memoryEnabled()
-          ? renderMemoryBlock((() => { try { return db.memory?.list() ?? []; } catch { return []; } })())
+          ? frozenMemoryBlock(chatId, renderMemoryBlock((() => { try { return db.memory?.list() ?? []; } catch { return []; } })()))
           : null;
       if (memoryBlock) {
         const head = requestMessages[0];
@@ -4768,7 +4831,7 @@ export function registerChatHandlers(
           if (steers && steers.length > 0) {
             steerQueues.delete(chatId);
             const text = steers.map((m) => m.text).join("\n\n");
-            requestMessages.push({ role: "user", content: `${STEER_NOTE}\n${text}` });
+            joinSteer(requestMessages, `${STEER_NOTE}\n${text}`, isRemote);
             // Kept with the turn's own message, so the history and the
             // transcript show it after a restart too.
             const addition = `${STEER_ADDED_PREFIX} ${text}`;
@@ -5176,7 +5239,7 @@ export function registerChatHandlers(
               } else if (tc.function.name === BROWSER_TOOL_NAME && !getDisabledTools(overrides || {}).has(BROWSER_TOOL_NAME)) {
                 // Browser: looking runs (asks once app data is in the chat);
                 // clicking, typing and choosing ask unless Full access.
-                const browser = agentBrowser(getWindow);
+                const browser = agentBrowser(chatId);
                 const refusal = refusalOf(
                   await gateToolCall(tc.function.name, toolArgs, tc.id, true, fullContent, describeBrowserAction(toolArgs, browser.lastSnapshotText)),
                 );
@@ -5200,8 +5263,11 @@ export function registerChatHandlers(
                   emitToolStatus(r.isError ? "error" : "result", tc.function.name, resultText, toolIteration, tc.id);
                 }
               } else if (tc.function.name === "schedule_task") {
-                // A lasting change: asks (Workspace, Read only), refused in Plan mode.
-                const refusal = refusalOf(await gateToolCall(tc.function.name, toolArgs, tc.id, true, fullContent));
+                // A lasting change: always asks (Full access too), refused in
+                // Plan mode. The card shows the prompt word for word.
+                const parsedSchedule = parseSchedule(toolArgs.schedule);
+                const scheduleSubject = `${String(toolArgs.title ?? "Scheduled task").slice(0, 80)} · ${parsedSchedule.ok ? describeSchedule(parsedSchedule.schedule) : "invalid schedule"}\n\n${String(toolArgs.prompt ?? "").trim().slice(0, 8000)}`;
+                const refusal = refusalOf(await gateToolCall(tc.function.name, toolArgs, tc.id, true, fullContent, scheduleSubject));
                 if (refusal) {
                   resultText = refusal;
                   emitToolStatus("error", tc.function.name, resultText, toolIteration, tc.id);
@@ -5221,7 +5287,18 @@ export function registerChatHandlers(
                   }
                 }
               } else if (tc.function.name === "remember" || tc.function.name === "recall" || tc.function.name === "forget") {
-                const r = runMemoryTool(tc.function.name, toolArgs, chatId);
+                // Saving and forgetting reach every chat: refused in Plan mode,
+                // asked once web pages, apps or MCP tools are in the turn.
+                let subject: string | undefined;
+                if (tc.function.name === "remember") subject = `Remember: ${String(toolArgs.text ?? "").slice(0, 300)}`;
+                else if (tc.function.name === "forget") {
+                  const e = (() => { try { return db.memory?.get(String(toolArgs.id ?? "")); } catch { return null; } })();
+                  subject = `Forget: ${e ? e.text : String(toolArgs.id ?? "")}`;
+                }
+                const refusal = tc.function.name === "recall"
+                  ? null
+                  : refusalOf(await gateToolCall(tc.function.name, toolArgs, tc.id, true, fullContent, subject));
+                const r = refusal ? { text: refusal, isError: true } : runMemoryTool(tc.function.name, toolArgs, chatId);
                 resultText = r.text;
                 emitToolStatus(r.isError ? "error" : "result", tc.function.name, resultText, toolIteration, tc.id);
               } else if (tc.function.name === "todo_write") {
@@ -6615,14 +6692,7 @@ export function registerChatHandlers(
         if (current && current.controller === abortController) {
           activeRequests.delete(chatId);
           // Steers this turn never reached go back as queued messages.
-          const unused = steerQueues.get(chatId);
-          steerQueues.delete(chatId);
-          if (unused && unused.length > 0) {
-            try {
-              const win = getWindow();
-              if (win && !win.isDestroyed()) win.webContents.send("chat:steerUnused", { chatId, items: unused });
-            } catch (_) {}
-          }
+          returnUnusedSteers(chatId, getWindow);
         }
       }
     };
@@ -6636,16 +6706,21 @@ export function registerChatHandlers(
       attachments?: Parameters<typeof handleSendMessage>[4],
     ) => handleSendMessage(event, chatId, content, endpoint, attachments, "send"),
   );
-  runChatTurnFromMain = async (chatId: string, prompt: string) => {
+  runChatTurnFromMain = async (chatId: string, prompt: string): Promise<{ ok: boolean; error?: string; retry?: boolean }> => {
     const chat = db.getChat(chatId);
     if (!chat) return { ok: false, error: "The task's chat was deleted." };
     const modelPath = String(chat.modelPath || chat.modelId || "");
     if (!modelPath) return { ok: false, error: "The task's chat has no model." };
     let endpoint: { host: string; port: number } | undefined;
-    if (!modelPath.startsWith("provider://")) {
+    if (modelPath.startsWith("provider://")) {
+      // A cloud model needs its provider binding; never fall back to whatever runs locally.
+      let bound = false;
+      try { bound = !!db.providers.getChatBinding(chatId); } catch { bound = false; }
+      if (!bound) return { ok: false, error: "The task's chat lost its cloud model. Open the chat and pick a model." };
+    } else {
       const session = sessionManager.getSessionByModelPath(modelPath.replace(/\/+$/, ""));
       if (!session || !["running", "loading", "standby"].includes(session.status)) {
-        return { ok: false, error: "Its model was not running. Start the model (or switch the task's chat to a cloud model)." };
+        return { ok: false, retry: true, error: "Its model was not running. Start the model (or switch the task's chat to a cloud model)." };
       }
       endpoint = { host: session.host, port: session.port };
     }

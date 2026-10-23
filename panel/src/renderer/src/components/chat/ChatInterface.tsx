@@ -232,7 +232,11 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
       window.setTimeout(() => setSteering(st => st.filter(m => !data.ids.includes(m.id))), 1800)
     })
     const offUnused = window.api.chat.onSteerUnused?.(data => {
-      if (data.chatId !== chatIdRef.current) return
+      if (data.chatId !== chatIdRef.current) {
+        // Another chat is open: keep them in that chat's queue for when it opens.
+        try { writeQueue(data.chatId, [...data.items, ...readQueue(data.chatId)]) } catch { /* storage off */ }
+        return
+      }
       const ids = new Set(data.items.map(i => i.id))
       setSteering(st => st.filter(m => !ids.has(m.id)))
       setQueued(q => [...data.items, ...q])

@@ -294,6 +294,22 @@ describe.skipIf(noBrowser)('action scripts', () => {
     expect(await page.evaluate(CLICK_SCRIPT('e999'))).toMatchObject({ ok: false, error: expect.stringContaining('No element e999') })
   })
 
+  it('a page cannot point a ref at another element by moving the attribute', async () => {
+    await page.setContent(`<button id="cancel" onclick="window.hit='cancel'">Cancel</button><button id="pay" onclick="window.hit='pay'">Pay now</button>`)
+    const t = (await snap()).text
+    const cancel = refOf(t, 'Cancel')
+    await page.evaluate((ref: string) => {
+      document.getElementById('cancel')!.removeAttribute('data-mlx-ref')
+      document.getElementById('pay')!.setAttribute('data-mlx-ref', ref)
+    }, cancel)
+    expect(await page.evaluate(CLICK_SCRIPT(cancel))).toEqual({ ok: true })
+    expect(await page.evaluate(() => (window as any).hit)).toBe('cancel')
+    // A removed element is gone, not replaced by an impostor.
+    await page.evaluate(() => document.getElementById('cancel')!.remove())
+    expect(await page.evaluate(CLICK_SCRIPT(cancel))).toMatchObject({ ok: false })
+    expect(await page.evaluate(() => (window as any).hit)).toBe('cancel')
+  })
+
   it('type sets the value through the native setter and fires input/change', async () => {
     await page.setContent(`<form id="f"><input id="q" aria-label="Search"><textarea id="ta" aria-label="Notes"></textarea></form>
       <div contenteditable="true" aria-label="Editor" id="ed">old</div>`)
@@ -400,6 +416,8 @@ describe('url policy', () => {
       'http://2130706433/', 'http://0x7f000001/', 'http://10.0.0.5', 'http://172.16.0.1', 'http://172.31.255.1',
       'http://192.168.1.1', 'http://169.254.169.254/latest/meta-data', 'http://100.64.0.1', 'http://0.0.0.0',
       'http://[::1]/', 'http://[fd00::1]/', 'http://[fe80::1]/', 'http://[::ffff:127.0.0.1]/', 'http://printer.local', 'http://router',
+      // IPv4 inside IPv6: compatible, NAT64 and 6to4 forms of 127.0.0.1.
+      'http://[::7f00:1]/', 'http://[::127.0.0.1]/', 'http://[64:ff9b::7f00:1]/', 'http://[2002:7f00:1::]/',
     ]
     for (const u of local) {
       expect(checkUrl(u).ok, u).toBe(false)
@@ -512,6 +530,21 @@ describe.skipIf(noBrowser)('AgentBrowser', () => {
       close: () => {},
     }
     ab = new AgentBrowser(driver, { settleMs: 3000 })
+  })
+
+  it('does nothing when the page changed the chosen element since the last look', async () => {
+    await page.route('https://swap.test/**', (route: any) => route.fulfill({ contentType: 'text/html', body: `<title>Swap</title><button id="b" onclick="window.hit=1">Cancel</button>` }))
+    const opened = await ab.open('https://swap.test/')
+    const ref = refOf(opened.text, 'Cancel')
+    await page.evaluate(() => { document.getElementById('b')!.textContent = 'Pay now' })
+    const r = await ab.click(ref)
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain(`Nothing was done: the page changed ${ref}`)
+    expect(r.text).toContain('Pay now')
+    expect(await page.evaluate(() => (window as any).hit)).toBeUndefined()
+    // After a fresh look the same ref clicks (the model saw "Pay now").
+    expect((await ab.click(ref)).isError).toBe(false)
+    expect(await page.evaluate(() => (window as any).hit)).toBe(1)
   })
 
   it('needs a page before acting', async () => {

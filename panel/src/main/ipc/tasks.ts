@@ -11,11 +11,18 @@ import { runChatTurnFromMain } from './chat'
 import { TaskScheduler } from '../tasks/scheduler'
 import { parseSchedule, type ScheduledTask } from '../../shared/schedule'
 import { t } from '../i18n'
+import { appWindows } from '../browser/electronDriver'
 
 let scheduler: TaskScheduler | null = null
+export const MAX_TASKS = 50
+
+/** The app's own windows (not the agent's hidden browser windows). */
+function mainWindow(): BrowserWindow | undefined {
+  return appWindows()[0]
+}
 
 function broadcast(): void {
-  for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('tasks:changed')
+  for (const w of appWindows()) w.webContents.send('tasks:changed')
 }
 
 export function taskScheduler(): TaskScheduler {
@@ -32,7 +39,7 @@ export function taskScheduler(): TaskScheduler {
           body: task.lastStatus === 'ok' ? task.title : `${task.title} · ${task.lastNote ?? ''}`.slice(0, 200),
         })
         n.on('click', () => {
-          const win = BrowserWindow.getAllWindows()[0]
+          const win = mainWindow()
           if (!win || win.isDestroyed()) return
           win.show(); win.focus()
           win.webContents.send('chat:openFromNotification', { chatId: task.chatId })
@@ -49,6 +56,11 @@ export function createTaskFromChat(sourceChatId: string, input: { title: string;
   { ok: true; task: ScheduledTask } | { ok: false; error: string } {
   const parsed = parseSchedule(input.schedule)
   if (!parsed.ok) return parsed
+  if (parsed.schedule.kind === 'once' && parsed.schedule.at <= Date.now()) return { ok: false, error: 'That time has already passed.' }
+  const all = db.tasks.list()
+  if (all.length >= MAX_TASKS) return { ok: false, error: `There are already ${MAX_TASKS} tasks. Delete some in Preferences → Tasks first.` }
+  // A task's own run never makes more tasks.
+  if (all.some(t => t.chatId === sourceChatId)) return { ok: false, error: 'A scheduled task cannot schedule more tasks.' }
   if (!input.prompt?.trim()) return { ok: false, error: 'The task needs a prompt.' }
   const source = db.getChat(sourceChatId)
   if (!source) return { ok: false, error: 'Open a chat with the model the task should use first.' }
@@ -56,10 +68,18 @@ export function createTaskFromChat(sourceChatId: string, input: { title: string;
   const chat = { id: randomUUID(), title: (input.title || input.prompt).replace(/\s+/g, ' ').trim().slice(0, 60), createdAt: now, updatedAt: now, modelId: source.modelId, modelPath: source.modelPath }
   db.createChat(chat)
   // Same model and settings (tools, folder, permissions) as the chat it came from.
+  // Runs are unattended: at most Workspace access (sandboxed commands, writes
+  // only in the project folder), never Full access.
   const overrides = db.getChatOverrides(sourceChatId)
   if (overrides) {
-    try { db.setChatOverrides({ ...overrides, chatId: chat.id }) } catch { /* keep defaults */ }
+    const preset = overrides.permissionPreset === 'read-only' ? 'read-only' : undefined
+    try { db.setChatOverrides({ ...overrides, chatId: chat.id, permissionPreset: preset }) } catch { /* keep defaults */ }
   }
+  // A cloud-model chat keeps its provider binding, so the task runs on the same model.
+  try {
+    const binding = db.providers.getChatBinding(sourceChatId)
+    if (binding) db.providers.setChatBinding({ ...binding, chatId: chat.id })
+  } catch { /* no binding */ }
   const task = taskScheduler().create({ title: input.title || input.prompt.slice(0, 60), prompt: input.prompt, chatId: chat.id, schedule: parsed.schedule })
   return { ok: true, task }
 }
@@ -72,7 +92,9 @@ export function registerTaskHandlers(): void {
   ipcMain.handle('tasks:setEnabled', (_e, id: string, on: boolean) => s.setEnabled(String(id), !!on))
   ipcMain.handle('tasks:runNow', (_e, id: string) => { void s.run(String(id)); return true })
   ipcMain.handle('tasks:delete', (_e, id: string) => s.delete(String(id)))
-  s.start()
+  s.recoverInterrupted()
+  // Start a little after launch, so local models have a chance to come up.
+  setTimeout(() => s.start(), 90_000)
   // After sleep: run what came due while the Mac slept (once, with a note).
   try { powerMonitor.on('resume', () => setTimeout(() => { void s.tick() }, 15_000)) } catch { /* not in tests */ }
 }

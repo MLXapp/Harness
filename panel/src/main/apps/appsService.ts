@@ -349,15 +349,22 @@ export class AppsService {
    * (schemas fetched once, cached). Empty when no app is known to be
    * connected, so the caller falls back to the meta tools.
    */
+  private schemaFailedAt = new Map<string, number>()
+
   async directTools(): Promise<AppTool[]> {
     const slugs = pickDirectSlugs(this.connectedApps())
     if (slugs.length === 0) return []
     const cache = { ...(this.deps.storage.readSchemaCache?.() ?? {}) }
-    const missing = slugs.filter(s => !cache[s])
+    const now = Date.now()
+    // A slug Composio could not describe is not asked for again for 10
+    // minutes, so a local turn never waits on the same failing call.
+    const missing = slugs.filter(s => !cache[s] && !((this.schemaFailedAt.get(s) ?? 0) > now - 10 * 60_000))
     if (missing.length > 0 && (await this.ensure())) {
       const r = await this.call('COMPOSIO_GET_TOOL_SCHEMAS', { tool_slugs: missing })
-      if (!r.isError) {
-        Object.assign(cache, parseToolSchemas(r.json))
+      const got = r.isError ? {} : parseToolSchemas(r.json)
+      for (const s of missing) if (!got[s]) this.schemaFailedAt.set(s, now)
+      if (Object.keys(got).length > 0) {
+        Object.assign(cache, got)
         this.deps.storage.writeSchemaCache?.(cache)
       }
     }

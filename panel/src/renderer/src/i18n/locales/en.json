@@ -728,8 +728,9 @@
         "mcp-write": "This tool may change things outside MLX Harness, so it asks first.",
         "app-write": "This sends or changes something in your apps. Check the fields before you allow it.",
         "exfil": "App data is in this chat, so web requests ask first: text in an email could try to send it elsewhere.",
-        "schedule": "This sets up something that runs later on its own.",
-        "browser-act": "This clicks, types or chooses on a web page in MLX Harness's browser."
+        "schedule": "This sets up a task that later runs on its own, in its own chat. Read the prompt before you allow it.",
+        "browser-act": "This clicks, types or chooses on a web page in MLX Harness's browser.",
+        "memory-untrusted": "Web pages or app data are in this chat, so saving to memory asks first: text on a page could try to plant a note every chat would see."
       },
       "reason": "Model's reason",
       "allowOnce": "Allow once",

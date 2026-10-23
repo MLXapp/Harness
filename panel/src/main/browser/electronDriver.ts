@@ -1,20 +1,45 @@
 /**
  * PageDriver on one hidden Electron BrowserWindow, created on first use and
- * again after close(). Its own persistent session (partition
- * persist:mlx-agent-browser), so the agent's cookies never mix with the app's.
- * The session refuses every permission, downloads, file pickers and requests
- * to local/private addresses (unless allowLocal); new windows load in place.
- * The page logic lives in ./agentBrowser.ts and ./snapshot.ts (pure).
+ * again after close(). Each driver gets its own in-memory session (a chat's
+ * browser never shares cookies with another chat, a scheduled task or the
+ * app), gone when the app quits. The session refuses every permission,
+ * downloads, file pickers and requests to local/private addresses (unless
+ * allowLocal), names included: a host is resolved first and refused when it
+ * points at a private address (127.0.0.1.nip.io, localtest.me …). New windows
+ * load in place. The window closes itself after 10 idle minutes. The page
+ * logic lives in ./agentBrowser.ts and ./snapshot.ts (pure); its scripts run
+ * in an isolated world, out of the page's reach.
  */
 
 import { BrowserWindow, session as electronSession, type Session, type WebContents } from 'electron'
-import { cleanUserAgent, isRequestAllowed, type PageDriver } from './agentBrowser'
+import { lookup } from 'dns/promises'
+import { randomBytes } from 'crypto'
+import { cleanUserAgent, isPrivateHost, isRequestAllowed, type PageDriver } from './agentBrowser'
 
-export const AGENT_BROWSER_PARTITION = 'persist:mlx-agent-browser'
+/** Isolated world for the agent's page scripts (any id ≥ 1000 is ours). */
+const AGENT_WORLD = 1999
+export const AGENT_BROWSER_IDLE_MS = 10 * 60_000
+
+const agentWindows = new WeakSet<BrowserWindow>()
+/** The agent browser's hidden windows (to leave out of "the app's window" lookups). */
+export function isAgentBrowserWindow(w: BrowserWindow | null | undefined): boolean {
+  return !!w && agentWindows.has(w)
+}
+/** The app's own windows (agent browser windows left out). */
+export function appWindows(): BrowserWindow[] {
+  return BrowserWindow.getAllWindows().filter(w => !w.isDestroyed() && !agentWindows.has(w))
+}
+const closers = new Set<() => void>()
+/** Close every agent browser window (e.g. when the app's last window closes on Windows/Linux). */
+export function closeAllAgentBrowserWindows(): void {
+  for (const c of [...closers]) c()
+}
 
 export interface ElectronDriverOptions {
   /** Allow localhost and private-network addresses (default false). Read on every request. */
   allowLocal?: boolean | (() => boolean)
+  /** Session partition (default: a fresh in-memory one per driver). */
+  partition?: string
 }
 
 export interface ElectronPageDriver extends PageDriver {
@@ -22,18 +47,31 @@ export interface ElectronPageDriver extends PageDriver {
   window(): BrowserWindow | null
 }
 
-const prepared = new WeakSet<Session>()
 const ERR_ABORTED = -3
 
-// The session outlives a driver: its handlers report to the driver that used it last.
-let sessionAllowLocal: () => boolean = () => false
-let sessionNote: (line: string) => void = () => {}
-const allowLocal = () => sessionAllowLocal()
-const note = (line: string) => sessionNote(line)
+/** host → { private?, until } for 60 s, so a page's many requests resolve once. */
+const dnsCache = new Map<string, { bad: boolean; until: number }>()
+const isIpLiteral = (h: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':')
 
-function prepareSession(ses: Session): void {
-  if (prepared.has(ses)) return
-  prepared.add(ses)
+/** True when a host name resolves to any private, loopback or link-local address. */
+export async function resolvesPrivate(hostname: string): Promise<boolean> {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
+  if (!h || isIpLiteral(h)) return false // literals are judged by isPrivateHost
+  const hit = dnsCache.get(h)
+  if (hit && hit.until > Date.now()) return hit.bad
+  let bad = false
+  try {
+    const all = await lookup(h, { all: true, verbatim: true })
+    bad = all.some(a => isPrivateHost(a.address))
+  } catch {
+    bad = false // unresolvable: Chromium fails the request by itself
+  }
+  if (dnsCache.size > 500) dnsCache.clear()
+  dnsCache.set(h, { bad, until: Date.now() + 60_000 })
+  return bad
+}
+
+function prepareSession(ses: Session, allowLocal: () => boolean, note: (line: string) => void): void {
   ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
   ses.setPermissionCheckHandler(() => false)
   try { ses.setDevicePermissionHandler(() => false) } catch { /* older Electron */ }
@@ -43,9 +81,16 @@ function prepareSession(ses: Session): void {
     try { item.cancel() } catch { /* already cancelled */ }
   })
   ses.webRequest.onBeforeRequest((details, callback) => {
-    const ok = isRequestAllowed(details.url, { allowLocal: allowLocal() })
-    if (!ok && details.resourceType === 'mainFrame') note(`Blocked ${details.url.slice(0, 120)}: local, private and non-web addresses are off limits.`)
-    callback({ cancel: !ok })
+    const local = allowLocal()
+    const blocked = () => {
+      if (details.resourceType === 'mainFrame') note(`Blocked ${details.url.slice(0, 120)}: local, private and non-web addresses are off limits.`)
+      callback({ cancel: true })
+    }
+    if (!isRequestAllowed(details.url, { allowLocal: local })) return blocked()
+    let host = ''
+    try { host = new URL(details.url).hostname } catch { /* data:, blob: … */ }
+    if (local || !host || !/^(https?|wss?):/i.test(details.url)) return callback({ cancel: false })
+    resolvesPrivate(host).then(bad => (bad ? blocked() : callback({ cancel: false })), () => callback({ cancel: false }))
   })
   ses.setUserAgent(cleanUserAgent(ses.getUserAgent()))
 }
@@ -54,12 +99,33 @@ export function createElectronDriver(
   getParent?: () => BrowserWindow | null,
   opts: ElectronDriverOptions = {},
 ): ElectronPageDriver {
+  void getParent // no parent window: a child would show, hide and close with the app's window
   let win: BrowserWindow | null = null
   let events: string[] = []
+  let idle: ReturnType<typeof setTimeout> | null = null
+  const partition = opts.partition ?? `mlx-agent-${randomBytes(6).toString('hex')}`
+  let prepared = false
   const allowLocal = () => (typeof opts.allowLocal === 'function' ? !!opts.allowLocal() : !!opts.allowLocal)
   const note = (line: string) => {
     events.push(line)
     if (events.length > 20) events = events.slice(-20)
+  }
+  const closeWindow = () => {
+    if (idle) clearTimeout(idle)
+    idle = null
+    const w = win
+    win = null
+    if (w && !w.isDestroyed()) {
+      try { if (w.webContents.debugger.isAttached()) w.webContents.debugger.detach() } catch { /* gone */ }
+      w.destroy()
+    }
+  }
+  closers.add(closeWindow)
+  /** Each use pushes the idle close back. */
+  const touch = () => {
+    if (idle) clearTimeout(idle)
+    idle = setTimeout(closeWindow, AGENT_BROWSER_IDLE_MS)
+    ;(idle as any).unref?.()
   }
 
   function attachDebugger(wc: WebContents): void {
@@ -89,20 +155,16 @@ export function createElectronDriver(
 
   function ensure(): BrowserWindow {
     if (win && !win.isDestroyed()) return win
-    const ses = electronSession.fromPartition(AGENT_BROWSER_PARTITION)
-    sessionAllowLocal = allowLocal
-    sessionNote = note
-    prepareSession(ses)
-    const parent = getParent?.() ?? null
+    const ses = electronSession.fromPartition(partition)
+    if (!prepared) { prepareSession(ses, allowLocal, note); prepared = true }
     win = new BrowserWindow({
       show: false,
       width: 1280,
       height: 900,
       skipTaskbar: true,
       paintWhenInitiallyHidden: true,
-      ...(parent && !parent.isDestroyed() ? { parent } : {}),
       webPreferences: {
-        partition: AGENT_BROWSER_PARTITION,
+        partition,
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
@@ -132,11 +194,13 @@ export function createElectronDriver(
     wc.on('will-attach-webview', e => e.preventDefault())
     wc.on('render-process-gone', () => note('The page crashed and was closed.'))
     attachDebugger(wc)
-    win.on('closed', () => { win = null })
+    agentWindows.add(win)
+    const created = win
+    win.on('closed', () => { if (win === created) win = null })
     return win
   }
 
-  const wc = () => ensure().webContents
+  const wc = () => { const c = ensure().webContents; touch(); return c }
 
   function loaded(c: WebContents, timeoutMs = 30_000): Promise<void> {
     if (!c.isLoading()) return Promise.resolve()
@@ -160,7 +224,9 @@ export function createElectronDriver(
     },
 
     run<T>(js: string): Promise<T> {
-      return wc().executeJavaScript(js, true) as Promise<T>
+      // Own world: the page cannot see the ref registry or patch what the
+      // scripts call. The DOM is shared, so clicks and typing still land.
+      return wc().executeJavaScriptInIsolatedWorld(AGENT_WORLD, [{ code: js }], true) as Promise<T>
     },
 
     async back(): Promise<void> {
@@ -196,13 +262,8 @@ export function createElectronDriver(
     },
 
     close(): void {
-      const w = win
-      win = null
+      closeWindow()
       events = []
-      if (w && !w.isDestroyed()) {
-        try { if (w.webContents.debugger.isAttached()) w.webContents.debugger.detach() } catch { /* gone */ }
-        w.destroy()
-      }
     },
 
     window(): BrowserWindow | null {

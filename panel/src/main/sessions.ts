@@ -1,3 +1,4 @@
+import { appWindows, isAgentBrowserWindow } from './browser/electronDriver'
 import { adoptNativeMtpConfig } from '../shared/nativeMtpAdoption'
 import { remoteServerBaseUrl } from '../shared/remoteApiUrl'
 import { markImageGenerationServerStopping, recordImageGenerationLog, requestImageGenerationServerStop } from './ipc/imageGenerationState'
@@ -5840,7 +5841,8 @@ export class SessionManager extends EventEmitter {
 
   private async confirmSlowStop(label: string, signal: AbortSignal): Promise<'wait' | 'force'> {
     // macOS cannot abort an unparented message box: it blocks the event loop.
-    const existing = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows().find(w => !w.isDestroyed())
+    const focused = BrowserWindow.getFocusedWindow()
+    const existing = (focused && !isAgentBrowserWindow(focused) ? focused : null) || appWindows()[0]
     const parent = existing || new BrowserWindow({ width: 480, height: 180, show: false, title: tMain('main.dialog.slowStopTitle') })
     if (!existing) parent.show()
     try {

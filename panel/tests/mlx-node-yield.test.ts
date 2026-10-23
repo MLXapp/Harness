@@ -26,6 +26,6 @@ describe('MLX Node yields to Harness', () => {
     expect(src).toContain("execFile('/usr/bin/open', ['-g', '-a', node.path!, url]")
     expect(src).toContain('!node.running')
     expect(src).toContain('mlx://yield?by=harness&minutes=')
-    expect(readFileSync('src/main/index.ts', 'utf8')).toContain('void releaseMlxNodeYield()')
+    expect(readFileSync('src/main/index.ts', 'utf8')).toContain('processManager.killAll(), releaseMlxNodeYield()])')
   })
 })

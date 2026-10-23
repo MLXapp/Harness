@@ -8,7 +8,7 @@
  */
 
 import { createHash } from 'crypto'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, join, relative, isAbsolute } from 'path'
 
 export const BACKUP_LIMIT = 50
@@ -110,7 +110,10 @@ export class FileBackups {
 /** "src/app.ts" when inside the working folder, else the absolute path. */
 export function shownPath(fullPath: string, workingDir: string): string {
   if (!workingDir) return fullPath
-  const rel = relative(workingDir, fullPath)
+  // Stored paths are real paths (/private/var/… on macOS): compare like with like.
+  let base = workingDir
+  try { base = realpathSync(workingDir) } catch { /* keep as given */ }
+  const rel = relative(base, fullPath)
   return rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel : fullPath
 }
 
