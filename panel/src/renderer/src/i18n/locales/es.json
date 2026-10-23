@@ -3207,7 +3207,9 @@
     "chip": "Apps",
     "onTitle": "Las apps están activadas en este chat",
     "offTitle": "Activar apps (Gmail, Calendar, Slack…) en este chat",
-    "setupTitle": "Conectar apps (Gmail, Calendar, Slack…)"
+    "setupTitle": "Conectar apps (Gmail, Calendar, Slack…)",
+    "connectedApp": "Conectada",
+    "directNote": "Los modelos de este Mac reciben directamente las acciones principales de las apps que conectaste aquí (más fácil para modelos pequeños); los modelos en la nube buscan en todo Composio."
   },
   "skills": {
     "intro": "Las habilidades son carpetas con un SKILL.md: instrucciones (y a veces scripts) para un tipo de trabajo, en el mismo formato que Claude Code. El agente ve el nombre y la descripción y solo lee las instrucciones cuando una tarea las necesita. Los scripts se ejecutan con las herramientas normales, así que preguntan como cualquier comando.",

@@ -3207,7 +3207,9 @@
     "chip": "应用",
     "onTitle": "此对话已开启应用",
     "offTitle": "在此对话中开启应用（Gmail、日历、Slack…）",
-    "setupTitle": "连接应用（Gmail、日历、Slack…）"
+    "setupTitle": "连接应用（Gmail、日历、Slack…）",
+    "connectedApp": "已连接",
+    "directNote": "这台 Mac 上的模型会直接获得你在此连接的应用的主要操作（对小模型更容易）；云端模型会搜索整个 Composio。"
   },
   "skills": {
     "intro": "技能是包含 SKILL.md 的文件夹：针对某类工作的说明（有时附带脚本），格式与 Claude Code 相同。智能体只看到名称和描述，需要时才读取说明。脚本通过普通工具运行，因此会像其他命令一样先询问。",

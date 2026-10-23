@@ -50,6 +50,10 @@ export function appsService(): AppsService {
       },
       writeRules: (rules) => db.setSetting(RULES_KEY, JSON.stringify(rules)),
       chatEnabled: (chatId) => db.getSetting(chatKey(chatId)) === '1',
+      readConnected: () => { try { const v = JSON.parse(db.getSetting('apps_connected') || '[]'); return Array.isArray(v) ? v.filter((x: unknown) => typeof x === 'string') : [] } catch { return [] } },
+      writeConnected: (list) => db.setSetting('apps_connected', JSON.stringify(list.slice(0, 50))),
+      readSchemaCache: () => { try { return JSON.parse(db.getSetting('apps_schema_cache') || '{}') } catch { return {} } },
+      writeSchemaCache: (cache) => db.setSetting('apps_schema_cache', JSON.stringify(cache)),
       setChatEnabled: (chatId, on) => { if (on) db.setSetting(chatKey(chatId), '1'); else db.deleteSetting(chatKey(chatId)) },
     },
     openExternal: async (url) => {
@@ -76,7 +80,10 @@ export function registerAppsHandlers(): void {
     mkdirSync(dir, { recursive: true })
     return (await shell.openPath(dir)) === ''
   })
-  ipcMain.handle('apps:status', () => ({ ...apps.status(), featured: FEATURED_APPS.map(id => ({ id, name: appName(id) })) }))
+  ipcMain.handle('apps:status', () => {
+    const connected = new Set(apps.connectedApps())
+    return { ...apps.status(), featured: FEATURED_APPS.map(id => ({ id, name: appName(id), connected: connected.has(id) })) }
+  })
   ipcMain.handle('apps:connect', () => apps.connectOAuth())
   ipcMain.handle('apps:connectKey', (_e, key: string) => apps.connectWithKey(typeof key === 'string' ? key : ''))
   ipcMain.handle('apps:cancel', () => { apps.cancelSignIn(); return apps.status() })
