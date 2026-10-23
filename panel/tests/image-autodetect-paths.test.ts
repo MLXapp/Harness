@@ -92,9 +92,11 @@ describe("image model autodetection path", () => {
   });
 
   it("image edit requests normalize painted mask data URLs before proxying", () => {
+    // image.ts builds the edit body with the shared imageEditBody helper.
     const src = readFileSync(IMAGE_TS, "utf-8");
-    expect(src).toContain("body.mask = maskBase64.replace");
-    expect(src).toContain("data:image");
+    expect(src).toContain("const body = imageEditBody(params)");
+    const inputs = readFileSync(join(__dirname, "..", "src", "shared", "imageNativeInputs.ts"), "utf-8");
+    expect(inputs).toContain("body.mask = params.maskBase64.replace(/^data:image");
   });
 
   it("API quick-start snippets switch to image generation/edit endpoints for image sessions", () => {

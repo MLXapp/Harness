@@ -37,6 +37,7 @@ import { registerMediaScheme, handleMediaProtocol } from './media/protocol'
 import { offerMlxNodeOnFirstRun } from './mlx-node'
 import { sessionManager } from './sessions'
 import { releaseMlxNodeYield, resumeMlxNodeYieldWatch, startMlxNodeYield } from './mlxNodeYield'
+import { runSelfTest, selfTestOutput } from './selfTest'
 import { apiGateway } from './api-gateway'
 import { buildContentSecurityPolicy } from './csp'
 import { rendererSettingValue } from './settingsAccess'
@@ -89,6 +90,9 @@ const quitConfirmation = new QuitConfirmation({
 })
 const processManager = new ProcessManager()
 const allowSecondaryInstance = shouldAllowSecondaryInstance(process.argv, process.env)
+/** `--mlx-self-test=<report.json>`: launch check of the packaged app (CI). */
+const selfTestOut = selfTestOutput()
+const selfTestRendererErrors: string[] = []
 const proofOwnedEngineLifecycle = shouldUseProofOwnedEngineLifecycle(
   process.argv,
   process.env,
@@ -624,9 +628,24 @@ app.whenReady().then(async () => {
     })
   }
 
+  // Self-test: run the checks once the window has loaded, nothing interactive.
+  if (selfTestOut && mainWindow && !mainWindow.isDestroyed()) {
+    const win = mainWindow
+    win.webContents.on('console-message', (event: any, level?: any, message?: any) => {
+      const lvl = typeof level === 'number' ? level : event?.level
+      const msg = typeof message === 'string' ? message : event?.message
+      if (lvl === 3 || lvl === 'error') selfTestRendererErrors.push(String(msg).slice(0, 300))
+    })
+    win.webContents.on('render-process-gone', (_e, d) => selfTestRendererErrors.push(`renderer crashed: ${d.reason}`))
+    win.webContents.on('preload-error', (_e, path, err) => selfTestRendererErrors.push(`preload error in ${path}: ${err?.message ?? err}`))
+    const go = () => setTimeout(() => { void runSelfTest(selfTestOut, () => mainWindow, selfTestRendererErrors) }, 4000)
+    if (win.webContents.isLoading()) win.webContents.once('did-finish-load', go)
+    else go()
+  }
+
   // First run: offer to install the MLX Node this build carries (once). Asked
   // after the window is up, so the question has MLX Harness behind it.
-  if (!proofOwnedEngineLifecycle && mainWindow && !mainWindow.isDestroyed()) {
+  if (!selfTestOut && !proofOwnedEngineLifecycle && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.once('ready-to-show', () => {
       setTimeout(() => {
         offerMlxNodeOnFirstRun(() => mainWindow).catch((e) => console.error('[MLX Node] first-run offer failed', e))
@@ -636,7 +655,7 @@ app.whenReady().then(async () => {
 
   // Check for app updates (non-blocking, fires after 5s delay)
   const appVersion = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8')).version
-  checkForUpdates(() => mainWindow, appVersion)
+  if (!selfTestOut) checkForUpdates(() => mainWindow, appVersion)
 
   // Detect and adopt existing vmlx-engine processes on normal startup. An
   // explicitly isolated proof instance owns only the engines it launches.

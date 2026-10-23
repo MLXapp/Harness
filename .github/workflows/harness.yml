@@ -185,6 +185,26 @@ jobs:
             rm -rf "$out"
           done
 
+      # Launch the app from the final DMG and run its self-test (window and
+      # preload IPC, memory and task stores, the agent browser in its own
+      # session, the MLX Node yield watcher). A failed launch fails the build.
+      - name: Launch the app (self-test)
+        working-directory: harness/panel/release
+        run: |
+          for dmg in MLX-Harness-*.dmg; do
+            mnt="$(mktemp -d)"; run="$(mktemp -d)"
+            hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$mnt" "$dmg" > /dev/null
+            ditto "$mnt/MLX Harness.app" "$run/MLX Harness.app"
+            hdiutil detach "$mnt" -quiet
+            code=0
+            perl -e 'alarm 240; exec @ARGV' "$run/MLX Harness.app/Contents/MacOS/MLX Harness" \
+              --vmlx-user-data-dir="$run/user-data" --mlx-self-test="$run/report.json" > "$run/log.txt" 2>&1 || code=$?
+            grep -E '\[SELFTEST\]' "$run/log.txt" || tail -50 "$run/log.txt"
+            test -f "$run/report.json" && cat "$run/report.json"
+            if [[ "$code" != "0" ]]; then echo "::error::$dmg: the app's self-test failed (exit $code)"; exit 1; fi
+            rm -rf "$run"
+          done
+
       - name: Remove the signing keychain
         if: always()
         run: |
