@@ -1,7 +1,7 @@
 /**
  * MLX Node steps aside while MLX Harness runs a model on this Mac.
  *
- * MLX Node 0.9.5+ understands `mlx://yield?by=harness&minutes=N` (pause its
+ * MLX Node 0.9.6+ understands `mlx://yield?by=harness&minutes=N` (pause its
  * network jobs and free its model for N minutes, at most 60, ending by
  * itself) and `mlx://resume?by=harness`. While a local model is loaded here,
  * Harness renews the yield every few minutes; when the last local model
@@ -14,7 +14,7 @@ import { execFile } from 'child_process'
 import { db } from './database'
 import { mlxNodeStatus } from './mlx-node'
 
-export const YIELD_MIN_VERSION = '0.9.5'
+export const YIELD_MIN_VERSION = '0.9.6'
 export const YIELD_MINUTES = 10
 export const RENEW_MS = 4 * 60_000
 export const YIELD_SETTING = 'mlx_node_yield'

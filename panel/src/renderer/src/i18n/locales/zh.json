@@ -3276,7 +3276,7 @@
     "yield": {
       "title": "在此运行模型时暂停 MLX Node",
       "help": "MLX Harness 中加载模型期间，MLX Node 会停止网络任务并释放内存，模型停止后几分钟内继续运行。",
-      "update": "需要 MLX Node 0.9.5 或更高版本（这台 Mac 为 {version}）。"
+      "update": "需要 MLX Node 0.9.6 或更高版本（这台 Mac 为 {version}）。"
     }
   }
 }

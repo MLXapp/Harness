@@ -74,12 +74,12 @@ const atLeast = (a: string | undefined, b: string) => {
   return true
 }
 
-/** "Pause MLX Node while a model runs here" (MLX Node 0.9.5 and newer). */
+/** "Pause MLX Node while a model runs here" (MLX Node 0.9.6 and newer). */
 function YieldRow({ version }: { version?: string }) {
   const { t } = useTranslation()
   const [on, setOn] = useState<boolean | null>(null)
   useEffect(() => { window.api.network.yieldEnabled?.().then(setOn).catch(() => setOn(true)) }, [])
-  const supported = atLeast(version, '0.9.5')
+  const supported = atLeast(version, '0.9.6')
   return (
     <div className="mt-4 flex items-start gap-4 border-t border-border pt-4">
       <div className="min-w-0 flex-1">

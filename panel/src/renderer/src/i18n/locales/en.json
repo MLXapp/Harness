@@ -3276,7 +3276,7 @@
     "yield": {
       "title": "Pause MLX Node while a model runs here",
       "help": "While a model is loaded in MLX Harness, MLX Node stops its network jobs and frees its memory, then carries on within minutes after the model stops.",
-      "update": "Needs MLX Node 0.9.5 or newer (this Mac has {version})."
+      "update": "Needs MLX Node 0.9.6 or newer (this Mac has {version})."
     }
   }
 }
