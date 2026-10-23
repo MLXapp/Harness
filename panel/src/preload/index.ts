@@ -222,6 +222,17 @@ const api = {
       ipcRenderer.invoke('chat:setOverrides', chatId, overrides),
     getOverrides: (chatId: string) => ipcRenderer.invoke('chat:getOverrides', chatId),
     setPlanMode: (chatId: string, on: boolean): Promise<boolean> => ipcRenderer.invoke('chat:setPlanMode', chatId, on),
+    steer: (chatId: string, id: string, text: string): Promise<{ accepted: boolean }> => ipcRenderer.invoke('chat:steer', chatId, id, text),
+    onSteered: (callback: (data: { chatId: string; ids: string[]; messageId?: string; content?: string | null }) => void) => {
+      const listener = (_e: unknown, data: { chatId: string; ids: string[]; messageId?: string; content?: string | null }) => callback(data)
+      ipcRenderer.on('chat:steered', listener)
+      return () => { ipcRenderer.removeListener('chat:steered', listener) }
+    },
+    onSteerUnused: (callback: (data: { chatId: string; items: Array<{ id: string; text: string }> }) => void) => {
+      const listener = (_e: unknown, data: { chatId: string; items: Array<{ id: string; text: string }> }) => callback(data)
+      ipcRenderer.on('chat:steerUnused', listener)
+      return () => { ipcRenderer.removeListener('chat:steerUnused', listener) }
+    },
     getPlanMode: (chatId: string): Promise<boolean> => ipcRenderer.invoke('chat:getPlanMode', chatId),
     clearOverrides: (chatId: string) => ipcRenderer.invoke('chat:clearOverrides', chatId),
 

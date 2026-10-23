@@ -1712,6 +1712,20 @@ class DatabaseManager {
   }
 
   /** Update an existing message's content in-place (for incremental persistence during streaming) */
+  /** Add text to a stored user message (steering a running turn). */
+  appendToUserMessage(messageId: string, addition: string): string | null {
+    this.ensureOpen();
+    const row = this.db.prepare("SELECT content FROM messages WHERE id = ? AND role = 'user'").get(messageId) as { content: string } | undefined;
+    if (!row) return null;
+    let next = `${row.content}\n\n${addition}`;
+    try {
+      const parts = JSON.parse(row.content);
+      if (Array.isArray(parts)) next = JSON.stringify([...parts, { type: "text", text: addition }]);
+    } catch { /* plain text */ }
+    this.db.prepare("UPDATE messages SET content = ? WHERE id = ?").run(next, messageId);
+    return next;
+  }
+
   updateMessageContent(
     messageId: string,
     content: string,

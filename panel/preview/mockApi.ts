@@ -297,6 +297,9 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       getOverrides: async (chatId: string) => overrides.get(chatId) ?? null,
       setPlanMode: async (chatId: string, on: boolean) => { if (on) planChats.add(chatId); else planChats.delete(chatId); return on },
       getPlanMode: async (chatId: string) => planChats.has(chatId),
+      steer: async () => ({ accepted: true }),
+      onSteered: on('chat:steered'),
+      onSteerUnused: on('chat:steerUnused'),
       clearOverrides: async (chatId: string) => { overrides.delete(chatId); return { success: true } },
       saveProfile: async (name: string, value: any, isDefault?: boolean) => {
         const profile = { id: newId('profile'), name, overrides: value, isDefault: !!isDefault, createdAt: Date.now() }

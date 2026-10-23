@@ -794,7 +794,12 @@
     "queue": {
       "label": "接下来",
       "remove": "从队列中移除",
-      "placeholder": "输入下一条消息，本次回复结束后发送…"
+      "placeholder": "补充到本次回复…（⌥↩ 改为回复结束后发送）"
+    },
+    "steer": {
+      "waiting": "正在加入回复…",
+      "joined": "已加入回复",
+      "added": "在处理时补充"
     }
   },
   "sessions": {

@@ -28,7 +28,7 @@ export interface MediaAttachment {
 export type ImageAttachment = MediaAttachment
 
 interface InputBoxProps {
-  onSend: (message: string, attachments?: MediaAttachment[]) => void
+  onSend: (message: string, attachments?: MediaAttachment[], options?: { queue?: boolean }) => void
   onAbort?: () => void
   disabled?: boolean
   loading?: boolean
@@ -183,11 +183,12 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
     }
   }, [loading, disabled])
 
-  const handleSend = () => {
-    // While a reply runs, only text is queued; attachments wait in the composer.
+  const handleSend = (options?: { queue?: boolean }) => {
+    // While a reply runs, text joins it (or, with ⌥, waits for the next
+    // turn); attachments wait in the composer.
     if (loading && (attachments.length > 0 || !message.trim())) return
     if ((message.trim() || attachments.length > 0) && !disabled && !noModel) {
-      onSend(message, attachments.length > 0 ? attachments : undefined)
+      onSend(message, attachments.length > 0 ? attachments : undefined, options)
       setMessage('')
       setAttachments([])
       // Reset file input so the same file can be re-selected
@@ -200,7 +201,7 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
     if (e.nativeEvent.isComposing || e.keyCode === 229) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      handleSend({ queue: e.altKey })
     }
     if (e.key === 'Escape' && loading && onAbort) {
       onAbort()
@@ -453,7 +454,7 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
           ) : (
             <button
               type="button"
-              onClick={handleSend}
+              onClick={() => handleSend()}
               data-vmlx-control="chat-send"
               disabled={!canSend}
               className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[color:var(--acc)] text-white shadow-[0_4px_14px_-6px_var(--acc-glow)] transition-[background-color,opacity,transform,box-shadow] duration-150 hover:bg-[color:var(--acc-hi)] active:scale-95 disabled:opacity-35 disabled:shadow-none disabled:active:scale-100"

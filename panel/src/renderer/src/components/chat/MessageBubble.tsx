@@ -358,13 +358,29 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
               ))}
             </div>
           )}
-          {textParts.map((p, i) =>
-            renderMarkdownSegment(p.text!, `user-text-${i}`, true)
-          )}
+          {textParts.map((p, i) => renderUserText(p.text!, `user-text-${i}`))}
         </div>
       )
     }
-    return renderMarkdownSegment(message.content, 'user-text', true)
+    return renderUserText(message.content, 'user-text')
+  }
+
+  // Text added while the reply ran ("[Added while working] …") shows as its
+  // own small block under the message.
+  const renderUserText = (text: string, key: string) => {
+    const pieces = text.split(/\n*\[Added while working\] /)
+    if (pieces.length === 1) return renderMarkdownSegment(text, key, true)
+    return (
+      <div key={key}>
+        {pieces[0].trim() && renderMarkdownSegment(pieces[0], `${key}-0`, true)}
+        {pieces.slice(1).map((added, i) => (
+          <div key={`${key}-a${i}`} className="mt-2 border-t border-foreground/10 pt-2">
+            <div className="mb-0.5 text-[11px] font-medium opacity-60">{t('chat.steer.added')}</div>
+            {renderMarkdownSegment(added, `${key}-a${i}-text`, true)}
+          </div>
+        ))}
+      </div>
+    )
   }
 
   const renderInlineContent = () => {

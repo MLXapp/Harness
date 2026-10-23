@@ -794,7 +794,12 @@
     "queue": {
       "label": "Después",
       "remove": "Quitar de la cola",
-      "placeholder": "Escribe el siguiente mensaje; se enviará cuando termine esta respuesta…"
+      "placeholder": "Añade algo a esta respuesta… (⌥↩ lo envía al terminar)"
+    },
+    "steer": {
+      "waiting": "Uniéndose a la respuesta…",
+      "joined": "Añadido a la respuesta",
+      "added": "Añadido mientras trabajaba"
     }
   },
   "sessions": {

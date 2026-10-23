@@ -712,6 +712,14 @@ const alwaysAllowedCommands = new Map<string, Set<string>>();
 const planModeChats = new Set<string>();
 /** Chats whose context holds data read from an app (Composio) in this app run. */
 const chatsWithAppData = new Set<string>();
+/**
+ * Steering: text the user sent while a turn runs. It joins the turn at the
+ * next tool step (after the tool results, before the model continues). What
+ * a turn never picks up goes back to the renderer as queued messages.
+ */
+const steerQueues = new Map<string, Array<{ id: string; text: string }>>();
+const STEER_NOTE = "[The user added this while you were working. Take it into account from here on:]";
+const STEER_ADDED_PREFIX = "[Added while working]";
 
 /** Add the Plan mode note to the end of this turn's user message (request only). */
 function withPlanModeNote(messages: any[]): void {
@@ -1629,6 +1637,7 @@ export function registerChatHandlers(
       // generation timeout — exactly the premature timeout the user hit. It
       // is armed immediately before the inference fetch below.
       repeatCallTracker.newTurn(chatId);
+      steerQueues.delete(chatId);
       activeRequests.set(chatId, {
         controller: abortController,
         startedAt: Date.now(),
@@ -4672,6 +4681,28 @@ export function registerChatHandlers(
 
         // ─── Helper: send follow-up request and stream response ────────────
         const sendFollowUp = async (): Promise<boolean> => {
+          // Steering: anything the user sent meanwhile joins here, after the
+          // tool results and before the model continues.
+          const steers = steerQueues.get(chatId);
+          if (steers && steers.length > 0) {
+            steerQueues.delete(chatId);
+            const text = steers.map((m) => m.text).join("\n\n");
+            requestMessages.push({ role: "user", content: `${STEER_NOTE}\n${text}` });
+            // Kept with the turn's own message, so the history and the
+            // transcript show it after a restart too.
+            const addition = `${STEER_ADDED_PREFIX} ${text}`;
+            let updated: string | null = null;
+            if (mode === "send") {
+              try { updated = db.appendToUserMessage(userMessage.id, addition); } catch (_) {}
+            }
+            try {
+              const win = getWindow();
+              if (win && !win.isDestroyed()) {
+                win.webContents.send("chat:steered", { chatId, ids: steers.map((m) => m.id), messageId: userMessage.id, content: updated });
+              }
+            } catch (_) {}
+            console.log(`[CHAT] Steer: ${steers.length} message(s) joined the running turn`);
+          }
           // Calibrate the token heuristic with the pass that just finished,
           // then compact before this pass if the history reached 80%.
           tokenCalibrator.observe(lastSentHeuristicTokens, promptTokens);
@@ -6447,6 +6478,15 @@ export function registerChatHandlers(
         const current = activeRequests.get(chatId);
         if (current && current.controller === abortController) {
           activeRequests.delete(chatId);
+          // Steers this turn never reached go back as queued messages.
+          const unused = steerQueues.get(chatId);
+          steerQueues.delete(chatId);
+          if (unused && unused.length > 0) {
+            try {
+              const win = getWindow();
+              if (win && !win.isDestroyed()) win.webContents.send("chat:steerUnused", { chatId, items: unused });
+            } catch (_) {}
+          }
         }
       }
     };
@@ -6561,6 +6601,15 @@ export function registerChatHandlers(
     return parseStoredTodos(db.getChatAgentState(chatId).todosJson);
   });
 
+  ipcMain.handle("chat:steer", (_, chatId: string, id: string, text: string) => {
+    if (typeof chatId !== "string" || typeof text !== "string" || !text.trim()) return { accepted: false };
+    if (!activeRequests.has(chatId)) return { accepted: false };
+    const list = steerQueues.get(chatId) ?? [];
+    if (list.length >= 10) return { accepted: false };
+    list.push({ id: typeof id === "string" ? id : String(Date.now()), text: text.slice(0, 20000) });
+    steerQueues.set(chatId, list);
+    return { accepted: true };
+  });
   ipcMain.handle("chat:setPlanMode", (_, chatId: string, on: boolean) => {
     if (typeof chatId !== "string" || !chatId) return false;
     if (on) planModeChats.add(chatId);

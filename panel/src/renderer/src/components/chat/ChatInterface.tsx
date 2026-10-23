@@ -212,6 +212,32 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
   // Messages typed while a reply is running: sent one by one when it ends.
   // Kept per chat in this browser profile so closing the window keeps them.
   const [queued, setQueued] = useState<QueuedMessage[]>([])
+  const [steering, setSteering] = useState<Array<QueuedMessage & { joined: boolean }>>([])
+  useEffect(() => {
+    setSteering([])
+    const offJoined = window.api.chat.onSteered?.(data => {
+      if (data.chatId !== chatIdRef.current) return
+      setSteering(st => st.map(m => (data.ids.includes(m.id) ? { ...m, joined: true } : m)))
+      // The turn's own message now carries the addition (as stored).
+      if (data.content) {
+        setMessages(prev => {
+          const idx = prev.map(m => m.role).lastIndexOf('user')
+          if (idx < 0) return prev
+          const next = prev.slice()
+          next[idx] = { ...next[idx], content: data.content as string }
+          return next
+        })
+      }
+      window.setTimeout(() => setSteering(st => st.filter(m => !data.ids.includes(m.id))), 1800)
+    })
+    const offUnused = window.api.chat.onSteerUnused?.(data => {
+      if (data.chatId !== chatIdRef.current) return
+      const ids = new Set(data.items.map(i => i.id))
+      setSteering(st => st.filter(m => !ids.has(m.id)))
+      setQueued(q => [...data.items, ...q])
+    })
+    return () => { offJoined?.(); offUnused?.() }
+  }, [chatId])
   const queueLoaded = useRef<string | null>(null)
   useEffect(() => {
     queueLoaded.current = null
@@ -628,12 +654,17 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
     }
   }
 
-  const handleSend = async (content: string, attachments?: MediaAttachment[]) => {
+  const handleSend = async (content: string, attachments?: MediaAttachment[], options?: { queue?: boolean }) => {
     if (!chatId || (!content.trim() && (!attachments || attachments.length === 0))) return
     if (loading) {
-      if (content.trim() && (!attachments || attachments.length === 0)) {
-        setQueued(q => [...q, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, text: content }])
+      if (!content.trim() || (attachments && attachments.length > 0)) return
+      const item = { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, text: content }
+      // Enter joins the running reply at its next step; ⌥Enter waits for it to end.
+      if (!options?.queue && window.api.chat.steer) {
+        const res = await window.api.chat.steer(chatId, item.id, content).catch(() => ({ accepted: false }))
+        if (res.accepted) { setSteering(st => [...st, { ...item, joined: false }]); return }
       }
+      setQueued(q => [...q, item])
       return
     }
     if (content.trim() === '/compact' && (!attachments || attachments.length === 0)) {
@@ -950,7 +981,7 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
           </button>
         </div>
       )}
-      <QueuedMessages items={queued} onRemove={id => setQueued(q => q.filter(m => m.id !== id))} />
+      <QueuedMessages steering={steering} items={queued} onRemove={id => setQueued(q => q.filter(m => m.id !== id))} />
       <InputBox
         onSend={handleSend}
         onAbort={handleAbort}
@@ -984,12 +1015,21 @@ function writeQueue(chatId: string, items: QueuedMessage[]): void {
 }
 
 /** Messages waiting for the running reply to end, above the composer. */
-function QueuedMessages({ items, onRemove }: { items: QueuedMessage[]; onRemove: (id: string) => void }) {
+function QueuedMessages({ steering, items, onRemove }: { steering: Array<QueuedMessage & { joined: boolean }>; items: QueuedMessage[]; onRemove: (id: string) => void }) {
   const { t } = useTranslation()
   return (
-    <Reveal open={items.length > 0}>
+    <Reveal open={items.length > 0 || steering.length > 0}>
       <div data-vmlx-section="chat-queue" className="mx-auto w-full max-w-[868px] px-6 pb-1.5">
         <div className="flex flex-col gap-1">
+          {steering.map(m => (
+            <div key={m.id} className="mlx-queued mlx-fade-in" data-vmlx-state={m.joined ? 'joined' : 'waiting'}>
+              <span className={`shrink-0 text-[11.5px] font-medium ${m.joined ? 'text-success' : 'text-[color:var(--acc)]'}`}>
+                {m.joined ? t('chat.steer.joined') : t('chat.steer.waiting')}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[13px]">{m.text}</span>
+              {!m.joined && <Loader2 className="mr-1.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />}
+            </div>
+          ))}
           {items.map(m => (
             <div key={m.id} className="mlx-queued mlx-fade-in">
               <span className="shrink-0 text-[11.5px] font-medium text-muted-foreground">{t('chat.queue.label')}</span>
