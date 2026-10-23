@@ -653,6 +653,17 @@ html.vibrancy .mlx-sidebar { background: var(--sidebar-wash), var(--sidebar-glas
 }
 .mlx-chip:hover { color: rgb(var(--foreground)); background: rgb(var(--foreground) / 0.08); }
 .mlx-chip.is-on { color: rgb(var(--foreground)); background: rgb(var(--primary) / 0.14); }
+/* Lyrics section tags ([Verse], [Chorus] …): small, quiet, mono like the text they insert. */
+.mlx-tag-pill {
+  height: 24px; padding: 0 8px; border-radius: 7px;
+  font: 500 11.5px/24px var(--mono, ui-monospace, monospace);
+  color: rgb(var(--muted-foreground)); background: rgb(var(--foreground) / 0.05);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+.mlx-tag-pill:hover { color: rgb(var(--foreground)); background: rgb(var(--foreground) / 0.09); }
+/* An inline text button, like a link in a sentence. */
+.mlx-link { color: rgb(var(--primary)); font-weight: 500; border-radius: 4px; }
+.mlx-link:hover { text-decoration: underline; text-underline-offset: 2px; }
 .mlx-generate {
   display: inline-flex; align-items: center; gap: 7px;
   height: 36px; padding: 0 16px; border-radius: 999px;
@@ -824,3 +835,35 @@ html.vibrancy .mlx-sidebar { background: var(--sidebar-wash), var(--sidebar-glas
   background: rgb(var(--bg-2-rgb));
   box-shadow: var(--elev-3), inset 0 0 0 0.5px var(--hair);
 }
+
+/* ── Waveform player (Audio and Music results) ─────────────────────────── */
+.mlx-wave { display: flex; align-items: center; gap: 10px; height: 44px; }
+.mlx-wave-play {
+  display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 999px;
+  color: rgb(var(--primary-foreground, 255 255 255)); background: rgb(var(--primary));
+  box-shadow: var(--elev-1); transition: transform 160ms ease, filter 160ms ease;
+}
+.mlx-wave-play:hover { filter: brightness(1.06); }
+.mlx-wave-play:active { transform: scale(0.94); }
+.mlx-wave-track {
+  --p: 0; position: relative; flex: 1; min-width: 0; height: 36px; cursor: pointer; border-radius: 6px;
+  touch-action: none; outline: none;
+}
+.mlx-wave-track:focus-visible { box-shadow: 0 0 0 2px rgb(var(--ring) / 0.5); }
+.mlx-wave-bars { position: absolute; inset: 0; display: flex; align-items: center; gap: 2px; }
+.mlx-wave-bars span {
+  flex: 1; min-width: 1px; border-radius: 2px; background: rgb(var(--foreground) / 0.18);
+  transition: height 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.mlx-wave-bars.is-played { clip-path: inset(0 calc((1 - var(--p)) * 100%) 0 0); }
+.mlx-wave-bars.is-played span { background: rgb(var(--primary)); }
+.mlx-wave-time { flex: none; min-width: 84px; text-align: right; font-size: 12px; color: rgb(var(--muted-foreground)); }
+@media (prefers-reduced-motion: reduce) { .mlx-wave-bars span { transition: none; } }
+
+/* A chip that folds away sideways (width and fade), so its neighbours glide instead of jumping. */
+.mlx-hcollapse {
+  display: inline-grid; grid-template-columns: 1fr; opacity: 1;
+  transition: grid-template-columns 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease, margin 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.mlx-hcollapse.is-closed { grid-template-columns: 0fr; opacity: 0; margin-left: -4px; }
+@media (prefers-reduced-motion: reduce) { .mlx-hcollapse { transition: opacity 120ms ease; } }

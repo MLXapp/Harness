@@ -611,6 +611,7 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
         cancel: async () => view(),
         disconnect: async () => { status = { state: 'off', via: null }; return view() },
         connectApp: async () => ({ ok: true, opened: 1 }),
+        checkApp: async () => ({ ok: true, connected: true }),
         rules: async () => rules,
         setRule: async (toolkit: string, rule: string) => { rules = { ...rules, [toolkit]: rule }; if (rule === 'ask') delete rules[toolkit]; return rules },
         chatEnabled: async (chatId: string) => status.state === 'connected' && chats.has(chatId),

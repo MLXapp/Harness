@@ -165,8 +165,8 @@ export function ChatHistory({ currentChatId, onChatSelect, searchQuery, filter =
         ) : (
           <>
             <MessageSquare className="h-5 w-5 text-muted-foreground/40 mb-2" />
-            <span className="text-xs text-muted-foreground">{t('layout.chatHistory.empty')}</span>
-            <span className="text-[11px] text-muted-foreground/50 mt-0.5">{t('layout.chatHistory.emptyHint')}</span>
+            <span className="text-xs text-muted-foreground">{t(filter === 'code' ? 'layout.chatHistory.emptyCode' : 'layout.chatHistory.empty')}</span>
+            <span className="text-[11px] text-muted-foreground/50 mt-0.5">{t(filter === 'code' ? 'layout.chatHistory.emptyCodeHint' : 'layout.chatHistory.emptyHint')}</span>
           </>
         )}
       </div>

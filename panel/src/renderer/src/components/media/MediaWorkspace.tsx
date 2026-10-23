@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AudioLines, Clapperboard, ImageIcon, Music2, Plus, Sparkles, type LucideIcon } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import {
-  defaultParams, estimateCost, mediaModel, modelsFor, MEDIA_PROVIDER_NAMES,
+  controlsFor, defaultParams, INSTRUMENTAL_PARAM, estimateCost, mediaModel, modelsFor, MEDIA_PROVIDER_NAMES,
   type MediaKind, type MediaModel,
 } from '../../../../shared/media/catalog'
 import { canRun, localPossible, mediaFit, recommendedModel } from '../../../../shared/media/fit'
@@ -14,6 +14,12 @@ import { ModelPicker } from './ModelPicker'
 import { ParamChips } from './ParamChips'
 import { readStored, useMac, useMediaAccounts, useMediaJobs, writeStored } from './hooks'
 import { usd } from './format'
+
+/** Section tags the music models read, inserted from the pills (kept in English: the models expect them). */
+const SECTIONS = ['Intro', 'Verse', 'Pre-Chorus', 'Chorus', 'Bridge', 'Outro']
+
+/** Seconds of work per second of music, measured on this Mac (from the last finished run). */
+const rateKey = (modelId: string) => `mlx.media.rate.${modelId}`
 
 const ICON: Record<MediaKind, LucideIcon> = { image: ImageIcon, video: Clapperboard, audio: AudioLines, music: Music2 }
 
@@ -40,6 +46,7 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const promptRef = useRef<HTMLTextAreaElement>(null)
+  const lyricsRef = useRef<HTMLTextAreaElement>(null)
 
   // The stored pick, else the recommendation for this Mac and these accounts.
   const recommended = useMemo(() => recommendedModel(kind, mac, connected), [kind, mac, connected])
@@ -69,8 +76,48 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
     promptRef.current?.focus()
   }
 
+  // Music: one Lyrics box and one Instrumental switch for every model.
+  const instrumental = !!model?.instrumental && values.instrumental === true
+  const takesLyrics = !!(model?.lyricsField || model?.lyricsInPrompt) && !instrumental
+  const needsLyrics = !!model?.lyricsRequired && !instrumental && !lyrics.trim()
+  const insertSection = (name: string) => {
+    const el = lyricsRef.current
+    const tag = `[${name}]`
+    const at = el ? el.selectionStart : lyrics.length
+    const before = lyrics.slice(0, at)
+    const lead = before && !before.endsWith('\n\n') ? (before.endsWith('\n') ? '\n' : '\n\n') : ''
+    const next = `${before}${lead}${tag}\n${lyrics.slice(at)}`
+    setLyrics(next)
+    requestAnimationFrame(() => { const pos = before.length + lead.length + tag.length + 1; el?.focus(); el?.setSelectionRange(pos, pos) })
+  }
+  const openLyrics = () => { setLyricsOpen(true); requestAnimationFrame(() => lyricsRef.current?.focus()) }
+
+  // A local song's time, once this Mac has made one with this model.
+  const [rates, setRates] = useState<Record<string, number>>({})
+  useEffect(() => {
+    const next: Record<string, number> = {}
+    for (const m of modelsFor(kind)) {
+      const v = Number(readStored(rateKey(m.id)))
+      if (Number.isFinite(v) && v > 0) next[m.id] = v
+    }
+    // The newest finished local run (not one that first downloaded the model) updates it.
+    for (const job of jobs) {
+      const secs = Number(job.values.duration)
+      if (job.where !== 'local' || job.status !== 'done' || job.downloadedModel || !job.finishedAt || !(secs > 0)) continue
+      const rate = (job.finishedAt - job.createdAt) / 1000 / secs
+      if (next[job.modelId] === undefined || readStored(`${rateKey(job.modelId)}.job`) !== job.id) {
+        next[job.modelId] = rate
+        writeStored(rateKey(job.modelId), String(rate))
+        writeStored(`${rateKey(job.modelId)}.job`, job.id)
+      }
+      break
+    }
+    setRates(next)
+  }, [jobs, kind])
+  const localSeconds = model?.where === 'local' && rates[model.id] && Number(values.duration) > 0 ? rates[model.id] * Number(values.duration) : undefined
+
   const needsConnect = model?.where === 'cloud' && fit?.state === 'cloud' && !fit.connected
-  const ready = !!model && !!fit && canRun(fit) && prompt.trim().length > 0 && !busy
+  const ready = !!model && !!fit && canRun(fit) && prompt.trim().length > 0 && !needsLyrics && !busy
   const listEstimate = model ? estimateCost(model, values, prompt) : undefined
   // The provider's own quote for exactly these settings (no charge), a moment
   // after the settings stop changing; the list price shows until it arrives.
@@ -93,7 +140,7 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
     setBusy(true)
     setError(null)
     try {
-      const result = await window.api.media.submit({ modelId: model.id, prompt, lyrics: model.lyricsField ? lyrics : undefined, values })
+      const result = await window.api.media.submit({ modelId: model.id, prompt, lyrics: takesLyrics ? lyrics : undefined, values })
       if (!result.ok) setError(result.error)
     } catch (e) {
       setError(String(e))
@@ -141,25 +188,46 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
             onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || !e.shiftKey) && !e.nativeEvent.isComposing) { e.preventDefault(); void generate() } }}
             placeholder={t(`media.${kind}.placeholder`)}
             className="block w-full resize-none bg-transparent px-4 pb-1 pt-3 min-h-[56px] max-h-[200px] text-[15px] leading-[1.5] placeholder:text-muted-foreground focus:outline-none" />
-          {model?.lyricsField && (
-            <Reveal open={lyricsOpen}>
-              <textarea data-vmlx-control="media-lyrics" value={lyrics} onChange={e => setLyrics(e.target.value)} rows={4}
-                placeholder={t('media.music.lyricsPlaceholder')}
-                className="mx-3 mb-1 block w-[calc(100%-24px)] resize-y rounded-[14px] bg-[rgb(var(--bg-3-rgb)/0.6)] px-3 py-2 text-[14px] leading-[1.5] placeholder:text-muted-foreground focus:outline-none" />
+          {kind === 'music' && (
+            <Reveal open={takesLyrics && lyricsOpen}>
+              <div className="mx-3 mb-1 rounded-[14px] bg-[rgb(var(--bg-3-rgb)/0.6)]">
+                <textarea ref={lyricsRef} data-vmlx-control="media-lyrics" value={lyrics} onChange={e => setLyrics(e.target.value)} rows={4}
+                  placeholder={t('media.music.lyricsPlaceholder')}
+                  className="block w-full resize-y bg-transparent px-3 pb-1 pt-2 text-[14px] leading-[1.5] placeholder:text-muted-foreground focus:outline-none" />
+                <div className="flex flex-wrap items-center gap-1 px-2 pb-2" role="group" aria-label={t('media.music.sections')}>
+                  {SECTIONS.map(name => (
+                    <button key={name} type="button" onClick={() => insertSection(name)} className="mlx-tag-pill" data-vmlx-control={`media-section-${name}`}>
+                      [{name}]
+                    </button>
+                  ))}
+                </div>
+              </div>
             </Reveal>
           )}
           <div className="flex flex-wrap items-center gap-1 px-2 pb-2 pt-1">
             <ModelPicker kind={kind} model={model} mac={mac} connected={connected} onPick={choose} />
-            {model?.lyricsField && (
-              <button type="button" onClick={() => setLyricsOpen(o => !o)} className={`mlx-chip ${lyricsOpen ? 'is-on' : ''}`}
-                data-vmlx-control="media-lyrics-toggle">
-                <Plus className={`h-3.5 w-3.5 transition-transform duration-200 ${lyricsOpen ? 'rotate-45' : ''}`} />{t('media.music.lyrics')}
-              </button>
+            {/* Vocals or instrumental first: it decides whether there are lyrics. */}
+            {model?.instrumental && <ParamChips params={[INSTRUMENTAL_PARAM]} values={values} onChange={(k, v) => setValues(prev => ({ ...prev, [k]: v }))} />}
+            {/* Instrumental folds the Lyrics chip away (no jump: its width animates). */}
+            {!!(model?.lyricsField || model?.lyricsInPrompt) && (
+              <span className={`mlx-hcollapse ${takesLyrics ? '' : 'is-closed'}`} {...(takesLyrics ? {} : { inert: '' })}>
+                <span className="min-w-0 overflow-hidden">
+                  <button type="button" onClick={() => lyricsOpen ? setLyricsOpen(false) : openLyrics()} className={`mlx-chip ${lyricsOpen ? 'is-on' : ''}`}
+                    aria-expanded={lyricsOpen} data-vmlx-control="media-lyrics-toggle">
+                    <Plus className={`h-3.5 w-3.5 transition-transform duration-200 ${lyricsOpen ? 'rotate-45' : ''}`} />{t('media.music.lyrics')}
+                  </button>
+                </span>
+              </span>
             )}
             {model && <ParamChips params={model.params} values={values} onChange={(k, v) => setValues(prev => ({ ...prev, [k]: v }))} />}
             <span className="min-w-0 flex-1" />
             {estimate !== undefined && !needsConnect && (
               <span className="px-1 text-[12.5px] text-muted-foreground mlx-num" title={t('media.estimateTitle')}>≈ {usd(estimate)}</span>
+            )}
+            {localSeconds !== undefined && localSeconds >= 20 && (
+              <span className="px-1 text-[12.5px] text-muted-foreground mlx-num" title={t('media.localTimeTitle')} data-vmlx-section="media-local-time">
+                ≈ {localSeconds < 90 ? t('media.value.seconds', { n: Math.round(localSeconds / 5) * 5 }) : t('media.value.minutes', { n: Math.round(localSeconds / 60) })}
+              </span>
             )}
             {needsConnect && model?.where === 'cloud' ? (
               <button type="button" data-vmlx-control="media-connect" onClick={() => openConnectAccount(model.provider)}
@@ -175,6 +243,17 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
             )}
           </div>
         </div>
+        {/* A model that sings needs words; say so before Generate is pressed in vain. */}
+        <Reveal open={needsLyrics && prompt.trim().length > 0 && !!fit && canRun(fit)}>
+          <p className="flex flex-wrap items-center justify-center gap-x-1 px-4 pt-2 text-[12.5px] text-muted-foreground" data-vmlx-section="media-needs-lyrics">
+            <span>{t('media.music.needsLyrics', { name: model?.name ?? '' })}</span>
+            <button type="button" className="mlx-link" onClick={openLyrics}>{t('media.music.addLyrics')}</button>
+            {model?.instrumental && <>
+              <span aria-hidden>·</span>
+              <button type="button" className="mlx-link" onClick={() => setValues(v => ({ ...v, instrumental: true }))}>{t('media.music.makeInstrumental')}</button>
+            </>}
+          </p>
+        </Reveal>
         <Reveal open={!!error}>
           <p role="alert" className="px-4 pt-2 text-[12.5px] text-destructive">{error}</p>
         </Reveal>
@@ -189,7 +268,7 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
 /** Values that still apply to the newly chosen model (same key, allowed value). */
 function pick(values: Values, model: MediaModel): Values {
   const out: Values = {}
-  for (const p of model.params) {
+  for (const p of controlsFor(model)) {
     const v = values[p.key]
     if (v === undefined) continue
     if (p.type === 'select' && !p.options.some(o => o === v)) continue

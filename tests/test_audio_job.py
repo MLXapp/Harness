@@ -6,8 +6,17 @@ import sys
 import types
 
 import numpy as np
+import pytest
 
 from vmlx_engine.audio import job
+
+
+@pytest.fixture(autouse=True)
+def _cached_hub(monkeypatch, tmp_path):
+    """Every repo counts as cached, so no test reaches the network."""
+    hub = types.ModuleType("huggingface_hub")
+    hub.snapshot_download = lambda repo, local_files_only=False: str(tmp_path)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
 
 
 class _FakeTTS:
@@ -59,3 +68,77 @@ def test_empty_text_and_bad_speed_fail_cleanly(tmp_path, capsys):
 
 def test_missing_arguments_exit_2():
     assert job.main(["tts"]) == 2
+
+
+def _fake_music(monkeypatch, calls):
+    gen = types.ModuleType("mlx_audio.music.generate")
+    utils = types.ModuleType("mlx_audio.music.utils")
+
+    def generate_music(caption, lyrics, model, duration=None, steps=30, seed=0, output_path="music.wav", verbose=True):
+        calls.append({"caption": caption, "lyrics": lyrics, "model": model, "duration": duration, "steps": steps, "seed": seed})
+        from pathlib import Path
+
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"RIFFsong")
+        return Path(output_path)
+
+    gen.generate_music = generate_music
+    utils.load_model = lambda repo: f"loaded:{repo}"
+    for name in ("mlx_audio", "mlx_audio.music"):
+        monkeypatch.setitem(sys.modules, name, sys.modules.get(name) or types.ModuleType(name))
+    monkeypatch.setitem(sys.modules, "mlx_audio.music.generate", gen)
+    monkeypatch.setitem(sys.modules, "mlx_audio.music.utils", utils)
+
+
+def test_music_passes_caption_lyrics_and_length(tmp_path, monkeypatch, capsys):
+    calls = []
+    _fake_music(monkeypatch, calls)
+    caption = tmp_path / "c.txt"
+    caption.write_text("warm lo-fi, Rhodes, brushed drums", encoding="utf-8")
+    lyrics = tmp_path / "l.txt"
+    lyrics.write_text("[instrumental]", encoding="utf-8")
+    out = tmp_path / "song.wav"
+    code = job.main(["music", "--model", "mlx-community/MiniMax-Music3-4bit", "--caption-file", str(caption),
+                     "--lyrics-file", str(lyrics), "--duration", "30", "--output", str(out)])
+    assert code == 0
+    assert out.read_bytes() == b"RIFFsong"
+    assert calls == [{"caption": "warm lo-fi, Rhodes, brushed drums", "lyrics": "[instrumental]",
+                      "model": "loaded:mlx-community/MiniMax-Music3-4bit", "duration": 30.0, "steps": 30, "seed": 0}]
+    assert [e["event"] for e in _events(capsys)] == ["loading", "generating", "done"]
+
+
+def test_music_refuses_empty_lyrics_and_bad_length(tmp_path, monkeypatch, capsys):
+    _fake_music(monkeypatch, [])
+    caption = tmp_path / "c.txt"
+    caption.write_text("pop", encoding="utf-8")
+    lyrics = tmp_path / "l.txt"
+    lyrics.write_text("  ", encoding="utf-8")
+    args = ["music", "--model", "m", "--caption-file", str(caption), "--lyrics-file", str(lyrics), "--output", str(tmp_path / "o.wav")]
+    assert job.main(args) == 1
+    assert "lyrics" in _events(capsys)[-1]["message"]
+    assert job.main(args + ["--duration", "400"]) == 2
+
+
+def test_first_run_says_it_is_downloading(tmp_path, monkeypatch, capsys):
+    calls = []
+    _fake_music(monkeypatch, calls)
+    hub = types.ModuleType("huggingface_hub")
+    fetched = []
+
+    def snapshot_download(repo, local_files_only=False):
+        if local_files_only:
+            raise FileNotFoundError(repo)
+        fetched.append(repo)
+        return str(tmp_path)
+
+    hub.snapshot_download = snapshot_download
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+    caption = tmp_path / "c.txt"
+    caption.write_text("pop", encoding="utf-8")
+    lyrics = tmp_path / "l.txt"
+    lyrics.write_text("[Verse]\nla la", encoding="utf-8")
+    code = job.main(["music", "--model", "mlx-community/MiniMax-Music3-4bit", "--caption-file", str(caption),
+                     "--lyrics-file", str(lyrics), "--output", str(tmp_path / "o.wav")])
+    assert code == 0
+    assert fetched == ["mlx-community/MiniMax-Music3-4bit"]
+    assert [e["event"] for e in _events(capsys)] == ["downloading", "loading", "generating", "done"]

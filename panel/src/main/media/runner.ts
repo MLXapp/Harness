@@ -18,7 +18,7 @@ import { pipeline } from 'stream/promises'
 import type { ChildProcess } from 'child_process'
 import { estimateCost, mediaModel, MEDIA_PROVIDER_NAMES, type MediaKind, type MediaProviderId } from '../../shared/media/catalog'
 import type { MediaJob, MediaJobOutput, MediaResult, MediaSubmitRequest } from '../../shared/media/jobs'
-import { buildCloudRequest, buildQuoteRequest, coerceParam, nextPollDelayMs, outputExtension, parsePoll, parseQuote, parseSubmit, pollUrl } from '../../shared/media/request'
+import { buildCloudRequest, buildQuoteRequest, coerceValues, nextPollDelayMs, outputExtension, parsePoll, parseQuote, parseSubmit, pollUrl, songText } from '../../shared/media/request'
 import { mediaUrl, mimeFor } from './paths'
 import { publicJob, type MediaJobStore, type StoredMediaJob } from './store'
 
@@ -40,6 +40,8 @@ export interface MediaRunnerDeps {
 }
 
 const MAX_DOWNLOAD_BYTES = 2 * 1024 ** 3
+
+type LocalPython = { path: string; env: NodeJS.ProcessEnv; cwd?: string }
 
 export class MediaRunner {
   private readonly fetch: Fetch
@@ -71,7 +73,7 @@ export class MediaRunner {
     if (!model) return { ok: false, error: 'Unknown model' }
     const prompt = String(request.prompt ?? '').trim()
     if (!prompt) return { ok: false, error: 'Write a prompt first' }
-    const values = Object.fromEntries(model.params.map(p => [p.key, coerceParam(p, request.values?.[p.key])]))
+    const values = coerceValues(model, request.values)
     const now = this.now()
     const job: StoredMediaJob = {
       id: randomUUID(),
@@ -81,7 +83,7 @@ export class MediaRunner {
       where: model.where,
       ...(model.where === 'cloud' ? { provider: model.provider } : {}),
       prompt,
-      ...(request.lyrics ? { lyrics: String(request.lyrics) } : {}),
+      ...(request.lyrics && !values.instrumental ? { lyrics: String(request.lyrics) } : {}),
       values,
       status: 'running',
       phase: 'submitting',
@@ -93,11 +95,17 @@ export class MediaRunner {
 
     if (model.where === 'local') {
       if (!model.available) return { ok: false, error: `${model.name} is not available in this version of MLX Harness yet` }
-      if (model.runner !== 'mlx-audio' || model.task !== 'text-to-speech' || !model.repo) return { ok: false, error: 'This model cannot run here yet' }
+      const speech = model.task === 'text-to-speech'
+      if (model.runner !== 'mlx-audio' || !(speech || model.task === 'song') || !model.repo) return { ok: false, error: 'This model cannot run here yet' }
+      let song
+      if (!speech) {
+        try { song = songText(model, { prompt, lyrics: request.lyrics, values }) } catch (error) { return { ok: false, error: (error as Error).message } }
+      }
       const python = this.deps.python()
-      if (!python) return { ok: false, error: 'The built-in engine is missing, so speech cannot run on this Mac' }
+      if (!python) return { ok: false, error: `The built-in engine is missing, so ${speech ? 'speech' : 'music'} cannot run on this Mac` }
       this.save(job)
-      void this.runLocalSpeech(job, model.repo, python)
+      if (speech) void this.runLocalSpeech(job, model.repo, python)
+      else void this.runLocalMusic(job, model.repo, song!, python)
       return { ok: true, job: publicJob(job) }
     }
 
@@ -139,7 +147,7 @@ export class MediaRunner {
     if (!model || model.where !== 'cloud') return { ok: false, error: 'No quote for this model' }
     const key = this.deps.resolveKey(model.provider)
     if (!key) return { ok: false, error: 'Not connected' }
-    const values = Object.fromEntries(model.params.map(p => [p.key, coerceParam(p, request.values?.[p.key])]))
+    const values = coerceValues(model, request.values)
     let req
     try {
       req = buildQuoteRequest(model, { prompt: String(request.prompt || 'preview'), lyrics: request.lyrics, values })
@@ -252,24 +260,45 @@ export class MediaRunner {
     return path
   }
 
-  // ── local speech ─────────────────────────────────────────────────────────
+  // ── local speech and music ───────────────────────────────────────────────
 
-  private async runLocalSpeech(job: StoredMediaJob, repo: string, python: { path: string; env: NodeJS.ProcessEnv; cwd?: string }): Promise<void> {
+  private async runLocalSpeech(job: StoredMediaJob, repo: string, python: LocalPython): Promise<void> {
     const dir = join(this.deps.mediaRoot(), job.kind)
     mkdirSync(dir, { recursive: true })
-    const name = `${job.id.slice(0, 8)}-0.wav`
-    const out = join(dir, name)
     const input = join(dir, `${job.id.slice(0, 8)}.txt`)
     writeFileSync(input, job.prompt, 'utf8')
-    const args = ['-B', '-s', '-u', '-m', 'vmlx_engine.audio.job', 'tts', '--model', repo, '--input', input, '--output', out]
+    const args = ['tts', '--model', repo, '--input', input]
     if (typeof job.values.voice === 'string') args.push('--voice', job.values.voice)
     if (typeof job.values.speed === 'number') args.push('--speed', String(job.values.speed))
+    this.runLocalJob(job, args, [input], python, 'Speech')
+  }
+
+  private async runLocalMusic(job: StoredMediaJob, repo: string, song: { prompt: string; lyrics?: string }, python: LocalPython): Promise<void> {
+    const dir = join(this.deps.mediaRoot(), job.kind)
+    mkdirSync(dir, { recursive: true })
+    // Text goes in files: lyrics can be long and hold any character.
+    const caption = join(dir, `${job.id.slice(0, 8)}.caption.txt`)
+    const lyrics = join(dir, `${job.id.slice(0, 8)}.lyrics.txt`)
+    writeFileSync(caption, song.prompt, 'utf8')
+    writeFileSync(lyrics, song.lyrics ?? '', 'utf8')
+    const args = ['music', '--model', repo, '--caption-file', caption, '--lyrics-file', lyrics]
+    if (typeof job.values.duration === 'number') args.push('--duration', String(job.values.duration))
+    this.runLocalJob(job, args, [caption, lyrics], python, 'Music')
+  }
+
+  /** `python -m vmlx_engine.audio.job <args> --output <wav>`, reading its JSON progress lines. */
+  private runLocalJob(job: StoredMediaJob, args: string[], inputs: string[], python: LocalPython, what: string): void {
+    const dir = join(this.deps.mediaRoot(), job.kind)
+    const name = `${job.id.slice(0, 8)}-0.wav`
+    const out = join(dir, name)
+    const cleanup = () => { for (const f of inputs) { try { rmSync(f, { force: true }) } catch { /* ignore */ } } }
     job.phase = 'loading'
     this.save(job)
     let child: ChildProcess
     try {
-      child = this.deps.spawn(python.path, args, { env: python.env, cwd: python.cwd })
+      child = this.deps.spawn(python.path, ['-B', '-s', '-u', '-m', 'vmlx_engine.audio.job', ...args, '--output', out], { env: python.env, cwd: python.cwd })
     } catch (error) {
+      cleanup()
       return this.finish(job, { status: 'failed', error: (error as Error).message })
     }
     this.processes.set(job.id, child)
@@ -284,7 +313,10 @@ export class MediaRunner {
         if (!line.startsWith('{')) continue
         try {
           const event = JSON.parse(line)
-          if (event.event === 'generating' && job.phase !== 'generating') { job.phase = 'generating'; this.save(job) }
+          // First use of a model: it is downloaded before it loads.
+          const phase = event.event === 'downloading' ? 'fetching' : event.event === 'loading' ? 'loading' : event.event === 'generating' ? 'generating' : null
+          if (phase === 'fetching') job.downloadedModel = true
+          if (phase && job.phase !== phase) { job.phase = phase; this.save(job) }
           if (event.event === 'error' && typeof event.message === 'string') lastError = event.message
         } catch { /* not ours */ }
       }
@@ -294,14 +326,14 @@ export class MediaRunner {
     child.on('error', (error) => { lastError = error.message })
     child.on('close', (code) => {
       this.processes.delete(job.id)
-      try { rmSync(input, { force: true }) } catch { /* ignore */ }
+      cleanup()
       if (this.cancelled.has(job.id)) return
       if (code === 0) {
         job.files = [out]
         this.finish(job, { status: 'done', outputs: [{ kind: 'file', url: mediaUrl(job.kind, name), mime: 'audio/wav', name }] })
       } else {
         const tail = stderrTail.trim().split('\n').pop() ?? ''
-        this.finish(job, { status: 'failed', error: lastError || tail || `Speech stopped (exit ${code})` })
+        this.finish(job, { status: 'failed', error: lastError || tail || `${what} stopped (exit ${code})` })
       }
     })
   }

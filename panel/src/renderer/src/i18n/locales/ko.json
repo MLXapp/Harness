@@ -308,7 +308,9 @@
       "groupYesterday": "어제",
       "groupThisWeek": "이번 주",
       "groupThisMonth": "이번 달",
-      "groupOlder": "이전"
+      "groupOlder": "이전",
+      "emptyCode": "아직 코드 세션이 없습니다",
+      "emptyCodeHint": "프로젝트 폴더를 선택해 시작하세요"
     },
     "inferenceMode": {
       "casual": "일반",
@@ -3056,7 +3058,11 @@
       "on": "켬",
       "off": "끔",
       "seconds": "{n}초",
-      "autoLanguage": "언어 자동"
+      "autoLanguage": "언어 자동",
+      "anySinger": "보컬 자동",
+      "female": "여성 보컬",
+      "male": "남성 보컬",
+      "minutes": "{n}분"
     },
     "param": {
       "duration": "길이",
@@ -3067,7 +3073,8 @@
       "speed": "속도",
       "language": "언어",
       "instrumental": "보컬",
-      "size": "크기"
+      "size": "크기",
+      "singer": "보컬"
     },
     "cancelled": "취소됨",
     "failed": "실패했습니다",
@@ -3079,7 +3086,9 @@
       "queued": "대기 중",
       "generating": "만드는 중",
       "loading": "모델 불러오는 중",
-      "downloading": "이 Mac에 저장 중"
+      "downloading": "이 Mac에 저장 중",
+      "fetching": "모델 다운로드 중(처음 한 번만)",
+      "fetchingSize": "모델 다운로드 중, {gb}GB(처음 한 번만)"
     },
     "generate": "생성",
     "estimateTitle": "이 설정의 정가이며, 실제 청구액은 제공업체 기준입니다",
@@ -3124,7 +3133,11 @@
         "2": "영화 같은 오케스트라 빌드업, 현악과 드럼, 웅장한 피날레"
       },
       "lyrics": "가사",
-      "lyricsPlaceholder": "[Verse]\n가사를 입력하세요…\n\n[Chorus]\n…"
+      "lyricsPlaceholder": "[Verse]\n가사를 입력하세요…\n\n[Chorus]\n…",
+      "sections": "곡 구성",
+      "needsLyrics": "{name}은(는) 가사를 노래합니다.",
+      "addLyrics": "가사 추가",
+      "makeInstrumental": "연주곡으로 만들기"
     },
     "mac": {
       "what": {
@@ -3135,7 +3148,12 @@
       "runsHere": "{gb}GB {chip}에서 바로 {what}을(를) 만듭니다. 비공개이며 무료입니다.",
       "soon": "로컬 {what}이(가) 지원되면 {gb}GB {chip}에서 이 Mac으로 만들 수 있습니다. 그때까지는 클라우드에서 만듭니다.",
       "cloudOnly": "로컬 {what}에는 {need}GB 이상이 필요합니다. 이 {chip}은(는) {gb}GB이므로 클라우드가 가장 좋습니다."
-    }
+    },
+    "localTimeTitle": "지난번 이 Mac에서 걸린 시간(이 길이 기준)",
+    "madeWith": "{name}(으)로 제작",
+    "play": "재생",
+    "pause": "일시 정지",
+    "position": "재생 위치"
   },
   "code": {
     "title": "이 Mac에서 에이전트와 코딩",

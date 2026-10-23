@@ -11,9 +11,13 @@
  *
  *  - Wan 3.0 has no open weights (Atlas Cloud: "not open source, not open
  *    weights"), so it is cloud-only. The newest open Wan is 2.2 (Apache-2.0).
- *  - Local video and music runners (ltx-2-mlx, mlx-video, ACE-Step 1.5) are not
+ *  - Local video runners (ltx-2-mlx, mlx-video) and ACE-Step 1.5 are not
  *    bundled yet: their rows say so and show whether this Mac could run them.
- *  - Local speech runs on mlx-audio (bundled) through vmlx_engine.audio.job.
+ *  - Local speech and MiniMax Music 3 run on mlx-audio (bundled, 0.5.8, which
+ *    has mlx_audio.music) through vmlx_engine.audio.job.
+ *  - Music models each ask for lyrics and instrumentals in their own way; the
+ *    composer has one Lyrics box and one Instrumental switch, and the fields
+ *    below say how each model takes them (see request.ts).
  *
  * Every number shown in the app comes from this file; nothing is estimated
  * at run time except the fit (memory) check in ./fit.ts.
@@ -31,7 +35,7 @@ export type MediaParam =
   | { key: string; field: string; type: 'toggle'; default: boolean; label: ParamLabel }
 
 /** Labels are i18n keys under media.param.* */
-export type ParamLabel = 'duration' | 'aspect' | 'resolution' | 'audio' | 'voice' | 'speed' | 'language' | 'instrumental' | 'size'
+export type ParamLabel = 'duration' | 'aspect' | 'resolution' | 'audio' | 'voice' | 'speed' | 'language' | 'instrumental' | 'size' | 'singer'
 
 export interface MediaPrice {
   usd: number
@@ -47,7 +51,18 @@ export interface MediaLicense {
   name: string
   /** False: outputs or weights are non-commercial (a badge says so). */
   commercial: boolean
+  /** A name the licence asks to show with the work ("MiniMax-Music3"). */
+  credit?: string
 }
+
+/**
+ * How a music model is asked for an instrumental:
+ *  - field: a boolean parameter (ElevenLabs force_instrumental)
+ *  - lyrics: this text in the lyrics field (ACE-Step, MiniMax local: "[instrumental]")
+ *  - prompt: a line added to the prompt (Lyria has no switch)
+ *  - path: a different endpoint that takes only the prompt (Mureka's BGM)
+ */
+export type InstrumentalSpec = { field: string } | { lyrics: string } | { prompt: string } | { path: string }
 
 interface MediaModelBase {
   /** Stable id (settings, tests, job rows). */
@@ -64,6 +79,14 @@ interface MediaModelBase {
   promptField: string
   /** Optional second text box (lyrics). */
   lyricsField?: string
+  /** Music without a lyrics field: lyrics are added to the prompt. */
+  lyricsInPrompt?: boolean
+  /** A song with vocals needs lyrics (otherwise turn on Instrumental). */
+  lyricsRequired?: boolean
+  /** Music: how the Instrumental switch is sent; absent = no switch. */
+  instrumental?: InstrumentalSpec
+  /** Longest prompt the provider takes, where it is under MAX_PROMPT_CHARS. */
+  maxPrompt?: number
   params: MediaParam[]
 }
 
@@ -310,52 +333,84 @@ const AUDIO: MediaModel[] = [
 // ── Music ───────────────────────────────────────────────────────────────────
 
 const MUSIC: MediaModel[] = [
+  // Checked 23 Oct 2026: WaveSpeed schemas and price quotes (get_model_schema /
+  // model/price), Artificial Analysis Music Arena v1.1 (7 Oct 2026), the model
+  // cards. Suno and Udio have no public API, so they are not offered.
   {
-    id: 'ws:ace-step-1.5', kind: 'music', task: 'song', where: 'cloud', provider: 'wavespeed',
-    path: 'wavespeed-ai/ace-step-1.5', name: 'ACE-Step 1.5', maker: 'ACE Studio · StepFun',
-    blurb: 'Full songs with vocals from a style and lyrics.', badge: 'Best value',
-    price: { usd: 0.0003, per: 'second' }, license: { name: 'MIT', commercial: true },
-    promptField: 'tags', lyricsField: 'lyrics',
-    params: [{ key: 'duration', field: 'duration', type: 'number', min: 5, max: 240, step: 5, default: 60, label: 'duration', unit: 's' }],
+    id: 'ws:mureka-v9.5', kind: 'music', task: 'song', where: 'cloud', provider: 'wavespeed',
+    path: 'mureka-ai/mureka-v9.5/generate-song', name: 'Mureka V9.5', maker: 'Mureka',
+    blurb: 'The most natural vocals you can call by API. It sings your lyrics.', badge: 'Best',
+    // Quote: $0.225 a song, and the same for its instrumental (generate-bgm).
+    price: { usd: 0.225, per: 'song' }, license: { name: 'Mureka (API)', commercial: true },
+    promptField: 'prompt', lyricsField: 'lyrics', lyricsRequired: true, maxPrompt: 1024,
+    instrumental: { path: 'mureka-ai/mureka-v9.5/generate-bgm' },
+    params: [{ key: 'singer', field: 'gender', type: 'select', options: ['', 'female', 'male'], default: '', label: 'singer' }],
+  },
+  {
+    id: 'ws:lyria-3.5', kind: 'music', task: 'song', where: 'cloud', provider: 'wavespeed',
+    path: 'google/lyria-3.5/music', name: 'Lyria 3.5', maker: 'Google',
+    blurb: 'Whole songs from a description, lyrics optional. Carries a SynthID watermark.', badge: 'New',
+    price: { usd: 0.10, per: 'song' }, license: { name: 'Google Lyria (API, SynthID watermark)', commercial: true },
+    promptField: 'prompt', lyricsInPrompt: true,
+    instrumental: { prompt: 'Instrumental only, no vocals.' },
+    params: [],
+  },
+  {
+    id: 'ws:elevenlabs-music-v2.5', kind: 'music', task: 'song', where: 'cloud', provider: 'wavespeed',
+    path: 'elevenlabs/music-v2.5', name: 'ElevenLabs Music v2.5', maker: 'ElevenLabs',
+    blurb: 'Trained on licensed music. Songs and scores up to 10 minutes.',
+    // Quote: $0.75 for 60 s.
+    price: { usd: 0.0125, per: 'second' }, license: { name: 'ElevenLabs (API, licensed training data)', commercial: true },
+    promptField: 'prompt', lyricsInPrompt: true, maxPrompt: 4100,
+    instrumental: { field: 'force_instrumental' },
+    params: [{ key: 'duration', field: 'music_length_ms', type: 'select', options: [10000, 30000, 60000, 120000, 180000, 300000, 600000], default: 30000, label: 'duration' }],
   },
   {
     id: 'at:minimax-music-3', kind: 'music', task: 'song', where: 'cloud', provider: 'atlascloud',
     path: 'minimax/music-3.0', name: 'MiniMax Music 3.0', maker: 'MiniMax',
-    blurb: 'Radio-ready songs, vocals or instrumental.', badge: 'Best',
-    price: { usd: 0.15, per: 'song' }, license: { name: 'MiniMax (API only)', commercial: true },
+    blurb: 'Songs up to 5 minutes, vocals or instrumental. The same model runs on a 24 GB Mac.',
+    price: { usd: 0.15, per: 'song' }, license: { name: 'MiniMax (API)', commercial: true },
     promptField: 'prompt', lyricsField: 'lyrics', fixed: { format: 'mp3' },
-    params: [{ key: 'instrumental', field: 'is_instrumental', type: 'toggle', default: false, label: 'instrumental' }],
+    instrumental: { field: 'is_instrumental' },
+    params: [],
   },
   {
-    id: 'ws:elevenlabs-music', kind: 'music', task: 'song', where: 'cloud', provider: 'wavespeed',
-    path: 'elevenlabs/music', name: 'ElevenLabs Music', maker: 'ElevenLabs',
-    blurb: 'Soundtracks and songs from a description.',
-    price: { usd: 0.01, per: 'second' },
-    license: { name: 'ElevenLabs (API only)', commercial: true },
-    promptField: 'prompt',
-    params: [
-      { key: 'duration', field: 'music_length_ms', type: 'select', options: [10000, 30000, 60000, 120000, 180000], default: 30000, label: 'duration' },
-      { key: 'instrumental', field: 'force_instrumental', type: 'toggle', default: true, label: 'instrumental' },
-    ],
-  },
-  {
-    id: 'local:ace-step-1.5-turbo', kind: 'music', task: 'song', where: 'local', runner: 'ace-step',
-    name: 'ACE-Step 1.5 Turbo', maker: 'ACE Studio · StepFun',
-    blurb: 'Songs with vocals on a 16 GB Mac.',
-    minMemoryGB: 16, recMemoryGB: 32,
-    speed: '200 s of music in 58.5 s on M1 Max 64 GB (dev.to, Jul 2026)',
-    available: false, cloudTwin: 'ws:ace-step-1.5',
-    license: { name: 'MIT', commercial: true },
-    promptField: 'tags', lyricsField: 'lyrics', params: [],
+    id: 'ws:ace-step-1.5', kind: 'music', task: 'song', where: 'cloud', provider: 'wavespeed',
+    path: 'wavespeed-ai/ace-step-1.5', name: 'ACE-Step 1.5', maker: 'ACE Studio · StepFun',
+    blurb: 'Songs with vocals for about 2 cents a minute. Open weights (MIT).', badge: 'Best value',
+    // Quote: $0.054 for 180 s.
+    price: { usd: 0.0003, per: 'second' }, license: { name: 'MIT', commercial: true },
+    promptField: 'tags', lyricsField: 'lyrics', lyricsRequired: true,
+    instrumental: { lyrics: '[instrumental]' },
+    params: [{ key: 'duration', field: 'duration', type: 'number', min: 5, max: 240, step: 5, default: 60, label: 'duration', unit: 's' }],
   },
   {
     id: 'local:minimax-music-3-4bit', kind: 'music', task: 'song', where: 'local', runner: 'mlx-audio',
     repo: 'mlx-community/MiniMax-Music3-4bit', name: 'MiniMax Music 3 (4-bit)', maker: 'MiniMax',
-    blurb: 'Open-weight songs; needs a newer mlx-audio.',
-    downloadGB: 9.2, minMemoryGB: 24, recMemoryGB: 32,
-    available: false, cloudTwin: 'at:minimax-music-3',
-    license: { name: 'MiniMax Music3 Community License', commercial: false },
-    promptField: 'prompt', lyricsField: 'lyrics', params: [],
+    blurb: 'The best open-weight vocals, made on this Mac. Free and private.', badge: 'Best',
+    // 9.2 GB of weights (repo listing). Community MLX ports ask 32 GB and
+    // recommend 48 GB; the 4-bit build loads on 24 GB with little to spare.
+    downloadGB: 9.2, minMemoryGB: 24, recMemoryGB: 48,
+    speed: 'Several minutes for a 60-second song at 30 steps (PocketAi MLX port card)',
+    available: true, cloudTwin: 'at:minimax-music-3',
+    // Commercial use is allowed when "MiniMax-Music3" is shown with the work;
+    // written permission is only needed above $20M yearly revenue (LICENSE §3).
+    license: { name: 'MiniMax Music3 Community License', commercial: true, credit: 'MiniMax-Music3' },
+    promptField: 'prompt', lyricsField: 'lyrics', lyricsRequired: true,
+    instrumental: { lyrics: '[instrumental]' },
+    params: [{ key: 'duration', field: 'duration', type: 'number', min: 10, max: 360, step: 10, default: 60, label: 'duration', unit: 's' }],
+  },
+  {
+    id: 'local:ace-step-1.5-turbo', kind: 'music', task: 'song', where: 'local', runner: 'ace-step',
+    name: 'ACE-Step 1.5 Turbo', maker: 'ACE Studio · StepFun',
+    blurb: 'Fast songs with vocals on a 16 GB Mac. Coming in a later version.',
+    // README: the 2B turbo model runs in under 4 GB of GPU memory; its 0.6B
+    // planner LM adds a little. XL (4B) wants 20 GB+.
+    minMemoryGB: 16, recMemoryGB: 32,
+    available: false, cloudTwin: 'ws:ace-step-1.5',
+    license: { name: 'MIT', commercial: true },
+    promptField: 'tags', lyricsField: 'lyrics', lyricsRequired: true,
+    instrumental: { lyrics: '[instrumental]' }, params: [],
   },
 ]
 
@@ -375,9 +430,17 @@ export const MEDIA_PROVIDER_NAMES: Record<MediaProviderId, string> = {
   atlascloud: 'Atlas Cloud',
 }
 
+/** The composer's Instrumental switch, as a control, for models that have one. */
+export const INSTRUMENTAL_PARAM: MediaParam = { key: 'instrumental', field: '', type: 'toggle', default: false, label: 'instrumental' }
+
+/** A model's controls, with the Instrumental switch first for music that has one. */
+export function controlsFor(model: MediaModel): MediaParam[] {
+  return model.instrumental ? [INSTRUMENTAL_PARAM, ...model.params] : model.params
+}
+
 /** Default values for a model's controls. */
 export function defaultParams(model: MediaModel): Record<string, string | number | boolean> {
-  return Object.fromEntries(model.params.map(p => [p.key, p.default]))
+  return Object.fromEntries(controlsFor(model).map(p => [p.key, p.default]))
 }
 
 /**

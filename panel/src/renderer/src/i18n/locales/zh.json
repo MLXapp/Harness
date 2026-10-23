@@ -308,7 +308,9 @@
       "groupYesterday": "昨天",
       "groupThisWeek": "本周",
       "groupThisMonth": "本月",
-      "groupOlder": "更早"
+      "groupOlder": "更早",
+      "emptyCode": "还没有代码会话",
+      "emptyCodeHint": "选择一个项目文件夹开始"
     },
     "inferenceMode": {
       "casual": "轻松",
@@ -3056,7 +3058,11 @@
       "on": "开",
       "off": "关",
       "seconds": "{n} 秒",
-      "autoLanguage": "自动识别语言"
+      "autoLanguage": "自动识别语言",
+      "anySinger": "演唱不限",
+      "female": "女声",
+      "male": "男声",
+      "minutes": "{n} 分钟"
     },
     "param": {
       "duration": "时长",
@@ -3067,7 +3073,8 @@
       "speed": "语速",
       "language": "语言",
       "instrumental": "人声",
-      "size": "尺寸"
+      "size": "尺寸",
+      "singer": "演唱"
     },
     "cancelled": "已取消",
     "failed": "生成失败",
@@ -3079,7 +3086,9 @@
       "queued": "排队中",
       "generating": "正在生成",
       "loading": "正在加载模型",
-      "downloading": "正在保存到这台 Mac"
+      "downloading": "正在保存到这台 Mac",
+      "fetching": "正在下载模型(仅首次)",
+      "fetchingSize": "正在下载模型,{gb} GB(仅首次)"
     },
     "generate": "生成",
     "estimateTitle": "按当前设置的标价估算；实际以服务商报价为准",
@@ -3124,7 +3133,11 @@
         "2": "电影感管弦乐渐强，弦乐与鼓，史诗般的结尾"
       },
       "lyrics": "歌词",
-      "lyricsPlaceholder": "[Verse]\n在这里写歌词…\n\n[Chorus]\n…"
+      "lyricsPlaceholder": "[Verse]\n在这里写歌词…\n\n[Chorus]\n…",
+      "sections": "歌曲段落",
+      "needsLyrics": "{name} 会唱出你的歌词。",
+      "addLyrics": "添加歌词",
+      "makeInstrumental": "改为纯音乐"
     },
     "mac": {
       "what": {
@@ -3135,7 +3148,12 @@
       "runsHere": "你的 {chip}（{gb} GB）可以在本机生成{what}：私密且免费。",
       "soon": "本地{what}上线后，你的 {chip}（{gb} GB）就能在本机生成{what}。在此之前将在云端生成。",
       "cloudOnly": "本地{what}需要 {need} GB 以上内存；这台 {chip} 只有 {gb} GB，云端效果最好。"
-    }
+    },
+    "localTimeTitle": "按上次在这台 Mac 上的用时估算(此时长)",
+    "madeWith": "由 {name} 制作",
+    "play": "播放",
+    "pause": "暂停",
+    "position": "播放位置"
   },
   "code": {
     "title": "在这台 Mac 上与智能体一起写代码",

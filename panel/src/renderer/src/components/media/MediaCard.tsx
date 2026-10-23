@@ -5,6 +5,7 @@ import type { MediaJob } from '../../../../shared/media/jobs'
 import { useElapsed } from './hooks'
 import { paramValueLabel, usd } from './format'
 import { ModelGlyph } from './ModelPicker'
+import { Waveform } from './Waveform'
 
 /** One generation: the result (or a live placeholder), its prompt and what made it. */
 export function MediaCard({ job, onReuse, onDeleted }: { job: MediaJob; onReuse: (job: MediaJob) => void; onDeleted: (id: string) => void }) {
@@ -33,7 +34,7 @@ export function MediaCard({ job, onReuse, onDeleted }: { job: MediaJob; onReuse:
       className="group mlx-group overflow-hidden mlx-view-in">
       {tall && (
         <div className="relative aspect-video bg-[rgb(var(--bg-3-rgb))]">
-          {running && <Pending phase={job.phase} seconds={elapsed} />}
+          {running && <Pending phase={job.phase} seconds={elapsed} sizeGB={model?.where === 'local' ? model.downloadGB : undefined} />}
           {file && file.mime.startsWith('image/') && <img src={file.url} alt={job.prompt} className="h-full w-full object-cover" />}
           {file && file.mime.startsWith('video/') && <video src={file.url} controls playsInline preload="metadata" className="h-full w-full bg-black object-contain" />}
           {job.status === 'failed' && <Failed error={job.error} />}
@@ -43,14 +44,20 @@ export function MediaCard({ job, onReuse, onDeleted }: { job: MediaJob; onReuse:
         </div>
       )}
       <div className="space-y-2 p-3.5">
-        {!tall && running && <div className="relative h-14 overflow-hidden rounded-[10px] bg-[rgb(var(--bg-3-rgb))]"><Pending phase={job.phase} seconds={elapsed} compact /></div>}
-        {!tall && file && file.mime.startsWith('audio/') && <audio src={file.url} controls preload="metadata" className="mlx-audio w-full" />}
+        {!tall && running && <div className="relative h-14 overflow-hidden rounded-[10px] bg-[rgb(var(--bg-3-rgb))]"><Pending phase={job.phase} seconds={elapsed} sizeGB={model?.where === 'local' ? model.downloadGB : undefined} compact /></div>}
+        {!tall && file && file.mime.startsWith('audio/') && <Waveform id={job.id} url={file.url} />}
         {!tall && job.status === 'failed' && <div className="relative min-h-[56px] rounded-[10px] bg-destructive/[0.06]"><Failed error={job.error} /></div>}
         {text && <p className="whitespace-pre-wrap text-[13.5px]">{text.text}</p>}
         <p className="line-clamp-2 text-[13.5px] leading-[19px]">{job.prompt}</p>
         <div className="flex min-h-[28px] items-center gap-2 text-[12px] text-muted-foreground">
           {model && <ModelGlyph model={model} size={15} />}
           <span className="min-w-0 truncate">{job.modelName}{job.provider ? ` · ${MEDIA_PROVIDER_NAMES[job.provider]}` : ` · ${t('media.onThisMac')}`}</span>
+          {/* Some licences ask for the model's name with the work. */}
+          {model?.license.credit && job.status === 'done' && (
+            <span className="shrink-0 rounded-full bg-foreground/[0.06] px-2 py-[1px] text-[11px]" title={model.license.name} data-vmlx-section="media-credit">
+              {t('media.madeWith', { name: model.license.credit })}
+            </span>
+          )}
           <span className="flex-1" />
           <span className="shrink-0 truncate mlx-num">
             {[...facts, ...(job.estimateUsd !== undefined && job.status === 'done' ? [`≈ ${usd(job.estimateUsd)}`] : [])].join(' · ')}
@@ -71,7 +78,7 @@ function IconButton({ title, onClick, children }: { title: string; onClick: () =
   )
 }
 
-function Pending({ phase, seconds, compact = false }: { phase?: MediaJob['phase']; seconds: number; compact?: boolean }) {
+function Pending({ phase, seconds, sizeGB, compact = false }: { phase?: MediaJob['phase']; seconds: number; sizeGB?: number; compact?: boolean }) {
   const { t } = useTranslation()
   const m = Math.floor(seconds / 60)
   const s = String(seconds % 60).padStart(2, '0')
@@ -79,7 +86,7 @@ function Pending({ phase, seconds, compact = false }: { phase?: MediaJob['phase'
     <div className="mlx-shimmer absolute inset-0 flex items-center justify-center">
       <div className={`flex items-center gap-2 text-muted-foreground ${compact ? 'text-[12.5px]' : 'text-[13px]'}`}>
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-        <span>{t(`media.phase.${phase ?? 'generating'}`)}</span>
+        <span>{phase === 'fetching' && sizeGB ? t('media.phase.fetchingSize', { gb: sizeGB }) : t(`media.phase.${phase ?? 'generating'}`)}</span>
         <span className="mlx-num">{m}:{s}</span>
       </div>
     </div>

@@ -370,15 +370,24 @@ function samplePicture(seed: number, label: string): string {
 }
 
 /** One second of silence as a WAV data URL. */
-function silentWav(): string {
-  const rate = 8000, n = rate
+/** A quiet sample: one second of silence, or (seed > 0) a few seconds of shaped tones so waveforms have a shape. */
+function silentWav(seed = 0): string {
+  const rate = 8000, n = seed > 0 ? rate * 6 : rate
   const buf = new ArrayBuffer(44 + n)
   const v = new DataView(buf)
   const w = (o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)) }
   w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true)
   v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate, true)
   v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true)
-  for (let i = 0; i < n; i++) v.setUint8(44 + i, 128)
+  for (let i = 0; i < n; i++) {
+    if (seed === 0) { v.setUint8(44 + i, 128); continue }
+    const t = i / rate
+    // Beats with a slow swell, like a song's verse and chorus.
+    const beat = Math.exp(-((t * 2) % 1) * 5)
+    const swell = 0.35 + 0.65 * Math.abs(Math.sin(t * 0.9 + seed))
+    const tone = Math.sin(2 * Math.PI * 220 * t) * 0.6 + Math.sin(2 * Math.PI * 330 * t + seed) * 0.4
+    v.setUint8(44 + i, Math.round(128 + 110 * tone * (0.25 + 0.75 * beat) * swell * 0.9))
+  }
   let bin = ''
   new Uint8Array(buf).forEach(x => { bin += String.fromCharCode(x) })
   return `data:audio/wav;base64,${btoa(bin)}`
@@ -386,7 +395,7 @@ function silentWav(): string {
 
 let sampleSeed = 0
 export function sampleOutput(kind: string, prompt: string) {
-  if (kind === 'audio' || kind === 'music') return { kind: 'file' as const, url: silentWav(), mime: 'audio/wav', name: 'sample.wav' }
+  if (kind === 'audio' || kind === 'music') return { kind: 'file' as const, url: silentWav(kind === 'music' ? 1 + (sampleSeed++ % 3) : 0), mime: 'audio/wav', name: 'sample.wav' }
   return { kind: 'file' as const, url: samplePicture(sampleSeed++, `Preview sample · ${prompt.slice(0, 48)}`), mime: 'image/svg+xml', name: 'sample.svg' }
 }
 
@@ -404,6 +413,7 @@ function sampleMediaJobs(now: number): any[] {
     job('video', 'ws:kling-3.0-std', 'Kling 3.0', 'wavespeed', 'Macro shot of coffee being poured, steam rising', { duration: 4, aspect: '1:1', audio: false }, 2 * HOUR),
     job('audio', 'local:kokoro-82m', 'Kokoro', undefined, 'Welcome to MLX Harness. Everything you see here runs on your Mac.', { voice: 'af_heart', speed: 1 }, 5 * MIN),
     job('audio', 'at:elevenlabs-v3', 'ElevenLabs v3', 'atlascloud', 'Once upon a time, a small computer learned to sing.', {}, 3 * HOUR),
+    job('music', 'local:minimax-music-3-4bit', 'MiniMax Music 3 (4-bit)', undefined, 'Warm indie folk, fingerpicked guitar, soft male vocals, campfire', { instrumental: false, duration: 60 }, 4 * MIN),
     job('music', 'ws:ace-step-1.5', 'ACE-Step 1.5', 'wavespeed', 'Upbeat synth-pop, bright female vocals, 120 BPM, summer night drive', { duration: 60 }, 12 * MIN),
     job('music', 'at:minimax-music-3', 'MiniMax Music 3.0', 'atlascloud', 'Lo-fi hip hop, warm piano, vinyl crackle', { instrumental: true }, 26 * HOUR, 'failed'),
     job('image', 'ws:nano-banana-2', 'Nano Banana 2', 'wavespeed', 'A poster that says "Open late" in bold orange letters', { aspect: '16:9', resolution: '1k' }, 8 * MIN),
