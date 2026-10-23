@@ -28,6 +28,15 @@ licenses, among them:
   * oMLX Qwen4 QSA kernel (Apache-2.0) and mlx-serve (MIT), see
     native_extensions/qsa_kernels/mtplx_qsa_kernels/.
 
+The DRY ("Don't Repeat Yourself") repetition penalty in
+vmlx_engine/sampling_dry.py is adapted from Rapid-MLX
+(https://github.com/raullenchai/Rapid-MLX, rapid_mlx/sampling_dry.py),
+Copyright 2025-2026 the Rapid-MLX contributors, Apache License 2.0.
+
+The window shell (sidebar vibrancy with the minimize workaround in
+panel/src/main/index.ts, hairline and elevation tokens, the Preferences sheet
+layout) follows DeepSeek Harness, Copyright (c) 2026 DeepSeek, MIT License.
+
 Portions of the chat agent in panel/src/main/agent/ (context compaction and its
 summary template, tool-result pruning, the repeat-call reminder, the todo
 tool, the macOS Seatbelt sandbox profile, the sandbox escalation flow, the

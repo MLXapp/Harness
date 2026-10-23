@@ -74,6 +74,11 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
   const on = (channel: string) => (cb: Listener) => events.on(channel, cb)
   const settings = new Map<string, string>(Object.entries(fx.settings))
   const overrides = new Map<string, any>()
+  // ?code=sample makes the most recent chat a Code session on a sample project.
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('code') === 'sample') {
+    const latest = [...fx.chats].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    if (latest) overrides.set(latest.id, { chatId: latest.id, builtinToolsEnabled: true, workingDirectory: '/Users/alex/Projects/harness-site', permissionPreset: 'workspace' })
+  }
   const profiles: any[] = []
   let gateway = { running: true, port: 8080, host: '127.0.0.1', displayHost: '127.0.0.1', singleModelMode: false }
   let downloadDir = MODELS_DIR
@@ -199,7 +204,10 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
         if (existing) return existing
         return api.chat.create(title, modelPath, undefined, modelPath)
       },
-      getRecent: async (limit = 100) => byRecent(fx.chats).slice(0, limit).map(chatSummary),
+      getRecent: async (limit = 100) => byRecent(fx.chats).slice(0, limit).map(chatSummary).map((c: any) => {
+        const o = overrides.get(c.id)
+        return o?.builtinToolsEnabled && o?.workingDirectory ? { ...c, codeDirectory: o.workingDirectory } : c
+      }),
       getByModel: async (modelPath: string) => byRecent(fx.chats).filter(c => c.modelPath === modelPath),
       getAll: async (folderId?: string) => byRecent(fx.chats).filter(c => folderId === undefined || c.folderId === folderId),
       get: async (id: string) => fx.chats.find(c => c.id === id) ?? null,
@@ -280,7 +288,8 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       getTodos: async () => [],
       onTodos: on('chat:todos'),
       pickImages: async () => [],
-      openDirectory: async () => ({ canceled: true, filePaths: [] }),
+      // The preview "chooses" a project folder so the Code tab can be clicked through.
+      openDirectory: async () => ({ canceled: false, filePaths: ['/Users/alex/Projects/harness-site'] }),
       setOverrides: async (chatId: string, value: any) => { overrides.set(chatId, value); return { success: true } },
       getOverrides: async (chatId: string) => overrides.get(chatId) ?? null,
       clearOverrides: async (chatId: string) => { overrides.delete(chatId); return { success: true } },
@@ -382,7 +391,7 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       getHardware: async () => {
         await wait(250)
         // ?mem=16 pretends to be a smaller Mac (media tabs grey out what it cannot run).
-        const mem = Number(new URLSearchParams(window.location.search).get('mem'))
+        const mem = typeof window === 'undefined' ? 0 : Number(new URLSearchParams(window.location.search).get('mem'))
         return { chip: HARDWARE.chip, modelName: HARDWARE.modelName, memoryGB: mem > 0 ? mem : HARDWARE.totalMemoryGB, freeDiskGB: HARDWARE.freeDiskGB }
       },
       getUpdateState: async () => ({ ...updateState }),
@@ -530,7 +539,7 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
     // The preview pretends to be a Mac with window glass; ?glass=0 shows the
     // opaque fallback other platforms get. The wallpaper behind it is preview.css.
     chrome: {
-      vibrancy: () => new URLSearchParams(window.location.search).get('glass') !== '0',
+      vibrancy: () => typeof window === 'undefined' || new URLSearchParams(window.location.search).get('glass') !== '0',
     },
 
     // The preview pretends to be a Mac: the mic offers Apple Dictation (a no-op here).

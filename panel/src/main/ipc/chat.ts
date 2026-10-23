@@ -1094,6 +1094,7 @@ export function registerChatHandlers(
     modelId: string,
     folderId?: string,
     modelPath?: string,
+    kind?: "chat" | "code",
   ): Chat => {
     const chat: Chat = {
       id: uuidv4(),
@@ -1159,6 +1160,20 @@ export function registerChatHandlers(
         console.error("[CHAT] Failed to apply default profile:", e);
       }
 
+    // The Chat tab's chats never pick up a project folder from an earlier
+    // chat: a working directory makes a chat a Code session, which is chosen
+    // explicitly in the Code tab. Other inherited tool settings stay.
+    if (kind === "chat") {
+      try {
+        const inherited = db.getChatOverrides(chat.id);
+        if (inherited?.workingDirectory) {
+          db.setChatOverrides({ ...inherited, workingDirectory: undefined } as any);
+        }
+      } catch (e) {
+        console.error("[CHAT] Failed to keep the new chat out of Code:", e);
+      }
+    }
+
     return chat;
   };
 
@@ -1170,7 +1185,8 @@ export function registerChatHandlers(
       modelId: string,
       folderId?: string,
       modelPath?: string,
-    ) => createChatRecord(title, modelId, folderId, modelPath),
+      kind?: "chat" | "code",
+    ) => createChatRecord(title, modelId, folderId, modelPath, kind === "chat" || kind === "code" ? kind : undefined),
   );
 
   // SessionView effects can be replayed in development. Keep the initial

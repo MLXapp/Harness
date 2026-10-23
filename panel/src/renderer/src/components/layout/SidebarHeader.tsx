@@ -5,9 +5,11 @@ import { useTranslation } from '../../i18n'
 interface SidebarHeaderProps {
   onNewChat: () => void
   onSearch: (query: string) => void
+  /** 'code' in the Code tab (its list holds Code sessions). */
+  title?: 'chats' | 'code'
 }
 
-export function SidebarHeader({ onNewChat, onSearch }: SidebarHeaderProps) {
+export function SidebarHeader({ onNewChat, onSearch, title = 'chats' }: SidebarHeaderProps) {
   const { t } = useTranslation()
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -26,7 +28,7 @@ export function SidebarHeader({ onNewChat, onSearch }: SidebarHeaderProps) {
   return (
     <div className="flex flex-col gap-2 pl-[22px] pr-3 pt-3 pb-1">
       <div className="flex items-center gap-2">
-        <span className="text-[12px] font-semibold text-muted-foreground flex-1">{t('layout.sidebarHeader.chats')}</span>
+        <span className="text-[12px] font-semibold text-muted-foreground flex-1">{title === 'code' ? t('code.sessions') : t('layout.sidebarHeader.chats')}</span>
         <button
           onClick={() => setSearchOpen(!searchOpen)}
           className="p-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent transition-colors"

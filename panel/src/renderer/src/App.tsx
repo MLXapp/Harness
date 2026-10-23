@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { MessageSquare, Terminal } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { MessageSquare } from 'lucide-react'
 import { AppHeader } from './components/layout/AppHeader'
 import { PreferencesSheet } from './components/preferences/PreferencesSheet'
 import { ConsoleSubnavigation } from './components/layout/ConsoleSubnavigation'
@@ -33,6 +33,7 @@ import { ModelDoctor } from './components/tools/ModelDoctor'
 import { ModelConverter } from './components/tools/ModelConverter'
 import { ApiDashboard } from './components/api/ApiDashboard'
 import { ImageWorkspace } from './components/media/ImageWorkspace'
+import { CodeWorkspace, type AccessMode, type CodeStart } from './components/code/CodeWorkspace'
 import { MediaWorkspace } from './components/media/MediaWorkspace'
 import { NetworkView } from './components/network/NetworkView'
 import { isImageSession, sessionMatchesModelPath } from '../../shared/sessionUtils'
@@ -51,6 +52,10 @@ function App() {
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const { state, restored, dispatch, setMode, openChat } = useAppState()
   const { sessions: allSessions, ready: sessionsReady } = useSessionsContext()
+  // Code sessions: a start request waiting for its chat to exist, and the
+  // open chat's project folder + access level (null = not a Code session).
+  const pendingCode = useRef<CodeStart | null>(null)
+  const [codeInfo, setCodeInfo] = useState<{ chatId: string; dir: string | null; access: AccessMode } | null>(null)
 
   // For chat mode, exclude image sessions — they belong in the Image tab
   const sessions = useMemo(() => allSessions.filter(s => !isImageSession(s)), [allSessions])
@@ -201,6 +206,48 @@ function App() {
     }
   }, [sessions, openChat, dispatch])
 
+  /** The Code tab's project folder and access level for a chat (agent tools on that folder). */
+  const readCodeInfo = useCallback(async (chatId: string | null) => {
+    if (!chatId) { setCodeInfo(null); return }
+    try {
+      const o = await window.api.chat.getOverrides(chatId)
+      const dir = o?.builtinToolsEnabled && o?.workingDirectory ? String(o.workingDirectory) : null
+      const access: AccessMode = o?.permissionPreset === 'read-only' || o?.permissionPreset === 'full' ? o.permissionPreset : 'workspace'
+      setCodeInfo({ chatId, dir, access })
+    } catch {
+      setCodeInfo({ chatId, dir: null, access: 'workspace' })
+    }
+  }, [])
+  useEffect(() => { void readCodeInfo(state.activeChatId) }, [state.activeChatId, readCodeInfo])
+
+  /** Turn a just-created chat into the Code session that was asked for. */
+  const applyPendingCode = useCallback(async (chatId: string) => {
+    const start = pendingCode.current
+    if (!start) return
+    pendingCode.current = null
+    const current = (await window.api.chat.getOverrides(chatId).catch(() => null)) || {}
+    await window.api.chat.setOverrides(chatId, {
+      ...current,
+      chatId,
+      builtinToolsEnabled: true,
+      workingDirectory: start.folder,
+      permissionPreset: start.access,
+    })
+    const name = start.folder.replace(/\/+$/, '').split('/').pop() || start.folder
+    await window.api.chat.update(chatId, { title: name }).catch(() => undefined)
+    setMode('code')
+    await readCodeInfo(chatId)
+    window.dispatchEvent(new CustomEvent('vmlx:chats-changed'))
+  }, [readCodeInfo, setMode])
+
+  const changeCodeAccess = useCallback(async (access: AccessMode) => {
+    const chatId = state.activeChatId
+    if (!chatId) return
+    const current = (await window.api.chat.getOverrides(chatId).catch(() => null)) || {}
+    await window.api.chat.setOverrides(chatId, { ...current, chatId, permissionPreset: access })
+    await readCodeInfo(chatId)
+  }, [state.activeChatId, readCodeInfo])
+
   /** A new chat bound to one provider model; false when it could not be created. */
   const createChatOnProvider = useCallback(async (
     providerId: string,
@@ -216,6 +263,7 @@ function App() {
         model.id,
         undefined,
         modelPath,
+        pendingCode.current ? 'code' : 'chat',
       )
       if (!result?.id) return false
       const bound = await api.setChatModel({
@@ -224,13 +272,15 @@ function App() {
       })
       if (!bound.ok) return false
       setCreatingChatSession(false)
-      setMode('chat')
+      const coding = !!pendingCode.current
+      if (coding) await applyPendingCode(result.id)
+      else setMode('chat')
       dispatch({ type: 'OPEN_CHAT', chatId: result.id, sessionId: '' })
       return true
     } catch {
       return false
     }
-  }, [dispatch, setMode, t])
+  }, [dispatch, setMode, t, applyPendingCode])
 
   /** A new chat on a provider model, local servers first; false when none is usable. */
   const createProviderChat = useCallback(async (): Promise<boolean> => {
@@ -286,12 +336,25 @@ function App() {
       t('chat.quickStart.chatWithModel', { model: modelName }),
       target.modelPath,
       undefined,
-      target.modelPath
+      target.modelPath,
+      pendingCode.current ? 'code' : 'chat',
     )
     if (result?.id) {
+      await applyPendingCode(result.id)
       openChat(result.id, target.id)
     }
-  }, [sessions, state.activeSessionId, setMode, dispatch, openChat, t, createProviderChat])
+  }, [sessions, state.activeSessionId, setMode, dispatch, openChat, t, createProviderChat, applyPendingCode])
+
+  /** Code tab → Start session: a new chat on the current model, then its folder and access. */
+  const startCodeSession = useCallback(async (start: CodeStart) => {
+    pendingCode.current = start
+    try {
+      await handleNewChat()
+    } catch (error) {
+      pendingCode.current = null
+      setChatCreationError(String(error))
+    }
+  }, [handleNewChat])
 
   useEffect(() => {
     // Restoring saved navigation must finish before acknowledging native menu
@@ -399,18 +462,21 @@ function App() {
               </div>
             )}
             {state.mode === 'code' && (
-              <div className="flex flex-col items-center justify-center h-full text-center px-8">
-                <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center mb-4">
-                  <Terminal className="h-8 w-8 text-emerald-500" />
-                </div>
-                <h2 className="text-lg font-semibold mb-2">{t('app.code.title')}</h2>
-                <p className="text-sm text-muted-foreground max-w-sm">
-                  {t('app.code.description')}
-                </p>
-                <span className="mt-4 px-3 py-1 text-xs font-medium bg-emerald-500/10 text-emerald-500 rounded-full">
-                  {t('app.code.comingSoon')}
-                </span>
-              </div>
+              <CodeWorkspace
+                codeDirectory={codeInfo && codeInfo.chatId === state.activeChatId ? codeInfo.dir : null}
+                access={codeInfo?.access ?? 'workspace'}
+                onStart={startCodeSession}
+                onAccessChange={(mode) => void changeCodeAccess(mode)}>
+                <ChatModeContent
+                  activeChatId={state.activeChatId}
+                  sessionEndpoint={sessionEndpoint}
+                  sessionStatus={activeSession?.status}
+                  activeSessionId={activeSession?.id || state.activeSessionId}
+                  ssdSession={activeSession}
+                  onNewChat={() => dispatch({ type: 'CLOSE_CHAT' })}
+                  onSessionChange={handleSessionChange}
+                />
+              </CodeWorkspace>
             )}
 
             {state.mode === 'chat' && creatingChatSession && (

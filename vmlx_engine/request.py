@@ -65,6 +65,12 @@ class SamplingParams:
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
     logit_bias: Optional[Dict[int, float]] = None
+    # DRY repetition penalty (vmlx_engine.sampling_dry); multiplier 0 = off.
+    dry_multiplier: float = 0.0
+    dry_base: Optional[float] = None
+    dry_allowed_length: Optional[int] = None
+    dry_penalty_last_n: Optional[int] = None
+    dry_sequence_breakers: Optional[List[str]] = None
     seed: Optional[int] = None
     stop: Optional[List[str]] = None
     stop_token_ids: Optional[List[int]] = None

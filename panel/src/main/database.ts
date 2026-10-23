@@ -1573,7 +1573,10 @@ class DatabaseManager {
       .prepare(
         `
       SELECT c.id, c.title, c.model_id, c.model_path, c.created_at, c.updated_at,
-             (SELECT COUNT(*) FROM messages WHERE chat_id = c.id) as message_count
+             (SELECT COUNT(*) FROM messages WHERE chat_id = c.id) as message_count,
+             (SELECT o.working_directory FROM chat_overrides o
+               WHERE o.chat_id = c.id AND o.builtin_tools_enabled = 1
+                 AND o.working_directory IS NOT NULL AND o.working_directory != '') as code_directory
       FROM chats c
       ORDER BY c.updated_at DESC
       LIMIT ?
@@ -1588,6 +1591,8 @@ class DatabaseManager {
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         messageCount: row.message_count,
+        // Set when the chat is a Code session (agent tools on a project folder).
+        ...(row.code_directory ? { codeDirectory: row.code_directory as string } : {}),
       }));
   }
 

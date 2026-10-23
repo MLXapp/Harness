@@ -3087,5 +3087,39 @@
       "soon": "Tu {chip} con {gb} GB podrá crear {what} en este Mac cuando llegue la versión local. Mientras tanto, en la nube",
       "cloudOnly": "La {what} local necesita {need} GB o más; este {chip} tiene {gb} GB, así que la nube da mejores resultados"
     }
+  },
+  "code": {
+    "title": "Programa con un agente en este Mac",
+    "subtitle": "Lee y edita tu proyecto, ejecuta comandos en un entorno aislado y pregunta antes de hacer algo arriesgado.",
+    "folder": "Carpeta del proyecto",
+    "chooseFolder": "Elige una carpeta…",
+    "access": "Acceso",
+    "recommended": "Recomendado",
+    "mode": {
+      "read-only": "Solo lectura",
+      "workspace": "Escritura en el proyecto",
+      "full": "Acceso total"
+    },
+    "modeHelp": {
+      "read-only": "Lee archivos y busca. Pregunta antes de escribir un archivo o ejecutar un comando.",
+      "workspace": "Edita archivos de esta carpeta y ejecuta comandos en un entorno aislado sin red. Pregunta antes de salir de ella.",
+      "full": "Edita cualquier cosa y ejecuta cualquier comando sin preguntar. Úsalo solo con proyectos de confianza."
+    },
+    "models": "Modelo",
+    "modelsHelp": "Lo eliges en el cuadro de mensaje y puedes cambiarlo cuando quieras. Buenas opciones para programar:",
+    "localModel": "Qwen3 Coder en este Mac",
+    "localModelHelp": "Privado y gratis; Modelos muestra lo que cabe en tu memoria",
+    "start": "Empezar sesión",
+    "sessions": "Sesiones de código",
+    "placeholder": "Describe un cambio, un error o una función…",
+    "empty": {
+      "title": "¿En qué trabajamos?",
+      "ideas": {
+        "0": "Explica cómo está organizado este proyecto",
+        "1": "Ejecuta las pruebas y arregla lo que falle",
+        "2": "Busca errores y código arriesgado",
+        "3": "Escribe un README para este proyecto"
+      }
+    }
   }
 }

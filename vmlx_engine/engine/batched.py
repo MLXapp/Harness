@@ -60,6 +60,15 @@ logger = logging.getLogger(__name__)
 _GEN_PROMPT_KEY_FAILURES: set[str] = set()
 
 
+
+def _dry_sampling_kwargs(kwargs: dict) -> dict:
+    """DRY settings from generation kwargs (only the ones a request set)."""
+    out = {}
+    for key in ("dry_multiplier", "dry_base", "dry_allowed_length", "dry_penalty_last_n", "dry_sequence_breakers"):
+        if kwargs.get(key) is not None:
+            out[key] = kwargs[key]
+    return out
+
 def _reconcile_mllm_terminal_delta(
     emitted_text: str,
     delta_text: str | None,
@@ -2715,6 +2724,7 @@ class BatchedEngine(BaseEngine):
             frequency_penalty=kwargs.get("frequency_penalty", 0.0),
             presence_penalty=kwargs.get("presence_penalty", 0.0),
             logit_bias=kwargs.get("logit_bias"),
+            **_dry_sampling_kwargs(kwargs),
             seed=kwargs.get("seed"),
             stop=stop or [],
             logprobs=bool(kwargs.get("logprobs", False)),
@@ -2904,6 +2914,7 @@ class BatchedEngine(BaseEngine):
             frequency_penalty=kwargs.get("frequency_penalty", 0.0),
             presence_penalty=kwargs.get("presence_penalty", 0.0),
             logit_bias=kwargs.get("logit_bias"),
+            **_dry_sampling_kwargs(kwargs),
             seed=kwargs.get("seed"),
             stop=stop or [],
             logprobs=bool(kwargs.get("logprobs", False)),

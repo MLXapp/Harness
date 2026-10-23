@@ -209,6 +209,8 @@ declare global {
           modelId: string,
           folderId?: string,
           modelPath?: string,
+          /** 'chat': never inherit a project folder; 'code': a Code session. */
+          kind?: 'chat' | 'code',
         ) => Promise<any>;
         ensureForModel: (title: string, modelPath: string) => Promise<any>;
         getAll: (folderId?: string) => Promise<any[]>;

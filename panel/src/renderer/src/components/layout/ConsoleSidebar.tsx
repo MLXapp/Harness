@@ -40,8 +40,12 @@ export function ConsoleSidebar({ onChatSelect, onNewChat }: ConsoleSidebarProps)
   }
 
   const startNew = () => {
-    if (workspace === 'chat' || workspace === 'code') {
-      setMode(workspace)
+    if (workspace === 'code') {
+      // A Code session starts on the Code start screen (folder + access).
+      setMode('code')
+      dispatch({ type: 'CLOSE_CHAT' })
+    } else if (workspace === 'chat') {
+      setMode('chat')
       onNewChat()
     } else {
       setMode(workspace)
@@ -102,8 +106,13 @@ export function ConsoleSidebar({ onChatSelect, onNewChat }: ConsoleSidebarProps)
         {/* Keep history/search state across page changes. */}
         <div className="flex-1 min-h-0 mlx-hair-t">
           <Sidebar embedded collapsed={false} currentChatId={state.activeChatId}
-            onNewChat={() => { setMode(workspace === 'code' ? 'code' : 'chat'); onNewChat() }}
-            onChatSelect={(id, path) => { if (!isWorkspaceTab(state.mode) || (state.mode !== 'chat' && state.mode !== 'code')) setMode('chat'); onChatSelect(id, path) }} />
+            filter={workspace === 'code' ? 'code' : 'chat'}
+            onNewChat={startNew}
+            onChatSelect={(id, path, codeDirectory) => {
+              // A Code session opens in Code, any other chat in Chat.
+              if (id) setMode(codeDirectory ? 'code' : 'chat')
+              onChatSelect(id, path)
+            }} />
         </div>
 
         <button data-vmlx-control="console-preferences" title={t('console.preferences')}

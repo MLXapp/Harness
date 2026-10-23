@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } fr
 import { ArrowDown, MessageCircle } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { useTranslation } from '../../i18n'
+import { fillComposer, useWorkspaceKind } from '../code/workspaceKind'
 import type { AssistantDisplayTimeline } from '../../../../shared/assistantDisplayTimeline'
 
 interface MessageMetrics {
@@ -47,6 +48,7 @@ interface MessageListProps {
 }
 
 export function MessageList({ messages, streamingMessageId, currentMetrics, reasoningMap, reasoningSegmentMap, reasoningDoneMap, answerPassMap, toolStatusMap, hideToolStatus, sessionId, sessionEndpoint, onRegenerate, onEdit }: MessageListProps) {
+  const workspace = useWorkspaceKind()
   const { t } = useTranslation()
   // Streaming changes the parent's closures on every chunk. Forward actions
   // through stable callbacks so completed bubbles keep their memoized render,
@@ -117,6 +119,23 @@ export function MessageList({ messages, streamingMessageId, currentMetrics, reas
       bottomRef.current?.scrollIntoView({ behavior: streamingMessageId && !isNewMessage ? 'auto' : 'smooth' })
     }
   }, [messages, streamingMessageId, reasoningVersion, toolStatusVersion])
+
+  if (messages.length === 0 && workspace === 'code') {
+    return (
+      <div className="flex-1 flex items-center justify-center px-6">
+        <div className="text-center mlx-view-in">
+          <p className="text-[20px] font-semibold tracking-[-0.01em]">{t('code.empty.title')}</p>
+          <div className="mt-4 flex max-w-[620px] flex-wrap justify-center gap-2">
+            {[0, 1, 2, 3].map(i => (
+              <button key={i} type="button" className="mlx-idea" onClick={() => fillComposer(t(`code.empty.ideas.${i}`))}>
+                {t(`code.empty.ideas.${i}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (messages.length === 0) {
     return (

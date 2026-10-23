@@ -2009,7 +2009,7 @@ describe('Generation Defaults', () => {
         expect(source).toContain('bundle generation defaults stay authoritative')
         expect(createRecord).toContain('getDefaultChatProfile')
         expect(createRecord).toContain('buildNewChatInheritedOverrides')
-        expect(createHandler).toContain('createChatRecord(title, modelId, folderId, modelPath)')
+        expect(createHandler).toContain('createChatRecord(title, modelId, folderId, modelPath, kind === "chat" || kind === "code" ? kind : undefined)')
         const ensureHandler = source.slice(
             source.indexOf('"chat:ensureForModel"'),
             source.indexOf('ipcMain.handle("chat:getByModel"'),
