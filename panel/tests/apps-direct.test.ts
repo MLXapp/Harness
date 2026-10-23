@@ -69,3 +69,16 @@ describe('AppsService direct mode against an MCP server', () => {
     expect(apps.asExecute('nope', {})).toBeNull()
   })
 })
+
+describe('connectionState', () => {
+  it('says connected only on a positive signal', async () => {
+    const { connectionState } = await import('../src/main/apps/composioPolicy')
+    expect(connectionState({ data: { results: { gmail: { status: 'active' } } } })).toBe('yes')
+    expect(connectionState({ gmail: { is_connected: true } })).toBe('yes')
+    expect(connectionState({ data: { results: { gmail: { status: 'INITIATED', redirect_url: 'https://connect.composio.dev/x' } } } })).toBe('no')
+    expect(connectionState({ gmail: { connection_status: 'EXPIRED' } })).toBe('no')
+    expect(connectionState(undefined, 'Something went wrong')).toBe('unknown')
+    expect(connectionState({ data: {} })).toBe('unknown')
+    expect(connectionState(undefined, 'Gmail is already connected.')).toBe('yes')
+  })
+})

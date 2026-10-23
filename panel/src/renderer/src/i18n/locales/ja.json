@@ -3370,7 +3370,8 @@
       "deleted": "削除"
     },
     "atLine": "{n} 行目",
-    "editComment": "編集"
+    "editComment": "編集",
+    "tooBig": "このファイルは書き換えられました: +{added} −{removed} 行。行ごとに表示するには多すぎます。Finder で表示するか、元に戻してください。"
   },
   "aside": {
     "menu": "横で質問…",

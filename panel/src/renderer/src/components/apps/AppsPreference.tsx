@@ -3,7 +3,7 @@
  * key), then each app: connect it, and choose whether its sends and changes
  * ask first (the default), always run, or are blocked. Reads always run.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, ExternalLink } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import type { AppRule, AppsStatusView } from '../../../../shared/apps'
@@ -42,6 +42,7 @@ export function AppsPreference() {
   const waiting = status?.state === 'waiting-for-browser' || status?.state === 'connecting'
 
   const [pending, setPending] = useState<string[]>([])
+  const lastCheck = useRef<Record<string, number>>({})
   const refreshStatus = () => { void window.api.apps.status().then(s => window.dispatchEvent(new CustomEvent('vmlx:apps-status', { detail: s }))).catch(() => undefined) }
   const connectApp = async (id: string) => {
     setBusy(id)
@@ -69,7 +70,16 @@ export function AppsPreference() {
   }
   useEffect(() => {
     if (pending.length === 0) return
-    const onFocus = () => { for (const id of pending) void check(id) }
+    // Coming back from the browser re-checks, at most every 8 s per app (each
+    // check is a call to Composio).
+    const onFocus = () => {
+      const now = Date.now()
+      for (const id of pending) {
+        if (now - (lastCheck.current[id] ?? 0) < 8000) continue
+        lastCheck.current[id] = now
+        void check(id)
+      }
+    }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [pending]) // eslint-disable-line react-hooks/exhaustive-deps

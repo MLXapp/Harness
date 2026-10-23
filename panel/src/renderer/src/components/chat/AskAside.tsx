@@ -1,8 +1,8 @@
 /**
  * Ask aside (⌘;): a quick side question about the open chat, answered by the
- * chat's own model without tools, and never added to the conversation. Works
- * while a reply is running. A local model reuses the chat's cache, so it is
- * nearly free. "Ask in Chat" sends the question as a normal message instead.
+ * chat's own model without calling tools, and never added to the
+ * conversation. Works while a reply is running; closing the card stops it.
+ * "Ask in Chat" sends the question as a normal message instead.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderChatMarkdownHtml } from './mathMarkdown'
@@ -39,7 +39,11 @@ export function AskAside({ chatId, endpoint, onAskInChat }: {
     return () => window.removeEventListener('vmlx:ask-aside', onOpen)
   }, [chatId])
   // Another chat: start fresh.
-  useEffect(() => { setOpen(false); setQuestion(''); setAnswer(null); setError(null); setBusy(false) }, [chatId])
+  useEffect(() => {
+    setOpen(false); setQuestion(''); setAnswer(null); setError(null); setBusy(false)
+    // Leaving the chat stops a side question still running there.
+    return () => { askId.current++; if (chatId) void window.api.chat.asideCancel?.(chatId) }
+  }, [chatId])
 
   const ask = async () => {
     const q = question.trim()
@@ -59,7 +63,11 @@ export function AskAside({ chatId, endpoint, onAskInChat }: {
   }
   // Same safe pipeline as reasoning text: markdown, KaTeX, then sanitized.
   const answerHtml = useMemo(() => answer ? sanitizeChatHtml(renderChatMarkdownHtml(answer)) : '', [answer])
-  const close = () => { setOpen(false); askId.current++ ; setBusy(false) }
+  // Closing stops the model too, so it doesn't keep generating beside the reply.
+  const close = () => {
+    if (busy && chatId) void window.api.chat.asideCancel?.(chatId)
+    setOpen(false); askId.current++; setBusy(false)
+  }
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 pb-1">

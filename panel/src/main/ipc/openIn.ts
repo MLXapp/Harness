@@ -7,7 +7,10 @@ import { ipcMain } from 'electron'
 import { execFile } from 'child_process'
 import { existsSync, statSync } from 'fs'
 import { homedir } from 'os'
-import { join } from 'path'
+import { isAbsolute, join } from 'path'
+
+/** Bundles macOS treats as one item (opening them runs or installs them). */
+const PACKAGE = /\.(app|bundle|framework|plugin|kext|pkg|mpkg|prefPane|appex|xpc|qlgenerator|saver|workflow)$/i
 
 export interface OpenInApp { id: string; name: string; bundleId: string; kind: 'finder' | 'terminal' | 'editor' }
 
@@ -42,13 +45,14 @@ let cached: { at: number; ids: string[] } | null = null
 export async function installedOpenInApps(): Promise<OpenInApp[]> {
   if (process.platform !== 'darwin') return []
   if (cached && Date.now() - cached.at < 5 * 60_000) return OPEN_IN_APPS.filter(a => cached!.ids.includes(a.id))
-  const found: string[] = []
-  for (const a of OPEN_IN_APPS) {
-    if (a.id === 'finder' || a.id === 'terminal') { found.push(a.id); continue }
+  // Every app is looked up at once (Spotlight can take a moment each).
+  const hits = await Promise.all(OPEN_IN_APPS.map(async a => {
+    if (a.id === 'finder' || a.id === 'terminal') return true
     const file = APP_FILES[a.id]
     const onDisk = file && [join('/Applications', file), join(homedir(), 'Applications', file)].some(p => existsSync(p))
-    if (onDisk || await spotlight(a.bundleId)) found.push(a.id)
-  }
+    return onDisk || await spotlight(a.bundleId)
+  }))
+  const found = OPEN_IN_APPS.filter((_, i) => hits[i]).map(a => a.id)
   cached = { at: Date.now(), ids: found }
   return OPEN_IN_APPS.filter(a => found.includes(a.id))
 }
@@ -56,6 +60,11 @@ export async function installedOpenInApps(): Promise<OpenInApp[]> {
 export function openFolderIn(appId: string, folder: string): Promise<{ ok: boolean; error?: string }> {
   const app = OPEN_IN_APPS.find(a => a.id === appId)
   if (!app) return Promise.resolve({ ok: false, error: 'Unknown app.' })
+  // A plain folder only: `open` would launch an app or package bundle
+  // (Foo.app is a directory too) instead of showing it.
+  if (typeof folder !== 'string' || !isAbsolute(folder) || PACKAGE.test(folder.replace(/\/+$/, ''))) {
+    return Promise.resolve({ ok: false, error: 'Not a folder.' })
+  }
   try { if (!statSync(folder).isDirectory()) return Promise.resolve({ ok: false, error: 'Not a folder.' }) } catch {
     return Promise.resolve({ ok: false, error: 'The folder is gone.' })
   }

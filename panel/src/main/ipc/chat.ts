@@ -55,6 +55,7 @@ import {
   sandboxEscalationMarker,
 } from "../agent/permissions";
 import { ApprovalBroker, type ApprovalCard } from "../agent/approvals";
+import { asideMessages } from "../agent/aside";
 import { appsService } from "./apps";
 import { appsInCall, decideAppCall, wrapUntrusted } from "../apps/composioPolicy";
 import { discoverSkills, renderSkillIndex } from "../agent/skills";
@@ -757,21 +758,8 @@ const STEER_NOTE = "[The user added this while you were working. Take it into ac
 /** U+2063 (invisible) marks the real additions, so typed text never splits. */
 const STEER_ADDED_PREFIX = "\u2063[Added while working]";
 
-/** The note that turns the last user message into a side question. */
-export const ASIDE_NOTE = "(A quick side question from the user. Answer it briefly from the conversation so far. Do not use tools, do not continue the task, and do not change any plan: this answer is not part of the conversation.)";
-
-/** Request messages for a side question: everything as is, the question last. */
-export function asideMessages(messages: any[]): any[] {
-  const out = messages.slice();
-  for (let i = out.length - 1; i >= 0; i--) {
-    const m = out[i];
-    if (m?.role !== "user") continue;
-    if (typeof m.content === "string") out[i] = { ...m, content: `${m.content}\n\n${ASIDE_NOTE}` };
-    else if (Array.isArray(m.content)) out[i] = { ...m, content: [...m.content, { type: "text", text: ASIDE_NOTE }] };
-    break;
-  }
-  return out;
-}
+/** Running side questions, by chat, so closing the card stops the model. */
+const asideControllers = new Map<string, AbortController>();
 
 /** A Deny the user explained: the model gets their words with the refusal. */
 function withDenyNote(message: string, note: string): string {
@@ -1455,7 +1443,13 @@ export function registerChatHandlers(
     "chat:deleteAll",
     async (_, scope?: { folderId?: string; modelPath?: string }) => {
       try {
+        const before = db.getChats().map((c) => c.id);
         const deleted = db.deleteAllChats(scope);
+        // Same cleanup as deleting one chat: browsers, queues, flags, and the
+        // Changes checkpoints (copies of the files those chats edited).
+        const left = new Set(db.getChats().map((c) => c.id));
+        for (const id of before) if (!left.has(id)) clearChatAgentRuntime(id);
+        turnChanges.prune(left);
         return { success: true, deleted };
       } catch (error) {
         return { success: false, error: (error as Error).message };
@@ -1566,6 +1560,11 @@ export function registerChatHandlers(
       // B5: Create AbortController for this request
       const abortController = new AbortController();
       let timedOut = false;
+      if (mode === "aside") {
+        // One side question per chat: a new one replaces (stops) the last.
+        asideControllers.get(chatId)?.abort();
+        asideControllers.set(chatId, abortController);
+      }
 
       const chat = db.getChat(chatId);
       if (!chat) {
@@ -2168,8 +2167,11 @@ export function registerChatHandlers(
           win.webContents.send("chat:typing", {
             chatId,
             messageId: assistantMessageId,
-            // A turn the window didn't start (a scheduled task) shows its prompt too.
-            userMessage: { id: userMessage.id, content: userMessage.content, timestamp: userMessage.timestamp },
+            // A turn the window didn't start (a scheduled task) shows its prompt
+            // too; a turn the window sent already shows its own copy.
+            ...(unattendedTurns.has(chatId)
+              ? { userMessage: { id: userMessage.id, content: userMessage.content, timestamp: userMessage.timestamp } }
+              : {}),
           });
         }
       } catch (_) {}
@@ -3480,10 +3482,13 @@ export function registerChatHandlers(
         const runSummaryRequest = async (
           summaryMessages: any[],
           maxTokens: number,
+          opts: { noTools?: boolean } = {},
         ): Promise<SummaryStreamResult> => {
-          const summaryBody = JSON.stringify(
-            buildRequestBody({ messages: summaryMessages, maxTokens }),
-          );
+          const summaryObj = buildRequestBody({ messages: summaryMessages, maxTokens });
+          // A side question must answer in words: the tools stay described
+          // (same prompt as the chat) but the model may not call them.
+          if (opts.noTools && (summaryObj.tools?.length ?? 0) > 0) summaryObj.tool_choice = "none";
+          const summaryBody = JSON.stringify(summaryObj);
           const summaryInit = {
             method: "POST",
             headers: { "Content-Type": "application/json", ...authHeaders },
@@ -3613,8 +3618,8 @@ export function registerChatHandlers(
           // local model reuses its cache), then the question, answered briefly
           // without tools. Nothing is saved.
           try {
-            const asked = asideMessages(requestMessages);
-            const res = await runSummaryRequest(asked, 1200);
+            const asked = asideMessages(requestMessages, content);
+            const res = await runSummaryRequest(asked, 1200, { noTools: true });
             if (res.error) return { success: false, error: res.error };
             return { success: true, text: (res.text || "").trim() };
           } catch (err) {
@@ -6754,6 +6759,7 @@ export function registerChatHandlers(
 
       } finally {
         if (fetchTimeout) clearTimeout(fetchTimeout);
+        if (mode === "aside" && asideControllers.get(chatId) === abortController) asideControllers.delete(chatId);
         // What this turn's file tools changed, under the reply ("2 files changed").
         if (turnChangeMessageId) {
           try {
@@ -6825,6 +6831,14 @@ export function registerChatHandlers(
       }
     },
   );
+  ipcMain.handle("chat:asideCancel", (_event, chatId: string) => {
+    if (typeof chatId !== "string") return false;
+    const c = asideControllers.get(chatId);
+    if (!c) return false;
+    c.abort();
+    asideControllers.delete(chatId);
+    return true;
+  });
   // Manual compaction (/compact): summarize the older history now.
   ipcMain.handle(
     "chat:compact",

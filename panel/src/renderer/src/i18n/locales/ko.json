@@ -3370,7 +3370,8 @@
       "deleted": "삭제됨"
     },
     "atLine": "{n}번째 줄",
-    "editComment": "편집"
+    "editComment": "편집",
+    "tooBig": "이 파일은 다시 작성되었습니다: +{added} −{removed}줄로, 한 줄씩 보여 주기에는 너무 많습니다. Finder에서 보거나 되돌리세요."
   },
   "aside": {
     "menu": "따로 묻기…",

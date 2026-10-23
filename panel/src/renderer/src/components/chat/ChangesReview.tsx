@@ -107,16 +107,22 @@ function ChangesSheet({ set, onClose, onSendComments }: { set: TurnChangeSet | n
     if (!shownSet) return
     if (!selected || !shownSet.files.some(f => f.path === selected)) setSelected(shownSet.files[0]?.path ?? null)
   }, [shownSet]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Focus moves in once when the sheet opens and back once when it closes;
+  // a new version of the set (after a revert) or a re-render (a reply
+  // streaming next to it) must not move it.
+  const isOpen = !!set
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
   useEffect(() => {
-    if (!set) return
+    if (!isOpen) return
     const before = document.activeElement as HTMLElement | null
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); onClose() }
+      if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); closeRef.current() }
     }
     window.addEventListener('keydown', onKey)
     panelRef.current?.focus()
     return () => { window.removeEventListener('keydown', onKey); if (before && document.contains(before)) requestAnimationFrame(() => before.focus()) }
-  }, [set, onClose])
+  }, [isOpen])
 
   if (!shownSet) return null
   const totals = changeTotals(shownSet)
@@ -267,6 +273,8 @@ function FileDiff({ set, file, busy, comments, onComment, onRevert }: {
         {!texts ? null
           : texts.opaque ? <p className="p-5 text-[13px] text-muted-foreground">{t('changes.opaque')}</p>
           : diff && diff.hunks.length === 0 ? <p className="p-5 text-[13px] text-muted-foreground">{t('changes.noLines')}</p>
+          // A whole-file rewrite of thousands of lines: say so instead of drawing every line.
+          : diff && diff.coarse && diff.added + diff.removed > 3000 ? <p className="p-5 text-[13px] text-muted-foreground" data-vmlx-section="changes-too-big">{t('changes.tooBig', { added: diff.added, removed: diff.removed })}</p>
           : diff?.hunks.map((h, hi) => (
             <div key={hi} className="mlx-hunk">
               <div className="mlx-hunk-head">{t('changes.atLine', { n: h.bStart })}</div>

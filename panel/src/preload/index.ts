@@ -192,6 +192,7 @@ const api = {
     },
     aside: (chatId: string, question: string, endpoint?: { host: string; port: number }): Promise<{ success: boolean; text?: string; error?: string }> =>
       ipcRenderer.invoke('chat:aside', chatId, question, endpoint),
+    asideCancel: (chatId: string): Promise<boolean> => ipcRenderer.invoke('chat:asideCancel', chatId),
     answerApproval: (id: string, answer: 'allow-once' | 'allow-always' | 'deny', note?: string) =>
       ipcRenderer.invoke('chat:answerApproval', id, answer, note),
     getPendingApprovals: (chatId: string) => ipcRenderer.invoke('chat:pendingApprovals', chatId),

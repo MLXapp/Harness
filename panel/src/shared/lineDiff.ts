@@ -120,8 +120,14 @@ export function lineDiff(before: string, after: string, context = 3): LineDiff {
   return { added, removed, hunks, coarse }
 }
 
-/** Just the +/- counts (cheap enough for every file at the end of a turn). */
-export function diffCounts(before: string, after: string): { added: number; removed: number } {
-  const d = lineDiff(before, after, 0)
-  return { added: d.added, removed: d.removed }
+/**
+ * Just the +/- counts, for every file at the end of a turn (main process).
+ * A lower edit-distance cap keeps a huge rewrite quick there; past it the
+ * counts are the plain "all removed, all added" ones.
+ */
+export function diffCounts(before: string, after: string, maxD = 1500): { added: number; removed: number } {
+  const { ops } = diffOps(splitLines(before), splitLines(after), maxD)
+  let added = 0, removed = 0
+  for (const op of ops) { if (op.type === 'add') added++; else if (op.type === 'del') removed++ }
+  return { added, removed }
 }

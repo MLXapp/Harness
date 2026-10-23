@@ -18,7 +18,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js'
 import { pickDirectSlugs, parseToolSchemas, slugForDirect, toDirectTools, type DirectSchema } from './composioDirect'
-import { COMPOSIO_CONNECT_URL, connectionLinks, isOfferedTool, mcpResultText, sanitizeArguments, type AppRule } from './composioPolicy'
+import { COMPOSIO_CONNECT_URL, connectionLinks, connectionState, isOfferedTool, mcpResultText, sanitizeArguments, type AppRule } from './composioPolicy'
 
 export const OAUTH_CALLBACK_PORT = 47391
 export const OAUTH_CALLBACK_PATH = '/oauth/composio'
@@ -400,19 +400,21 @@ export class AppsService {
     if (isError) return { ok: false, opened: 0, message: text.slice(0, 300) }
     const links = connectionLinks(json)
     for (const l of links.slice(0, 1)) await this.deps.openExternal(l.url)
-    // Only an app Composio reports as connected (no sign-in link left) counts
-    // as connected; an opened sign-in page is pending until checkApp() sees it done.
-    if (links.length === 0) this.markConnected(toolkit, true)
-    return { ok: true, opened: Math.min(1, links.length), message: links.length ? undefined : 'Already connected.' }
+    // Only an app Composio reports as connected counts as connected; an
+    // opened sign-in page is pending until checkApp() sees it done.
+    const state = connectionState(json, text)
+    if (state === 'yes') this.markConnected(toolkit, true)
+    return { ok: true, opened: Math.min(1, links.length), message: links.length ? undefined : state === 'yes' ? 'Already connected.' : undefined }
   }
 
   /** After a sign-in in the browser: is the app connected now? Opens nothing. */
   async checkApp(toolkit: string): Promise<{ ok: boolean; connected: boolean; message?: string }> {
     const { json, text, isError } = await this.call('COMPOSIO_MANAGE_CONNECTIONS', { toolkits: [toolkit] })
     if (isError) return { ok: false, connected: false, message: text.slice(0, 300) }
-    const connected = connectionLinks(json).length === 0
-    this.markConnected(toolkit, connected)
-    return { ok: true, connected }
+    const state = connectionState(json, text)
+    // 'unknown' changes nothing: an odd reply never turns an app on or off.
+    if (state !== 'unknown') this.markConnected(toolkit, state === 'yes')
+    return { ok: true, connected: state === 'yes' }
   }
 
   private markConnected(toolkit: string, on: boolean): void {
