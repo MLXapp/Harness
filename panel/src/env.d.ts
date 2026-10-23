@@ -521,6 +521,8 @@ declare global {
         getTotals: () => Promise<import('./shared/mlxNetwork').FetchResult<import('./shared/mlxNetwork').NetworkSnapshot>>;
         getMining: (walletName: string) => Promise<import('./shared/mlxNetwork').FetchResult<import('./shared/mlxNetwork').WalletMining>>;
         getMlxAppStatus: () => Promise<import('./shared/mlxNetwork').MlxAppStatus>;
+        yieldEnabled?: () => Promise<boolean>;
+        setYieldEnabled?: (on: boolean) => Promise<boolean>;
         openMlxApp: () => Promise<boolean>;
         installMlxNode: () => Promise<import('./shared/mlxNode').MlxNodeInstallResult>;
       };

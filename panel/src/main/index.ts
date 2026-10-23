@@ -35,6 +35,7 @@ import { registerTaskHandlers } from './ipc/tasks'
 import { registerMediaScheme, handleMediaProtocol } from './media/protocol'
 import { offerMlxNodeOnFirstRun } from './mlx-node'
 import { sessionManager } from './sessions'
+import { releaseMlxNodeYield, startMlxNodeYield } from './mlxNodeYield'
 import { apiGateway } from './api-gateway'
 import { buildContentSecurityPolicy } from './csp'
 import { rendererSettingValue } from './settingsAccess'
@@ -656,6 +657,10 @@ app.whenReady().then(async () => {
 
   // Start global health monitor for all sessions
   sessionManager.startGlobalMonitor()
+  // MLX Node steps aside while a local model runs here (Preferences → MLX Node).
+  startMlxNodeYield((cb) => {
+    for (const ev of ['session:ready', 'session:stopped', 'session:created']) sessionManager.on(ev, cb)
+  })
 
   // Initialize tray if enabled in settings
   const trayEnabled = db.getSetting('tray_enabled')
@@ -712,6 +717,7 @@ app.on('before-quit', async (e) => {
   try {
     abortAllChatRequests()
     killSpawnedProcesses()
+    void releaseMlxNodeYield()
   } catch (err) {
     console.error('[QUIT] Error stopping agent work:', err)
   }

@@ -389,6 +389,8 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       getTotals: async () => ({ ok: true, data: { chain: 'mlx-1', at: Date.now(), totals: { macs: 1284, online: 912, working: 640, tps: 182_400, tokensToday: 9_840_000_000, countries: 41, freeNodes: 377 } } }),
       getMining: async () => ({ ok: true, data: { at: Date.now(), locked: '128400000', pending: '2150000', rate: 0.0003, active: true, macs: 1, state: 'mining' as const } }),
       getMlxAppStatus: async () => ({ installed: false, running: false, bundled: true, bundledVersion: '0.9.0' }),
+      yieldEnabled: async () => true,
+      setYieldEnabled: async (on: boolean) => on,
       openMlxApp: async () => false,
       installMlxNode: async () => ({ ok: true as const, path: '/Applications/MLX Node.app', installed: true }),
     },
