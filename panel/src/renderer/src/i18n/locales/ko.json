@@ -734,7 +734,18 @@
       "deny": "거부",
       "alwaysAllow": "이 채팅에서 이 명령을 항상 허용",
       "autoDeny": "{time} 후 자동으로 거부됩니다",
-      "alwaysAllowTool": "이 채팅에서 이 도구를 항상 허용"
+      "alwaysAllowTool": "이 채팅에서 이 도구를 항상 허용",
+      "ask": {
+        "shell": "MLX Harness가 이 명령을 실행하도록 허용할까요?",
+        "escalation": "이 명령을 샌드박스 밖에서 실행할까요?",
+        "write": "MLX Harness가 이 파일을 바꾸도록 허용할까요?",
+        "applescript": "MLX Harness가 이 AppleScript를 실행하도록 허용할까요?",
+        "git": "MLX Harness가 이 git 명령을 실행하도록 허용할까요?",
+        "mcp": "MLX Harness가 이 도구를 사용하도록 허용할까요?",
+        "tool": "MLX Harness가 이 도구를 사용하도록 허용할까요?",
+        "app": "MLX Harness가 앱에서 이 작업을 하도록 허용할까요?"
+      },
+      "alwaysAllowApp": "이 채팅에서 이 앱들에 항상 허용"
     },
     "switcher": {
       "title": "모델 전환 (⌘⇧M)",

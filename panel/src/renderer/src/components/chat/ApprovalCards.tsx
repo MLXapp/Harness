@@ -91,11 +91,27 @@ export function ApprovalCards({ chatId }: { chatId: string }) {
       .catch(() => setShown(prev => prev.map(s => (s.card.id === id ? { ...s, busy: false } : s))))
   }
 
+  // ⌘↩ allows and ⌘. denies the first open card (the one on top).
+  useEffect(() => {
+    const first = shown.find(s => s.open && !s.busy)
+    if (!first) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.altKey || e.ctrlKey) return
+      if (e.key === 'Enter') { e.preventDefault(); respond(first.card.id, 'allow-once') }
+      else if (e.key === '.') { e.preventDefault(); respond(first.card.id, 'deny') }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [shown]) // eslint-disable-line react-hooks/exhaustive-deps
+
   if (shown.length === 0) return null
 
   return (
-    <div className="bg-card" data-vmlx-control="approval-cards">
-      {shown.map(({ card, open, busy }) => {
+    <div data-vmlx-control="approval-cards">
+      {shown.map(({ card, open, busy }, index) => {
+        const askKey = `chat.approval.ask.${card.kind}`
+        const ask = t(askKey)
+        const first = index === shown.findIndex(s => s.open && !s.busy)
         const kindLabel = t(`chat.approval.kind.${card.kind}`)
         const whyKey = `chat.approval.why.${card.why}`
         const why = t(whyKey)
@@ -110,63 +126,70 @@ export function ApprovalCards({ chatId }: { chatId: string }) {
             }}
           >
             <div className="min-h-0 overflow-hidden">
-              <div className="border-t border-border px-4 py-3">
+              <div className="mx-auto w-full max-w-[868px] px-6 pb-2 pt-1">
                 <div
-                  className="max-w-2xl mx-auto rounded-lg border border-warning/40 bg-warning/5 p-3"
+                  className="mlx-approval"
                   role="alertdialog"
-                  aria-label={t('chat.approval.title')}
+                  aria-label={ask !== askKey ? ask : t('chat.approval.title')}
                   data-approval-kind={card.kind}
                 >
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <ShieldAlert className="h-4 w-4 text-warning flex-shrink-0" />
-                    <span className="text-sm font-medium">{t('chat.approval.title')}</span>
-                    <span className="ml-auto text-[11px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldAlert className="mt-[2px] h-[18px] w-[18px] flex-shrink-0 text-warning" strokeWidth={1.9} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[14px] font-semibold leading-5">{ask !== askKey ? ask : t('chat.approval.title')}</p>
+                      <p className="mt-0.5 text-[12.5px] leading-[17px] text-muted-foreground">
+                        {ask === askKey && <span className="text-foreground/80">{kindLabel}{why !== whyKey ? ' · ' : ''}</span>}
+                        {why !== whyKey && <span>{why}</span>}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-foreground/[0.06] px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
                       {card.toolName}
                     </span>
                   </div>
-                  <div className="text-xs text-muted-foreground mb-2">
-                    <span className="font-medium text-foreground">{kindLabel}</span>
-                    {why !== whyKey && <span> · {why}</span>}
-                  </div>
                   {card.subject && (
-                    <pre className="text-xs font-mono bg-background border border-border rounded px-2 py-1.5 mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all select-text">
+                    <pre className={`mt-2.5 max-h-56 overflow-auto rounded-[10px] bg-[rgb(var(--bg-3-rgb)/0.7)] px-3 py-2 text-[12.5px] leading-[18px] whitespace-pre-wrap select-text ${card.kind === 'app' ? 'font-sans break-words' : 'font-mono break-all'}`}>
                       {card.subject}
                     </pre>
                   )}
                   {card.reason && (
-                    <div className="text-xs mb-2">
+                    <p className="mt-2 text-[12.5px] leading-[17px]">
                       <span className="text-muted-foreground">{t('chat.approval.reason')}: </span>
                       <span className="whitespace-pre-wrap">{card.reason}</span>
-                    </div>
+                    </p>
                   )}
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       disabled={busy}
+                      data-vmlx-control="approval-allow"
                       onClick={() => respond(card.id, 'allow-once')}
-                      className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-40"
+                      className="flex h-8 items-center gap-2 rounded-full bg-[color:var(--acc)] px-3.5 text-[13px] font-medium text-white transition-[background-color,transform] duration-150 hover:bg-[color:var(--acc-hi)] active:scale-[0.97] disabled:opacity-40"
                     >
                       {t('chat.approval.allowOnce')}
+                      {first && <kbd className="mlx-kbd">⌘↩</kbd>}
                     </button>
                     <button
                       type="button"
                       disabled={busy}
+                      data-vmlx-control="approval-deny"
                       onClick={() => respond(card.id, 'deny')}
-                      className="px-3 py-1.5 text-sm border border-border rounded hover:bg-accent disabled:opacity-40"
+                      className="flex h-8 items-center gap-2 rounded-full bg-foreground/[0.07] px-3.5 text-[13px] font-medium transition-[background-color,transform] duration-150 hover:bg-foreground/[0.11] active:scale-[0.97] disabled:opacity-40"
                     >
                       {t('chat.approval.deny')}
+                      {first && <kbd className="mlx-kbd">⌘.</kbd>}
                     </button>
                     {card.allowAlways && (
                       <button
                         type="button"
                         disabled={busy}
+                        data-vmlx-control="approval-always"
                         onClick={() => respond(card.id, 'allow-always')}
-                        className="px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline disabled:opacity-40"
+                        className="px-2 py-1.5 text-[12.5px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline disabled:opacity-40"
                       >
-                        {t(card.kind === 'mcp' ? 'chat.approval.alwaysAllowTool' : 'chat.approval.alwaysAllow')}
+                        {t(card.kind === 'mcp' ? 'chat.approval.alwaysAllowTool' : card.kind === 'app' ? 'chat.approval.alwaysAllowApp' : 'chat.approval.alwaysAllow')}
                       </button>
                     )}
-                    <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
+                    <span className="ml-auto text-[11.5px] text-muted-foreground tabular-nums">
                       {t('chat.approval.autoDeny', { time: formatRemaining(card.expiresAt - now) })}
                     </span>
                   </div>

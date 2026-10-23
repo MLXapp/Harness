@@ -734,7 +734,18 @@
       "deny": "拒否",
       "alwaysAllow": "このチャットではこのコマンドを常に許可",
       "autoDeny": "{time} 後に自動的に拒否されます",
-      "alwaysAllowTool": "このチャットではこのツールを常に許可"
+      "alwaysAllowTool": "このチャットではこのツールを常に許可",
+      "ask": {
+        "shell": "MLX Harness にこのコマンドの実行を許可しますか？",
+        "escalation": "このコマンドをサンドボックスの外で実行しますか？",
+        "write": "MLX Harness にこのファイルの変更を許可しますか？",
+        "applescript": "MLX Harness にこの AppleScript の実行を許可しますか？",
+        "git": "MLX Harness にこの git コマンドの実行を許可しますか？",
+        "mcp": "MLX Harness にこのツールの使用を許可しますか？",
+        "tool": "MLX Harness にこのツールの使用を許可しますか？",
+        "app": "MLX Harness にアプリでこの操作を許可しますか？"
+      },
+      "alwaysAllowApp": "このチャットではこれらのアプリで常に許可"
     },
     "switcher": {
       "title": "モデルを切り替え (⌘⇧M)",
