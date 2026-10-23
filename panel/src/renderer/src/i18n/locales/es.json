@@ -2881,7 +2881,9 @@
       "title": "Conecta una cuenta o cualquier servidor compatible con OpenAI",
       "body": "Claude, DeepSeek, OpenAI, Gemini y WaveSpeed AI funcionan con una clave. Sus modelos aparecen en el botón de modelo, junto a los de este Mac.",
       "connect": "Conectar una cuenta…"
-    }
+    },
+    "media": "Para imágenes, vídeo, voz y música",
+    "mediaHint": "WaveSpeed AI (arriba) también sirve aquí. Los resultados se guardan en este Mac."
   },
   "onboarding": {
     "label": "Configurar MLX Harness",

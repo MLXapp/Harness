@@ -2881,7 +2881,9 @@
       "title": "계정 또는 OpenAI 호환 서버 연결",
       "body": "Claude, DeepSeek, OpenAI, Gemini, WaveSpeed AI는 키 하나로 연결됩니다. 해당 모델은 이 Mac의 모델과 함께 모델 버튼에 나타납니다.",
       "connect": "계정 연결…"
-    }
+    },
+    "media": "이미지, 동영상, 음성, 음악용",
+    "mediaHint": "위의 WaveSpeed AI도 여기서 사용할 수 있습니다. 결과는 이 Mac에 저장됩니다."
   },
   "onboarding": {
     "label": "MLX Harness 설정",

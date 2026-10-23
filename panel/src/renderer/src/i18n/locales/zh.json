@@ -2881,7 +2881,9 @@
       "title": "连接账户或任何兼容 OpenAI 的服务器",
       "body": "Claude、DeepSeek、OpenAI、Gemini 和 WaveSpeed AI 只需一个密钥。它们的模型会出现在模型按钮中，与这台 Mac 上的模型并列。",
       "connect": "连接账户…"
-    }
+    },
+    "media": "用于图像、视频、语音和音乐",
+    "mediaHint": "上方的 WaveSpeed AI 也可用于这里。结果保存在这台 Mac 上。"
   },
   "onboarding": {
     "label": "设置 MLX Harness",

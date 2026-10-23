@@ -7,6 +7,7 @@
 
 import {
   FEATURED_ACCOUNTS,
+  MEDIA_ACCOUNTS,
   FEATURED_CLOUD_MODELS,
   reachableFeaturedModels,
   type FeaturedAccount,
@@ -138,7 +139,7 @@ export function connectedAccountIds(providers: readonly ProviderView[]): Set<str
 
 /** Catalog providers and custom endpoints that are not one of the five. */
 export function otherProviders(providers: readonly ProviderView[]): ProviderView[] {
-  const featured = new Set(FEATURED_ACCOUNTS.map(a => a.catalogId))
+  const featured = new Set([...FEATURED_ACCOUNTS, ...MEDIA_ACCOUNTS].map(a => a.catalogId))
   return providers.filter(p => p.kind !== 'local-server' && !featured.has(p.id))
 }
 
