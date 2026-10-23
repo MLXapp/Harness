@@ -55,6 +55,7 @@ export function registerMediaHandlers(getWindow: () => BrowserWindow | null): vo
 
   ipcMain.handle('media:list', (_, kind: MediaKind) => (KINDS.includes(kind) ? runner!.list(kind) : []))
   ipcMain.handle('media:submit', (_, request: MediaSubmitRequest) => runner!.submit(request))
+  ipcMain.handle('media:quote', (_, request: MediaSubmitRequest) => runner!.quote(request))
   ipcMain.handle('media:cancel', (_, id: string) => runner!.cancel(String(id)))
   ipcMain.handle('media:delete', (_, id: string) => runner!.delete(String(id)))
   ipcMain.handle('media:reveal', (_, id: string) => {

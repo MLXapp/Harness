@@ -155,3 +155,27 @@ export function outputExtension(url: string, kind: MediaKind): string {
   if (ext && allowed[kind].includes(ext)) return ext === 'jpeg' ? 'jpg' : ext
   return kind === 'image' ? 'png' : kind === 'video' ? 'mp4' : 'mp3'
 }
+
+/**
+ * A price quote for the same request (no charge, nothing runs):
+ *  - WaveSpeed AI: POST /api/v3/model/price {model_id, inputs} (the endpoint
+ *    WaveSpeed's own MCP server uses for its price quotes).
+ *  - Atlas Cloud: POST /api/v1/model/calculate with the generate body.
+ */
+export function buildQuoteRequest(model: CloudMediaModel, input: MediaInput): CloudRequest {
+  const req = buildCloudRequest(model, input)
+  if (model.provider === 'wavespeed') {
+    return { url: `${WAVESPEED_API}/model/price`, body: { model_id: model.path, inputs: req.body } }
+  }
+  return { url: `${ATLAS_API}/model/calculate`, body: req.body }
+}
+
+/** USD from a quote reply (either provider), or undefined. */
+export function parseQuote(json: any): number | undefined {
+  const d = json?.data ?? json
+  for (const v of [d?.discounted_price, d?.price, d?.unit_price]) {
+    const n = typeof v === 'string' ? Number(v) : v
+    if (typeof n === 'number' && Number.isFinite(n) && n >= 0) return n
+  }
+  return undefined
+}

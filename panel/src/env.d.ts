@@ -457,6 +457,7 @@ declare global {
       media: {
         list: (kind: import('./shared/media/catalog').MediaKind) => Promise<import('./shared/media/jobs').MediaJob[]>;
         submit: (request: import('./shared/media/jobs').MediaSubmitRequest) => Promise<import('./shared/media/jobs').MediaResult<{ job: import('./shared/media/jobs').MediaJob }>>;
+        quote: (request: import('./shared/media/jobs').MediaSubmitRequest) => Promise<import('./shared/media/jobs').MediaResult<{ usd: number }>>;
         cancel: (id: string) => Promise<import('./shared/media/jobs').MediaResult<object>>;
         delete: (id: string) => Promise<import('./shared/media/jobs').MediaResult<object>>;
         reveal: (id: string) => Promise<{ ok: boolean }>;

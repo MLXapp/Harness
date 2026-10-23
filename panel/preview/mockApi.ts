@@ -525,6 +525,11 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
         }, 4200)
         return { ok: true as const, job: { ...job } }
       },
+      quote: async (request: any) => {
+        const model = mediaModel(request.modelId)
+        const usd = model ? estimateCost(model, request.values ?? {}, request.prompt) : undefined
+        return usd === undefined ? { ok: false as const, error: 'No quote' } : { ok: true as const, usd }
+      },
       cancel: async (id: string) => {
         const job = fx.mediaJobs.find(j => j.id === id)
         if (job && job.status === 'running') { job.status = 'cancelled'; delete job.phase; events.emit('media:job', { ...job }) }

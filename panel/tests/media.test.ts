@@ -39,7 +39,11 @@ describe('media catalog', () => {
     expect(estimateCost(cloud('ws:z-image-turbo'), {})).toBe(0.005)
     expect(estimateCost(cloud('at:elevenlabs-v3'), {}, 'x'.repeat(2500))).toBeCloseTo(0.3)
     expect(estimateCost(cloud('ws:ace-step-1.5'), { duration: 60 })).toBeCloseTo(0.018)
-    expect(estimateCost(cloud('ws:qwen3-tts'), {})).toBeUndefined()
+    expect(estimateCost(cloud('ws:qwen3-tts'), {})).toBe(0.005)
+    // Matches WaveSpeed's own quotes for Wan 3.0 (5 s): 480p $0.2375, 720p $0.475, 1080p $0.95.
+    expect(estimateCost(cloud('ws:wan-3.0'), { duration: 5, resolution: '720p' })).toBeCloseTo(0.475)
+    expect(estimateCost(cloud('ws:wan-3.0'), { duration: 10, resolution: '1080p' })).toBeCloseTo(1.9)
+    expect(estimateCost(cloud('ws:elevenlabs-music'), { duration: 30000 })).toBeCloseTo(0.3)
   })
 })
 

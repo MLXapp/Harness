@@ -71,7 +71,22 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
 
   const needsConnect = model?.where === 'cloud' && fit?.state === 'cloud' && !fit.connected
   const ready = !!model && !!fit && canRun(fit) && prompt.trim().length > 0 && !busy
-  const estimate = model ? estimateCost(model, values, prompt) : undefined
+  const listEstimate = model ? estimateCost(model, values, prompt) : undefined
+  // The provider's own quote for exactly these settings (no charge), a moment
+  // after the settings stop changing; the list price shows until it arrives.
+  const [quote, setQuote] = useState<{ key: string; usd: number } | null>(null)
+  const quoteKey = model ? `${model.id}|${JSON.stringify(values)}|${model.where === 'cloud' && model.price?.per === '1k-chars' ? prompt.length : ''}` : ''
+  useEffect(() => {
+    if (!model || model.where !== 'cloud' || needsConnect) return
+    let alive = true
+    const id = window.setTimeout(() => {
+      window.api.media.quote({ modelId: model.id, prompt: prompt || 'preview', values })
+        .then(r => { if (alive && r.ok) setQuote({ key: quoteKey, usd: r.usd }) })
+        .catch(() => undefined)
+    }, 600)
+    return () => { alive = false; window.clearTimeout(id) }
+  }, [quoteKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const estimate = quote && quote.key === quoteKey ? quote.usd : listEstimate
 
   const generate = async () => {
     if (!model || !ready) return
