@@ -2994,7 +2994,8 @@
       "node": "MLX Node",
       "keys": "API keys",
       "about": "About",
-      "apps": "Apps"
+      "apps": "Apps",
+      "skills": "Skills"
     }
   },
   "media": {
@@ -3196,5 +3197,12 @@
     "onTitle": "Apps are on in this chat",
     "offTitle": "Turn on apps (Gmail, Calendar, Slack…) in this chat",
     "setupTitle": "Connect apps (Gmail, Calendar, Slack…)"
+  },
+  "skills": {
+    "intro": "Skills are folders with a SKILL.md: instructions (and sometimes scripts) for a kind of work, in the same format as Claude Code. The agent sees each skill's name and description and reads the instructions only when a task needs them. Scripts run with the normal tools, so they ask like any command.",
+    "yours": "Your skills",
+    "openFolder": "Open folder",
+    "none": "No skills yet. Add a folder with a SKILL.md to ~/.mlx-harness/skills; skills in ~/.claude/skills are found too.",
+    "footer": "A project's own skills (.claude/skills or .agents/skills in its folder) are used in its Code sessions and win over yours with the same name."
   }
 }

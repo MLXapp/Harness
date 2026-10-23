@@ -2994,7 +2994,8 @@
       "node": "MLX Node",
       "keys": "API 密钥",
       "about": "关于",
-      "apps": "应用"
+      "apps": "应用",
+      "skills": "技能"
     }
   },
   "media": {
@@ -3196,5 +3197,12 @@
     "onTitle": "此对话已开启应用",
     "offTitle": "在此对话中开启应用（Gmail、日历、Slack…）",
     "setupTitle": "连接应用（Gmail、日历、Slack…）"
+  },
+  "skills": {
+    "intro": "技能是包含 SKILL.md 的文件夹：针对某类工作的说明（有时附带脚本），格式与 Claude Code 相同。智能体只看到名称和描述，需要时才读取说明。脚本通过普通工具运行，因此会像其他命令一样先询问。",
+    "yours": "你的技能",
+    "openFolder": "打开文件夹",
+    "none": "还没有技能。请在 ~/.mlx-harness/skills 中添加含 SKILL.md 的文件夹；~/.claude/skills 中的技能也会被找到。",
+    "footer": "项目自带的技能（其文件夹中的 .claude/skills 或 .agents/skills）会在该项目的代码会话中使用，并优先于同名的个人技能。"
   }
 }
