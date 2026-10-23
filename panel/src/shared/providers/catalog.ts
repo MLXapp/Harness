@@ -70,6 +70,14 @@ export const PROVIDER_CATALOG: readonly CatalogProvider[] = [
     note: "WaveSpeed AI's LLM gateway (one key for Claude, GPT, Gemini, DeepSeek and more); DSH ships no WaveSpeed entry.",
   },
   {
+    id: 'atlascloud',
+    displayName: 'Atlas Cloud',
+    api: 'openai-completions',
+    baseURL: 'https://api.atlascloud.ai/v1',
+    dshBaseURL: null,
+    note: "Atlas Cloud's OpenAI-compatible LLM API; the same key runs its image, video and audio models (Video, Audio and Music tabs). DSH ships no Atlas Cloud entry.",
+  },
+  {
     id: 'openrouter',
     displayName: 'OpenRouter',
     api: 'openai-completions',

@@ -2963,5 +2963,129 @@
       "keys": "API keys",
       "about": "About"
     }
+  },
+  "media": {
+    "chooseModel": "Choose a model",
+    "section": {
+      "local": "On this Mac",
+      "cloud": "Cloud"
+    },
+    "onThisMac": "On this Mac",
+    "yourMac": "{chip} · {gb} GB",
+    "badge": {
+      "value": "Best value",
+      "best": "Best",
+      "fast": "Fast",
+      "new": "New",
+      "nonCommercial": "Non-commercial"
+    },
+    "download": "{gb} GB download",
+    "connect": "Connect {name}",
+    "useCloud": "Use {name} in the cloud",
+    "fit": {
+      "good": "Runs well on this Mac",
+      "tight": "Runs, close to this Mac's memory ({need} GB runs it well)",
+      "no": "Needs {need} GB · this Mac has {have} GB",
+      "soonYes": "Coming to MLX Harness · this Mac can run it",
+      "soonNo": "Coming to MLX Harness · needs {need} GB, this Mac has {have} GB",
+      "cloudReady": "Ready",
+      "cloudConnect": "Needs an account"
+    },
+    "price": {
+      "image": "{price} / image",
+      "second": "{price} / s",
+      "run": "{price} / run",
+      "1k-chars": "{price} / 1K characters",
+      "song": "{price} / song",
+      "from": "from {price}"
+    },
+    "value": {
+      "soundOn": "Sound on",
+      "soundOff": "No sound",
+      "instrumental": "Instrumental",
+      "vocals": "With vocals",
+      "on": "On",
+      "off": "Off",
+      "seconds": "{n} s",
+      "autoLanguage": "Any language"
+    },
+    "param": {
+      "duration": "Length",
+      "aspect": "Shape",
+      "resolution": "Resolution",
+      "audio": "Sound",
+      "voice": "Voice",
+      "speed": "Speed",
+      "language": "Language",
+      "instrumental": "Vocals",
+      "size": "Size"
+    },
+    "cancelled": "Cancelled",
+    "failed": "This did not work",
+    "save": "Save…",
+    "reveal": "Show in Finder",
+    "reuse": "Use this prompt again",
+    "phase": {
+      "submitting": "Sending",
+      "queued": "Waiting in line",
+      "generating": "Making it",
+      "loading": "Loading the model",
+      "downloading": "Saving to this Mac"
+    },
+    "generate": "Generate",
+    "estimateTitle": "List price for these settings; the provider's quote is what you pay",
+    "cloudNote": "Runs on {name}. Your prompt goes to them; the result is saved on this Mac.",
+    "image": {
+      "title": "Make an image in the cloud",
+      "subtitle": "For the newest image models. Everyday images are quick on this Mac: switch to On this Mac.",
+      "placeholder": "Describe the image…",
+      "ideas": {
+        "0": "A ceramic coffee cup on a sunlit marble counter, soft morning light",
+        "1": "A poster that says \"Open late\" in bold orange letters",
+        "2": "Isometric illustration of a tiny data center inside a Mac mini"
+      }
+    },
+    "video": {
+      "title": "Make a video",
+      "subtitle": "Describe a shot. The best video models run on big GPUs in the cloud and send the clip back to this Mac.",
+      "placeholder": "Describe the shot: subject, motion, camera, light…",
+      "ideas": {
+        "0": "Slow dolly shot through a rainy Tokyo alley at night, neon reflections",
+        "1": "A golden retriever runs along the beach at sunrise, waves crashing",
+        "2": "Macro shot of coffee being poured, steam rising, 4 seconds"
+      }
+    },
+    "audio": {
+      "title": "Turn text into speech",
+      "subtitle": "Natural voices for narration, notes and drafts. Small voice models run right here.",
+      "placeholder": "Type what to say…",
+      "ideas": {
+        "0": "Welcome to MLX Harness. Everything you see here runs on your Mac.",
+        "1": "Today's plan: finish the deck, call the bank, and leave by six.",
+        "2": "Once upon a time, a small computer learned to sing."
+      }
+    },
+    "music": {
+      "title": "Make a song",
+      "subtitle": "Describe the style, add lyrics if you like, and get a full track back.",
+      "placeholder": "Style: genre, mood, tempo, instruments, voice…",
+      "ideas": {
+        "0": "Upbeat synth-pop, bright female vocals, 120 BPM, summer night drive",
+        "1": "Lo-fi hip hop, warm piano, vinyl crackle, instrumental",
+        "2": "Cinematic orchestral build, strings and drums, epic finish"
+      },
+      "lyrics": "Lyrics",
+      "lyricsPlaceholder": "[Verse]\nYour lyrics here…\n\n[Chorus]\n…"
+    },
+    "mac": {
+      "what": {
+        "video": "video",
+        "audio": "speech",
+        "music": "music"
+      },
+      "runsHere": "Your {chip} with {gb} GB makes {what} right here: private and free",
+      "soon": "Your {chip} with {gb} GB will make {what} on this Mac when local {what} arrives. Until then it runs in the cloud",
+      "cloudOnly": "Local {what} needs {need} GB or more; this {chip} has {gb} GB, so the cloud gives the best results"
+    }
   }
 }

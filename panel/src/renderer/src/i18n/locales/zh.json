@@ -2963,5 +2963,129 @@
       "keys": "API 密钥",
       "about": "关于"
     }
+  },
+  "media": {
+    "chooseModel": "选择模型",
+    "section": {
+      "local": "在这台 Mac 上",
+      "cloud": "云端"
+    },
+    "onThisMac": "在这台 Mac 上",
+    "yourMac": "{chip} · {gb} GB",
+    "badge": {
+      "value": "最划算",
+      "best": "最佳",
+      "fast": "快速",
+      "new": "新",
+      "nonCommercial": "非商用"
+    },
+    "download": "需下载 {gb} GB",
+    "connect": "连接 {name}",
+    "useCloud": "改用云端的 {name}",
+    "fit": {
+      "good": "可在这台 Mac 上流畅运行",
+      "tight": "可以运行，但内存吃紧（{need} GB 才流畅）",
+      "no": "需要 {need} GB · 这台 Mac 只有 {have} GB",
+      "soonYes": "即将登陆 MLX Harness · 这台 Mac 可以运行",
+      "soonNo": "即将推出 · 需要 {need} GB，这台 Mac 只有 {have} GB",
+      "cloudReady": "可用",
+      "cloudConnect": "需要账户"
+    },
+    "price": {
+      "image": "{price} / 张",
+      "second": "{price} / 秒",
+      "run": "{price} / 次",
+      "1k-chars": "{price} / 1000 字符",
+      "song": "{price} / 首",
+      "from": "{price} 起"
+    },
+    "value": {
+      "soundOn": "有声音",
+      "soundOff": "无声音",
+      "instrumental": "纯音乐",
+      "vocals": "有人声",
+      "on": "开",
+      "off": "关",
+      "seconds": "{n} 秒",
+      "autoLanguage": "自动识别语言"
+    },
+    "param": {
+      "duration": "时长",
+      "aspect": "画幅",
+      "resolution": "分辨率",
+      "audio": "声音",
+      "voice": "音色",
+      "speed": "语速",
+      "language": "语言",
+      "instrumental": "人声",
+      "size": "尺寸"
+    },
+    "cancelled": "已取消",
+    "failed": "生成失败",
+    "save": "保存…",
+    "reveal": "在访达中显示",
+    "reuse": "再次使用此提示词",
+    "phase": {
+      "submitting": "正在发送",
+      "queued": "排队中",
+      "generating": "正在生成",
+      "loading": "正在加载模型",
+      "downloading": "正在保存到这台 Mac"
+    },
+    "generate": "生成",
+    "estimateTitle": "按当前设置的标价估算；实际以服务商报价为准",
+    "cloudNote": "在 {name} 上运行。提示词会发送给对方，结果保存在这台 Mac 上。",
+    "image": {
+      "title": "在云端生成图像",
+      "subtitle": "用于最新的图像模型。日常图像在这台 Mac 上就能很快生成：切换到“在这台 Mac 上”。",
+      "placeholder": "描述你想要的图像…",
+      "ideas": {
+        "0": "阳光下大理石台面上的陶瓷咖啡杯，柔和的晨光",
+        "1": "一张用醒目橙色字写着“营业到深夜”的海报",
+        "2": "Mac mini 里的迷你数据中心，等距视角插画"
+      }
+    },
+    "video": {
+      "title": "生成视频",
+      "subtitle": "描述一个镜头。最好的视频模型在云端大型 GPU 上运行，生成后把片段传回这台 Mac。",
+      "placeholder": "描述镜头：主体、动作、运镜、光线…",
+      "ideas": {
+        "0": "夜雨中的东京小巷，缓慢推轨镜头，霓虹倒影",
+        "1": "日出时金毛犬沿着海滩奔跑，浪花拍岸",
+        "2": "倒咖啡的微距镜头，热气升腾，4 秒"
+      }
+    },
+    "audio": {
+      "title": "把文字变成语音",
+      "subtitle": "适合旁白、笔记和草稿的自然语音。小型语音模型直接在本机运行。",
+      "placeholder": "输入要朗读的内容…",
+      "ideas": {
+        "0": "欢迎使用 MLX Harness。你在这里看到的一切都在你的 Mac 上运行。",
+        "1": "今天的计划：做完幻灯片，给银行打电话，六点前下班。",
+        "2": "很久很久以前，一台小电脑学会了唱歌。"
+      }
+    },
+    "music": {
+      "title": "创作一首歌",
+      "subtitle": "描述风格，愿意的话加上歌词，就能得到一首完整的歌。",
+      "placeholder": "风格：曲风、情绪、节奏、乐器、嗓音…",
+      "ideas": {
+        "0": "轻快的合成器流行，明亮女声，120 BPM，夏夜兜风",
+        "1": "Lo-fi 嘻哈，温暖的钢琴，黑胶噪点，纯音乐",
+        "2": "电影感管弦乐渐强，弦乐与鼓，史诗般的结尾"
+      },
+      "lyrics": "歌词",
+      "lyricsPlaceholder": "[Verse]\n在这里写歌词…\n\n[Chorus]\n…"
+    },
+    "mac": {
+      "what": {
+        "video": "视频",
+        "audio": "语音",
+        "music": "音乐"
+      },
+      "runsHere": "你的 {chip}（{gb} GB）可直接在本机生成{what}：私密且免费",
+      "soon": "本地{what}上线后，你的 {chip}（{gb} GB）即可在本机生成。在此之前将在云端运行",
+      "cloudOnly": "本地{what}需要 {need} GB 以上内存；这台 {chip} 只有 {gb} GB，云端效果最好"
+    }
   }
 }

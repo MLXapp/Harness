@@ -2963,5 +2963,129 @@
       "keys": "Claves de API",
       "about": "Acerca de"
     }
+  },
+  "media": {
+    "chooseModel": "Elige un modelo",
+    "section": {
+      "local": "En este Mac",
+      "cloud": "Nube"
+    },
+    "onThisMac": "En este Mac",
+    "yourMac": "{chip} · {gb} GB",
+    "badge": {
+      "value": "Mejor precio",
+      "best": "El mejor",
+      "fast": "Rápido",
+      "new": "Nuevo",
+      "nonCommercial": "No comercial"
+    },
+    "download": "Descarga de {gb} GB",
+    "connect": "Conectar {name}",
+    "useCloud": "Usar {name} en la nube",
+    "fit": {
+      "good": "Funciona bien en este Mac",
+      "tight": "Funciona, al límite de la memoria ({need} GB lo hacen fluido)",
+      "no": "Necesita {need} GB · este Mac tiene {have} GB",
+      "soonYes": "Llega pronto a MLX Harness · este Mac puede ejecutarlo",
+      "soonNo": "Llega pronto · necesita {need} GB, este Mac tiene {have} GB",
+      "cloudReady": "Listo",
+      "cloudConnect": "Requiere una cuenta"
+    },
+    "price": {
+      "image": "{price} / imagen",
+      "second": "{price} / s",
+      "run": "{price} / ejecución",
+      "1k-chars": "{price} / 1000 caracteres",
+      "song": "{price} / canción",
+      "from": "desde {price}"
+    },
+    "value": {
+      "soundOn": "Con sonido",
+      "soundOff": "Sin sonido",
+      "instrumental": "Instrumental",
+      "vocals": "Con voz",
+      "on": "Sí",
+      "off": "No",
+      "seconds": "{n} s",
+      "autoLanguage": "Cualquier idioma"
+    },
+    "param": {
+      "duration": "Duración",
+      "aspect": "Formato",
+      "resolution": "Resolución",
+      "audio": "Sonido",
+      "voice": "Voz",
+      "speed": "Velocidad",
+      "language": "Idioma",
+      "instrumental": "Voz",
+      "size": "Tamaño"
+    },
+    "cancelled": "Cancelado",
+    "failed": "No ha funcionado",
+    "save": "Guardar…",
+    "reveal": "Mostrar en el Finder",
+    "reuse": "Reutilizar este texto",
+    "phase": {
+      "submitting": "Enviando",
+      "queued": "En cola",
+      "generating": "Creando",
+      "loading": "Cargando el modelo",
+      "downloading": "Guardando en este Mac"
+    },
+    "generate": "Generar",
+    "estimateTitle": "Precio de lista con estos ajustes; pagas lo que indique el proveedor",
+    "cloudNote": "Se ejecuta en {name}. Tu texto se envía allí; el resultado se guarda en este Mac.",
+    "image": {
+      "title": "Crea una imagen en la nube",
+      "subtitle": "Para los modelos de imagen más nuevos. Las imágenes del día a día son rápidas en este Mac: cambia a En este Mac.",
+      "placeholder": "Describe la imagen…",
+      "ideas": {
+        "0": "Una taza de cerámica sobre una encimera de mármol al sol, luz suave de mañana",
+        "1": "Un cartel que dice \"Abierto hasta tarde\" en letras naranjas",
+        "2": "Ilustración isométrica de un pequeño centro de datos dentro de un Mac mini"
+      }
+    },
+    "video": {
+      "title": "Crea un vídeo",
+      "subtitle": "Describe una toma. Los mejores modelos de vídeo se ejecutan en GPU de la nube y te devuelven el clip a este Mac.",
+      "placeholder": "Describe la toma: sujeto, movimiento, cámara, luz…",
+      "ideas": {
+        "0": "Travelling lento por un callejón lluvioso de Tokio de noche, reflejos de neón",
+        "1": "Un golden retriever corre por la playa al amanecer, con olas rompiendo",
+        "2": "Plano macro de café sirviéndose, con vapor, 4 segundos"
+      }
+    },
+    "audio": {
+      "title": "Convierte texto en voz",
+      "subtitle": "Voces naturales para narraciones, notas y borradores. Los modelos de voz pequeños funcionan aquí mismo.",
+      "placeholder": "Escribe lo que se debe decir…",
+      "ideas": {
+        "0": "Bienvenido a MLX Harness. Todo lo que ves aquí funciona en tu Mac.",
+        "1": "Plan de hoy: terminar la presentación, llamar al banco y salir a las seis.",
+        "2": "Érase una vez un pequeño ordenador que aprendió a cantar."
+      }
+    },
+    "music": {
+      "title": "Crea una canción",
+      "subtitle": "Describe el estilo, añade letra si quieres y recibe una pista completa.",
+      "placeholder": "Estilo: género, ánimo, tempo, instrumentos, voz…",
+      "ideas": {
+        "0": "Synth-pop animado, voz femenina brillante, 120 BPM, conduciendo una noche de verano",
+        "1": "Hip hop lo-fi, piano cálido, crujido de vinilo, instrumental",
+        "2": "Crescendo orquestal cinematográfico, cuerdas y percusión, final épico"
+      },
+      "lyrics": "Letra",
+      "lyricsPlaceholder": "[Verso]\nTu letra aquí…\n\n[Estribillo]\n…"
+    },
+    "mac": {
+      "what": {
+        "video": "vídeo",
+        "audio": "voz",
+        "music": "música"
+      },
+      "runsHere": "Tu {chip} con {gb} GB crea {what} aquí mismo: privado y gratis",
+      "soon": "Tu {chip} con {gb} GB podrá crear {what} en este Mac cuando llegue la versión local. Mientras tanto, en la nube",
+      "cloudOnly": "La {what} local necesita {need} GB o más; este {chip} tiene {gb} GB, así que la nube da mejores resultados"
+    }
   }
 }

@@ -416,6 +416,21 @@ const api = {
     readText: (): Promise<string> => ipcRenderer.invoke('clipboard:readText'),
   },
 
+  // Image (cloud), Video, Audio and Music generations (main/ipc/media.ts).
+  media: {
+    list: (kind: import('../shared/media/catalog').MediaKind): Promise<import('../shared/media/jobs').MediaJob[]> => ipcRenderer.invoke('media:list', kind),
+    submit: (request: import('../shared/media/jobs').MediaSubmitRequest): Promise<import('../shared/media/jobs').MediaResult<{ job: import('../shared/media/jobs').MediaJob }>> => ipcRenderer.invoke('media:submit', request),
+    cancel: (id: string): Promise<import('../shared/media/jobs').MediaResult<object>> => ipcRenderer.invoke('media:cancel', id),
+    delete: (id: string): Promise<import('../shared/media/jobs').MediaResult<object>> => ipcRenderer.invoke('media:delete', id),
+    reveal: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('media:reveal', id),
+    save: (id: string): Promise<{ ok: boolean; path?: string; error?: string }> => ipcRenderer.invoke('media:save', id),
+    onJob: (callback: (job: import('../shared/media/jobs').MediaJob) => void) => {
+      const handler = (_: unknown, job: import('../shared/media/jobs').MediaJob) => callback(job)
+      ipcRenderer.on('media:job', handler)
+      return () => { ipcRenderer.removeListener('media:job', handler) }
+    },
+  },
+
   // Window chrome: on macOS the sidebar is window glass (vibrancy) and the
   // renderer leaves the page background transparent behind it.
   chrome: {

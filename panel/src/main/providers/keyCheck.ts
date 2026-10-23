@@ -11,6 +11,10 @@
  *    proved with GET https://api.wavespeed.ai/api/v3/balance (answers 401
  *    "Missing API key" / invalid key, checked 20 Oct 2026); the model count
  *    comes from the public list.
+ *  - Atlas Cloud: same shape. GET https://api.atlascloud.ai/public/v1/balance
+ *    ({"value":"125.500000","currency":"usd"}; 401 {"code":401,"msg":"invalid
+ *    token"}, atlascloud.ai/docs/public-api, checked 23 Oct 2026); models from
+ *    the public https://api.atlascloud.ai/v1/models.
  *
  * The key is never logged and never part of a returned message.
  */
@@ -23,6 +27,8 @@ import { ANTHROPIC_VERSION, listingUrl, readBounded, readListing, type Discovery
 import { providerErrorDetail } from './errors'
 
 export const WAVESPEED_BALANCE_URL = 'https://api.wavespeed.ai/api/v3/balance'
+/** Atlas Cloud: the LLM list is public too; the key is proved on the billing balance. */
+export const ATLAS_BALANCE_URL = 'https://api.atlascloud.ai/public/v1/balance'
 
 const MESSAGES: Record<KeyCheckReason, string> = {
   rejected: 'The key was not accepted',
@@ -120,13 +126,17 @@ export async function checkProviderKey(
     return fail('format', 'Paste a key')
   }
 
-  if (target.providerId === 'wavespeed') {
-    const balance = await get(fetchImpl, WAVESPEED_BALANCE_URL, authHeaders('openai-completions', key, {}), signal)
+  if (target.providerId === 'wavespeed' || target.providerId === 'atlascloud') {
+    const balanceUrl = target.providerId === 'wavespeed' ? WAVESPEED_BALANCE_URL : ATLAS_BALANCE_URL
+    const balance = await get(fetchImpl, balanceUrl, authHeaders('openai-completions', key, {}), signal)
     const bad = verdict(balance)
     if (bad) return bad
     try {
       const body = JSON.parse(balance.text)
-      const amount = body?.data?.balance ?? body?.balance
+      // Atlas answers {code: 401} inside a 200 on some gateways; treat it as a rejection.
+      if (body?.code === 401 || body?.code === 403) return fail('rejected')
+      const raw = body?.data?.balance ?? body?.balance ?? body?.value ?? body?.data?.value
+      const amount = typeof raw === 'string' ? Number(raw) : raw
       if (typeof amount === 'number' && amount <= 0) return fail('no-credit')
     } catch {
       // A 2xx without JSON still proves the key.

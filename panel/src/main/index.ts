@@ -28,6 +28,8 @@ import { installApplicationMenu, acknowledgeMenuReadiness, resetMenuReadiness } 
 import { registerCodingToolHandlers } from './ipc/coding-tools'
 import { registerDistributedHandlers } from './ipc/distributed'
 import { registerNetworkHandlers } from './ipc/network'
+import { registerMediaHandlers, mediaRoot } from './ipc/media'
+import { registerMediaScheme, handleMediaProtocol } from './media/protocol'
 import { offerMlxNodeOnFirstRun } from './mlx-node'
 import { sessionManager } from './sessions'
 import { apiGateway } from './api-gateway'
@@ -270,6 +272,7 @@ function createWindow(): void {
     registerCodingToolHandlers()
     registerDistributedHandlers(() => mainWindow)
     registerNetworkHandlers()
+    registerMediaHandlers(() => mainWindow)
 
     // Download window — a real separate window for showing download progress
     ipcMain.handle('downloads:openWindow', () => {
@@ -489,8 +492,12 @@ function createWindow(): void {
   }
 }
 
+// mlx-media:// (generated images, video and audio) must be privileged before ready.
+registerMediaScheme()
+
 // App ready
 app.whenReady().then(async () => {
+  handleMediaProtocol(mediaRoot)
   // Electron's development executable otherwise retains its generic Dock icon.
   if (is.dev && process.platform === 'darwin') {
     app.dock?.setIcon(join(app.getAppPath(), 'resources/icon.png'))

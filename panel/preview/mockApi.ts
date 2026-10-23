@@ -15,7 +15,8 @@ import type { ChatModelBinding, ProviderDraft, ProviderView } from '../src/share
 import type { KeyCheckRequest, KeyCheckResult } from '../src/shared/providers/keyCheck'
 import type { UpdateState } from '../src/shared/appUpdate'
 import type { NativeNavigationAction } from '../src/shared/nativeNavigation'
-import { APP_VERSION, HARDWARE, HF_CACHE, MODELS_DIR, type Fixtures, type FixtureMessage } from './fixtures'
+import { APP_VERSION, HARDWARE, HF_CACHE, MODELS_DIR, sampleOutput, type Fixtures, type FixtureMessage } from './fixtures'
+import { estimateCost, mediaModel, MEDIA_PROVIDER_NAMES } from '../src/shared/media/catalog'
 
 type Listener = (data: any) => void
 
@@ -380,7 +381,9 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       getTotalMemoryGB: async () => HARDWARE.totalMemoryGB,
       getHardware: async () => {
         await wait(250)
-        return { chip: HARDWARE.chip, modelName: HARDWARE.modelName, memoryGB: HARDWARE.totalMemoryGB, freeDiskGB: HARDWARE.freeDiskGB }
+        // ?mem=16 pretends to be a smaller Mac (media tabs grey out what it cannot run).
+        const mem = Number(new URLSearchParams(window.location.search).get('mem'))
+        return { chip: HARDWARE.chip, modelName: HARDWARE.modelName, memoryGB: mem > 0 ? mem : HARDWARE.totalMemoryGB, freeDiskGB: HARDWARE.freeDiskGB }
       },
       getUpdateState: async () => ({ ...updateState }),
       onUpdateState: on('app:updateState'),
@@ -483,6 +486,45 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
 
     clipboard: {
       readText: async () => 'sk-preview-0123456789abcdef',
+    },
+
+    // Media tabs: jobs live in fx.mediaJobs; a submit "runs" for a few
+    // seconds and finishes with a sample picture (or a short silent clip).
+    media: {
+      list: async (kind: string) => fx.mediaJobs.filter(j => j.kind === kind).sort((a, b) => b.createdAt - a.createdAt),
+      submit: async (request: any) => {
+        const model = mediaModel(request.modelId)
+        if (!model) return { ok: false as const, error: 'Unknown model' }
+        if (model.where === 'cloud' && !fx.providers.some(p => p.id === model.provider && p.configured)) {
+          return { ok: false as const, error: `Connect ${MEDIA_PROVIDER_NAMES[model.provider]} first` }
+        }
+        const now = Date.now()
+        const job: any = {
+          id: newId('media'), kind: model.kind, modelId: model.id, modelName: model.name, where: model.where,
+          ...(model.where === 'cloud' ? { provider: model.provider } : {}),
+          prompt: String(request.prompt), ...(request.lyrics ? { lyrics: request.lyrics } : {}),
+          values: { ...request.values }, status: 'running', phase: 'queued', outputs: [],
+          estimateUsd: estimateCost(model, request.values ?? {}, request.prompt), createdAt: now, updatedAt: now,
+        }
+        fx.mediaJobs.push(job)
+        events.emit('media:job', { ...job })
+        setTimeout(() => { job.phase = 'generating'; job.updatedAt = Date.now(); events.emit('media:job', { ...job }) }, 1200)
+        setTimeout(() => {
+          job.status = 'done'; delete job.phase; job.finishedAt = Date.now(); job.updatedAt = job.finishedAt
+          job.outputs = [sampleOutput(job.kind, job.prompt)]
+          events.emit('media:job', { ...job })
+        }, 4200)
+        return { ok: true as const, job: { ...job } }
+      },
+      cancel: async (id: string) => {
+        const job = fx.mediaJobs.find(j => j.id === id)
+        if (job && job.status === 'running') { job.status = 'cancelled'; delete job.phase; events.emit('media:job', { ...job }) }
+        return { ok: true as const }
+      },
+      delete: async (id: string) => { fx.mediaJobs = fx.mediaJobs.filter(j => j.id !== id); return { ok: true as const } },
+      reveal: async () => ({ ok: true }),
+      save: async () => ({ ok: false, error: 'Saving is off in the preview' }),
+      onJob: (cb: (job: any) => void) => events.on('media:job', cb),
     },
 
     // The preview pretends to be a Mac with window glass; ?glass=0 shows the
