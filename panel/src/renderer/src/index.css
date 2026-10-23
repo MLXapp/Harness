@@ -712,3 +712,15 @@ html.vibrancy .mlx-sidebar { background: var(--sidebar-wash), var(--sidebar-glas
 .mlx-apps-tile span:nth-child(2) { background: var(--acc, #ff7a1a); }
 .mlx-apps-tile span:nth-child(3) { background: var(--sys-green, #30d158); }
 .mlx-apps-tile span:nth-child(4) { background: var(--sys-purple, #bf5af2); }
+
+/* Approval card: one glass card above the composer. */
+.mlx-approval {
+  border-radius: 18px; padding: 14px 16px;
+  background: rgb(var(--bg-2-rgb));
+  box-shadow: var(--elev-2), inset 0 0 0 1px rgb(var(--warning) / 0.28);
+}
+.mlx-kbd {
+  font: 500 11px/1 var(--mono, ui-monospace, monospace);
+  padding: 2px 5px; border-radius: 5px; opacity: 0.75;
+  background: rgb(0 0 0 / 0.14);
+}

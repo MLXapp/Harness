@@ -734,7 +734,18 @@
       "deny": "Denegar",
       "alwaysAllow": "Permitir siempre este comando en este chat",
       "autoDeny": "Se denegará automáticamente en {time}",
-      "alwaysAllowTool": "Permitir siempre esta herramienta en este chat"
+      "alwaysAllowTool": "Permitir siempre esta herramienta en este chat",
+      "ask": {
+        "shell": "¿Permitir que MLX Harness ejecute este comando?",
+        "escalation": "¿Ejecutar este comando fuera del sandbox?",
+        "write": "¿Permitir que MLX Harness cambie este archivo?",
+        "applescript": "¿Permitir que MLX Harness ejecute este AppleScript?",
+        "git": "¿Permitir que MLX Harness ejecute este comando de git?",
+        "mcp": "¿Permitir que MLX Harness use esta herramienta?",
+        "tool": "¿Permitir que MLX Harness use esta herramienta?",
+        "app": "¿Permitir que MLX Harness haga esto en tus apps?"
+      },
+      "alwaysAllowApp": "Permitir siempre en estas apps durante este chat"
     },
     "switcher": {
       "title": "Cambiar de modelo (⌘⇧M)",

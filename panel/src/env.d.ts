@@ -7,7 +7,7 @@ declare global {
     chatId: string;
     toolCallId?: string;
     toolName: string;
-    kind: "shell" | "escalation" | "write" | "applescript" | "git" | "mcp" | "tool";
+    kind: "shell" | "escalation" | "write" | "applescript" | "git" | "mcp" | "tool" | "app";
     subject: string;
     reason?: string;
     why: string;

@@ -734,7 +734,18 @@
       "deny": "拒绝",
       "alwaysAllow": "在此聊天中始终允许此命令",
       "autoDeny": "{time} 后自动拒绝",
-      "alwaysAllowTool": "在此对话中始终允许此工具"
+      "alwaysAllowTool": "在此对话中始终允许此工具",
+      "ask": {
+        "shell": "允许 MLX Harness 运行此命令吗？",
+        "escalation": "在沙盒外运行此命令吗？",
+        "write": "允许 MLX Harness 更改此文件吗？",
+        "applescript": "允许 MLX Harness 运行此 AppleScript 吗？",
+        "git": "允许 MLX Harness 运行此 git 命令吗？",
+        "mcp": "允许 MLX Harness 使用此工具吗？",
+        "tool": "允许 MLX Harness 使用此工具吗？",
+        "app": "允许 MLX Harness 在你的应用中执行此操作吗？"
+      },
+      "alwaysAllowApp": "在此对话中始终允许这些应用执行"
     },
     "switcher": {
       "title": "切换模型 (⌘⇧M)",
