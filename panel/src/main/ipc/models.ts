@@ -1,4 +1,5 @@
-import { ipcMain, dialog, BrowserWindow } from "electron";
+import { ipcMain, dialog } from "electron";
+import { appWindows } from "../browser/electronDriver";
 import { prepareDownloadDirectory, removeOwnedDownloadDirectory } from "../downloadDirectoryOwnership";
 import { hfModelFeedPath, validateHfModelFeed, type HfModelFeedSort } from "../../shared/hfModelFeed";
 import {
@@ -1528,9 +1529,10 @@ export function registerModelHandlers(): void {
   // parseTqdmProgress removed — download manager now uses structured JSON stdout
 
   function emitToRenderer(channel: string, data: any) {
-    // Send to ALL windows (main + download popup) so both stay in sync
+    // Send to every app window (main + download popup) so both stay in sync;
+    // never to the agent's hidden browser windows (web pages).
     try {
-      for (const win of BrowserWindow.getAllWindows()) {
+      for (const win of appWindows()) {
         if (!win.isDestroyed()) {
           win.webContents.send(channel, data);
         }

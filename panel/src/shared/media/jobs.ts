@@ -5,7 +5,7 @@ import type { MediaKind, MediaProviderId } from './catalog'
 export type MediaJobStatus = 'running' | 'done' | 'failed' | 'cancelled'
 
 /** Where a running job is: shown as one line under the card. */
-export type MediaJobPhase = 'submitting' | 'queued' | 'generating' | 'loading' | 'downloading'
+export type MediaJobPhase = 'submitting' | 'queued' | 'generating' | 'loading' | 'downloading' | 'fetching'
 
 export type MediaJobOutput =
   | { kind: 'file'; /** mlx-media:// URL the page can play or show. */ url: string; mime: string; name: string }
@@ -25,6 +25,8 @@ export interface MediaJob {
   phase?: MediaJobPhase
   outputs: MediaJobOutput[]
   error?: string
+  /** A local run that first downloaded its model (its time is not a speed). */
+  downloadedModel?: boolean
   /** List-price estimate shown before the run (USD). */
   estimateUsd?: number
   createdAt: number

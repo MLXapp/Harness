@@ -5,7 +5,8 @@ type T = (key: string, params?: Record<string, string | number>) => string
 
 export function usd(n: number): string {
   if (n >= 1) return `$${n.toFixed(2)}`
-  if (n >= 0.1) return `$${n.toFixed(2)}`
+  // $0.225 stays $0.225 (a list price is never rounded up); $0.10 stays $0.10.
+  if (n >= 0.1) return `$${Math.abs(n * 100 - Math.round(n * 100)) > 1e-6 ? n.toFixed(3) : n.toFixed(2)}`
   if (n >= 0.01) return `$${n.toFixed(3).replace(/0$/, '')}`
   return `$${n.toPrecision(2).replace(/0+$/, '')}`
 }
@@ -45,8 +46,11 @@ export function paramValueLabel(key: string, value: string | number | boolean, t
   }
   if (key === 'duration') {
     const seconds = typeof value === 'number' && value > 1000 ? value / 1000 : Number(value)
+    if (seconds >= 60 && seconds % 60 === 0) return t('media.value.minutes', { n: seconds / 60 })
+    if (seconds > 60) return `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`
     return t('media.value.seconds', { n: seconds })
   }
+  if (key === 'singer') return value === 'female' ? t('media.value.female') : value === 'male' ? t('media.value.male') : t('media.value.anySinger')
   if (key === 'speed') return `${Number(value).toFixed(1)}×`
   if (key === 'size') return String(value).replace('*', '×')
   if (key === 'language' && value === 'auto') return t('media.value.autoLanguage')

@@ -133,7 +133,6 @@ function Row({ model, fit, selected, onPick, compact = false }: { model: MediaMo
             <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />{line.text}
           </span>
           {price && <span className="text-muted-foreground">· {price}</span>}
-          {model.where === 'local' && model.downloadGB !== undefined && !compact && <span className="text-muted-foreground">· {t('media.download', { gb: model.downloadGB })}</span>}
           {needsConnect && model.where === 'cloud' && (
             <button type="button" onClick={(e) => { e.stopPropagation(); openConnectAccount(model.provider) }}
               className="ml-auto rounded-full bg-foreground/[0.07] px-2 py-0.5 text-[12px] font-medium text-foreground hover:bg-foreground/[0.12]">
@@ -147,8 +146,11 @@ function Row({ model, fit, selected, onPick, compact = false }: { model: MediaMo
             </button>
           )}
         </div>
-        {model.where === 'local' && model.speed && !disabled && (
-          <p className="mt-0.5 text-[11.5px] text-muted-foreground/80">{model.speed}</p>
+        {/* Download size and the sourced timing share one quiet line, so the fit line never wraps into a stray "·". */}
+        {model.where === 'local' && !compact && (model.speed || model.downloadGB !== undefined) && !disabled && (
+          <p className="mt-0.5 text-[11.5px] text-muted-foreground/80">
+            {[model.downloadGB !== undefined ? t('media.download', { gb: model.downloadGB }) : '', model.speed ?? ''].filter(Boolean).join(' · ')}
+          </p>
         )}
       </div>
     </div>

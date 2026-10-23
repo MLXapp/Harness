@@ -308,7 +308,9 @@
       "groupYesterday": "Ayer",
       "groupThisWeek": "Esta semana",
       "groupThisMonth": "Este mes",
-      "groupOlder": "Anteriores"
+      "groupOlder": "Anteriores",
+      "emptyCode": "Aún no hay sesiones de código",
+      "emptyCodeHint": "Elige una carpeta de proyecto para empezar"
     },
     "inferenceMode": {
       "casual": "Casual",
@@ -3056,7 +3058,11 @@
       "on": "Sí",
       "off": "No",
       "seconds": "{n} s",
-      "autoLanguage": "Cualquier idioma"
+      "autoLanguage": "Cualquier idioma",
+      "anySinger": "Cualquier voz",
+      "female": "Voz femenina",
+      "male": "Voz masculina",
+      "minutes": "{n} min"
     },
     "param": {
       "duration": "Duración",
@@ -3067,7 +3073,8 @@
       "speed": "Velocidad",
       "language": "Idioma",
       "instrumental": "Voz",
-      "size": "Tamaño"
+      "size": "Tamaño",
+      "singer": "Voz"
     },
     "cancelled": "Cancelado",
     "failed": "No ha funcionado",
@@ -3079,7 +3086,9 @@
       "queued": "En cola",
       "generating": "Creando",
       "loading": "Cargando el modelo",
-      "downloading": "Guardando en este Mac"
+      "downloading": "Guardando en este Mac",
+      "fetching": "Descargando el modelo (solo la primera vez)",
+      "fetchingSize": "Descargando el modelo, {gb} GB (solo la primera vez)"
     },
     "generate": "Generar",
     "estimateTitle": "Precio de lista con estos ajustes; pagas lo que indique el proveedor",
@@ -3124,7 +3133,11 @@
         "2": "Crescendo orquestal cinematográfico, cuerdas y percusión, final épico"
       },
       "lyrics": "Letra",
-      "lyricsPlaceholder": "[Verso]\nTu letra aquí…\n\n[Estribillo]\n…"
+      "lyricsPlaceholder": "[Verso]\nTu letra aquí…\n\n[Estribillo]\n…",
+      "sections": "Partes de la canción",
+      "needsLyrics": "{name} canta tu letra.",
+      "addLyrics": "Añadir letra",
+      "makeInstrumental": "Hacerla instrumental"
     },
     "mac": {
       "what": {
@@ -3135,7 +3148,12 @@
       "runsHere": "Tu {chip} con {gb} GB crea {what} aquí mismo: privado y gratis.",
       "soon": "Tu {chip} con {gb} GB creará {what} en este Mac cuando llegue la {what} local. Mientras tanto se crea en la nube.",
       "cloudOnly": "La {what} local necesita {need} GB o más; este {chip} tiene {gb} GB, así que la nube da mejores resultados."
-    }
+    },
+    "localTimeTitle": "Lo que tardó este Mac la última vez, para esta duración",
+    "madeWith": "Hecho con {name}",
+    "play": "Reproducir",
+    "pause": "Pausa",
+    "position": "Posición de reproducción"
   },
   "code": {
     "title": "Programa con un agente en este Mac",

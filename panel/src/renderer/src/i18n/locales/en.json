@@ -308,7 +308,9 @@
       "groupYesterday": "Yesterday",
       "groupThisWeek": "This Week",
       "groupThisMonth": "This Month",
-      "groupOlder": "Older"
+      "groupOlder": "Older",
+      "emptyCode": "No code sessions yet",
+      "emptyCodeHint": "Choose a project folder to begin"
     },
     "inferenceMode": {
       "casual": "Casual",
@@ -3056,7 +3058,11 @@
       "on": "On",
       "off": "Off",
       "seconds": "{n} s",
-      "autoLanguage": "Any language"
+      "autoLanguage": "Any language",
+      "anySinger": "Any singer",
+      "female": "Female singer",
+      "male": "Male singer",
+      "minutes": "{n} min"
     },
     "param": {
       "duration": "Length",
@@ -3067,7 +3073,8 @@
       "speed": "Speed",
       "language": "Language",
       "instrumental": "Vocals",
-      "size": "Size"
+      "size": "Size",
+      "singer": "Singer"
     },
     "cancelled": "Cancelled",
     "failed": "This did not work",
@@ -3079,7 +3086,9 @@
       "queued": "Waiting in line",
       "generating": "Making it",
       "loading": "Loading the model",
-      "downloading": "Saving to this Mac"
+      "downloading": "Saving to this Mac",
+      "fetching": "Downloading the model (first time only)",
+      "fetchingSize": "Downloading the model, {gb} GB (first time only)"
     },
     "generate": "Generate",
     "estimateTitle": "List price for these settings; the provider's quote is what you pay",
@@ -3124,7 +3133,11 @@
         "2": "Cinematic orchestral build, strings and drums, epic finish"
       },
       "lyrics": "Lyrics",
-      "lyricsPlaceholder": "[Verse]\nYour lyrics here…\n\n[Chorus]\n…"
+      "lyricsPlaceholder": "[Verse]\nYour lyrics here…\n\n[Chorus]\n…",
+      "sections": "Song sections",
+      "needsLyrics": "{name} sings your lyrics.",
+      "addLyrics": "Add lyrics",
+      "makeInstrumental": "Make it instrumental"
     },
     "mac": {
       "what": {
@@ -3135,7 +3148,12 @@
       "runsHere": "Your {chip} with {gb} GB makes {what} right here: private and free.",
       "soon": "Your {chip} with {gb} GB will make {what} on this Mac when local {what} arrives. Until then it runs in the cloud.",
       "cloudOnly": "Local {what} needs {need} GB or more; this {chip} has {gb} GB, so the cloud gives the best results."
-    }
+    },
+    "localTimeTitle": "How long this Mac took last time, for this length",
+    "madeWith": "Made with {name}",
+    "play": "Play",
+    "pause": "Pause",
+    "position": "Playback position"
   },
   "code": {
     "title": "Code with an agent on this Mac",

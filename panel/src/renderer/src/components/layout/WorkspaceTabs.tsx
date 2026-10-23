@@ -44,9 +44,23 @@ export function WorkspaceTabs() {
   // When no tab is active the thumb stays where it was and fades out, so
   // coming back slides from a sensible place instead of from zero.
   const pos = thumb ?? last.current
+  // Tab-list keys (WAI-ARIA): ←/→ move and select, Home/End jump; one Tab stop.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const keys: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1 }
+    const i = WORKSPACE_TABS.indexOf((active ?? WORKSPACE_TABS[0]) as WorkspaceTab)
+    let next: number | null = null
+    if (e.key in keys) next = (i + keys[e.key] + WORKSPACE_TABS.length) % WORKSPACE_TABS.length
+    else if (e.key === 'Home') next = 0
+    else if (e.key === 'End') next = WORKSPACE_TABS.length - 1
+    if (next === null) return
+    e.preventDefault()
+    const tab = WORKSPACE_TABS[next]
+    setMode(tab)
+    refs.current.get(tab)?.focus()
+  }
   return (
     <nav aria-label={t('shell.tabs.label')} data-vmlx-section="workspace-tabs"
-      className="mlx-seg no-drag" role="tablist">
+      className="mlx-seg no-drag" role="tablist" onKeyDown={onKeyDown}>
       <div aria-hidden className="mlx-seg-thumb"
         style={{ transform: `translateX(${pos?.x ?? 0}px)`, width: pos?.w ?? 0, opacity: thumb ? 1 : 0 }} />
       {WORKSPACE_TABS.map(tab => {
@@ -55,6 +69,7 @@ export function WorkspaceTabs() {
         const label = t(`shell.tabs.${tab}`)
         return (
           <button key={tab} role="tab" aria-selected={selected} title={label}
+            tabIndex={selected || (!active && tab === WORKSPACE_TABS[0]) ? 0 : -1}
             data-vmlx-control={`tab-${tab}`} data-vmlx-state={selected ? 'active' : 'inactive'}
             ref={el => { if (el) refs.current.set(tab, el); else refs.current.delete(tab) }}
             onClick={() => setMode(tab)}

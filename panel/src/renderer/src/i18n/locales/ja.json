@@ -308,7 +308,9 @@
       "groupYesterday": "昨日",
       "groupThisWeek": "今週",
       "groupThisMonth": "今月",
-      "groupOlder": "それ以前"
+      "groupOlder": "それ以前",
+      "emptyCode": "コードセッションはまだありません",
+      "emptyCodeHint": "プロジェクトフォルダを選んで始めましょう"
     },
     "inferenceMode": {
       "casual": "カジュアル",
@@ -3056,7 +3058,11 @@
       "on": "オン",
       "off": "オフ",
       "seconds": "{n}秒",
-      "autoLanguage": "言語を自動判別"
+      "autoLanguage": "言語を自動判別",
+      "anySinger": "歌声はおまかせ",
+      "female": "女性ボーカル",
+      "male": "男性ボーカル",
+      "minutes": "{n} 分"
     },
     "param": {
       "duration": "長さ",
@@ -3067,7 +3073,8 @@
       "speed": "速さ",
       "language": "言語",
       "instrumental": "ボーカル",
-      "size": "サイズ"
+      "size": "サイズ",
+      "singer": "歌声"
     },
     "cancelled": "キャンセルしました",
     "failed": "うまくいきませんでした",
@@ -3079,7 +3086,9 @@
       "queued": "順番待ち",
       "generating": "生成中",
       "loading": "モデルを読み込み中",
-      "downloading": "このMacに保存中"
+      "downloading": "このMacに保存中",
+      "fetching": "モデルをダウンロード中(初回のみ)",
+      "fetchingSize": "モデルをダウンロード中、{gb} GB(初回のみ)"
     },
     "generate": "生成",
     "estimateTitle": "この設定での定価です。実際の請求額は提供元の見積もりに従います",
@@ -3124,7 +3133,11 @@
         "2": "映画的なオーケストラの盛り上がり、弦とドラム、壮大なフィナーレ"
       },
       "lyrics": "歌詞",
-      "lyricsPlaceholder": "[Verse]\n歌詞をここに…\n\n[Chorus]\n…"
+      "lyricsPlaceholder": "[Verse]\n歌詞をここに…\n\n[Chorus]\n…",
+      "sections": "曲のセクション",
+      "needsLyrics": "{name} は歌詞を歌います。",
+      "addLyrics": "歌詞を追加",
+      "makeInstrumental": "インストにする"
     },
     "mac": {
       "what": {
@@ -3135,7 +3148,12 @@
       "runsHere": "{gb} GB の {chip} なら、この Mac で{what}を作れます。プライベートで無料です。",
       "soon": "ローカルの{what}に対応すると、{gb} GB の {chip} でこの Mac で作れるようになります。それまではクラウドで作ります。",
       "cloudOnly": "ローカルの{what}には {need} GB以上が必要です。この{chip}は {gb} GBなので、クラウドが最適です。"
-    }
+    },
+    "localTimeTitle": "前回この Mac でかかった時間(この長さの場合)",
+    "madeWith": "{name} で作成",
+    "play": "再生",
+    "pause": "一時停止",
+    "position": "再生位置"
   },
   "code": {
     "title": "このMacでエージェントとコーディング",

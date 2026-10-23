@@ -43,7 +43,10 @@ describe('media catalog', () => {
     // Matches WaveSpeed's own quotes for Wan 3.0 (5 s): 480p $0.2375, 720p $0.475, 1080p $0.95.
     expect(estimateCost(cloud('ws:wan-3.0'), { duration: 5, resolution: '720p' })).toBeCloseTo(0.475)
     expect(estimateCost(cloud('ws:wan-3.0'), { duration: 10, resolution: '1080p' })).toBeCloseTo(1.9)
-    expect(estimateCost(cloud('ws:elevenlabs-music'), { duration: 30000 })).toBeCloseTo(0.3)
+    // WaveSpeed quotes (23 Oct 2026): ElevenLabs Music v2.5 60 s $0.75; ACE-Step 180 s $0.054; Mureka V9.5 $0.225.
+    expect(estimateCost(cloud('ws:elevenlabs-music-v2.5'), { duration: 60000 })).toBeCloseTo(0.75)
+    expect(estimateCost(cloud('ws:ace-step-1.5'), { duration: 180 })).toBeCloseTo(0.054)
+    expect(estimateCost(cloud('ws:mureka-v9.5'), {})).toBe(0.225)
   })
 })
 
@@ -65,6 +68,10 @@ describe('fit on this Mac', () => {
     expect(recommendedModel('video', { memoryGB: 128 }, at)?.id).toBe('at:wan-3.0')
     expect(recommendedModel('video', { memoryGB: 16 }, ws)?.id).toBe('ws:wan-3.0')
     expect(recommendedModel('music', { memoryGB: 16 }, at)?.id).toBe('at:minimax-music-3')
+    expect(recommendedModel('music', { memoryGB: 16 }, ws)?.id).toBe('ws:ace-step-1.5')
+    // MiniMax Music 3 runs well from 48 GB, on the bundled mlx-audio: private and free.
+    expect(recommendedModel('music', { memoryGB: 64 }, ws)?.id).toBe('local:minimax-music-3-4bit')
+    expect(recommendedModel('music', { memoryGB: 32 }, ws)?.id).toBe('ws:ace-step-1.5')
     // Nothing connected: still the best-value cloud model (the composer offers to connect).
     expect(recommendedModel('video', { memoryGB: 16 }, none)?.id).toBe('ws:wan-3.0')
   })
@@ -196,6 +203,82 @@ describe('media runner (cloud)', () => {
     expect(await runner.submit({ modelId: 'at:wan-3.0', prompt: 'p', values: {} })).toEqual({ ok: false, error: 'Connect Atlas Cloud first' })
     expect((await runner.submit({ modelId: 'local:ltx-2.3-int4', prompt: 'p', values: {} })).ok).toBe(false)
     expect((await runner.submit({ modelId: 'local:kokoro-82m', prompt: 'p', values: {} }) as any).error).toMatch(/engine/)
+  })
+})
+
+describe('music requests', () => {
+  const body = (id: string, input: { prompt: string; lyrics?: string; values?: Record<string, unknown> }) =>
+    buildCloudRequest(cloud(id), { prompt: input.prompt, lyrics: input.lyrics, values: input.values ?? {} })
+
+  it('Mureka: sings the lyrics, picks a singer only when asked, and makes instrumentals on its BGM endpoint', () => {
+    const song = body('ws:mureka-v9.5', { prompt: 'indie pop', lyrics: '[Verse]\nhello', values: { singer: '' } })
+    expect(song.url).toBe('https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-song')
+    expect(song.body).toEqual({ prompt: 'indie pop', lyrics: '[Verse]\nhello' })
+    expect(body('ws:mureka-v9.5', { prompt: 'p', lyrics: 'la', values: { singer: 'female' } }).body).toMatchObject({ gender: 'female' })
+    const bgm = body('ws:mureka-v9.5', { prompt: 'calm piano', lyrics: 'ignored', values: { instrumental: true, singer: 'male' } })
+    expect(bgm.url).toBe('https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-bgm')
+    expect(bgm.body).toEqual({ prompt: 'calm piano' })
+    expect(() => body('ws:mureka-v9.5', { prompt: 'pop', lyrics: '  ' })).toThrow(/lyrics/)
+    expect(() => body('ws:mureka-v9.5', { prompt: 'x'.repeat(1100), lyrics: 'la' })).toThrow(/1024/)
+  })
+
+  it('Lyria and ElevenLabs take lyrics in the prompt; each asks for an instrumental its own way', () => {
+    expect(body('ws:lyria-3.5', { prompt: 'soul', lyrics: 'oh yeah' }).body).toEqual({ prompt: 'soul\n\nLyrics:\noh yeah' })
+    expect(body('ws:lyria-3.5', { prompt: 'soul', lyrics: 'oh yeah', values: { instrumental: true } }).body)
+      .toEqual({ prompt: 'soul\n\nInstrumental only, no vocals.' })
+    expect(body('ws:elevenlabs-music-v2.5', { prompt: 'score', values: { duration: 60000 } }).body)
+      .toEqual({ prompt: 'score', music_length_ms: 60000, force_instrumental: false })
+    expect(body('ws:elevenlabs-music-v2.5', { prompt: 'score', values: { instrumental: true } }).body).toMatchObject({ force_instrumental: true })
+  })
+
+  it('ACE-Step and MiniMax: "[instrumental]" lyrics or is_instrumental', () => {
+    expect(body('ws:ace-step-1.5', { prompt: 'funk', values: { instrumental: true, duration: 30 } }).body)
+      .toEqual({ tags: 'funk', lyrics: '[instrumental]', duration: 30 })
+    expect(body('ws:ace-step-1.5', { prompt: 'funk', lyrics: '[Chorus]\ngo', values: { duration: 30 } }).body)
+      .toEqual({ tags: 'funk', lyrics: '[Chorus]\ngo', duration: 30 })
+    expect(() => body('ws:ace-step-1.5', { prompt: 'funk' })).toThrow(/Instrumental/)
+    expect(body('at:minimax-music-3', { prompt: 'rock', values: { instrumental: true } }).body)
+      .toEqual({ model: 'minimax/music-3.0', prompt: 'rock', lyrics: '', is_instrumental: true, format: 'mp3' })
+    expect(body('at:minimax-music-3', { prompt: 'rock', lyrics: 'yeah' }).body).toMatchObject({ lyrics: 'yeah', is_instrumental: false })
+  })
+
+  it('runs MiniMax Music 3 on this Mac through the bundled engine, saying when it first downloads the model', async () => {
+    const { EventEmitter } = await import('node:events')
+    const { MediaRunner } = await import('../src/main/media/runner')
+    const root = mkdtempSync(join(tmpdir(), 'mlx-music-'))
+    const rows = new Map<string, any>()
+    const store = { save: (j: any) => rows.set(j.id, JSON.parse(JSON.stringify(j))), get: (id: string) => rows.get(id), list: () => [...rows.values()], running: () => [], delete: (id: string) => rows.delete(id) }
+    let seen: { cmd: string; args: string[]; caption: string; lyrics: string } | null = null
+    const runner = new MediaRunner({
+      store: () => store as any, mediaRoot: () => root, resolveKey: () => undefined,
+      python: () => ({ path: '/bundled/python3', env: {} }),
+      spawn: (cmd, args) => {
+        const child: any = new EventEmitter()
+        child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => true
+        const at = (flag: string) => args[args.indexOf(flag) + 1]
+        seen = { cmd, args, caption: readFileSync(at('--caption-file'), 'utf8'), lyrics: readFileSync(at('--lyrics-file'), 'utf8') }
+        setTimeout(() => {
+          child.stdout.emit('data', Buffer.from('{"event":"downloading"}\n{"event":"loading"}\n{"event":"generating"}\n'))
+          child.emit('close', 0)
+        }, 0)
+        return child
+      },
+      emit: () => {},
+    })
+    const r = await runner.submit({ modelId: 'local:minimax-music-3-4bit', prompt: 'lo-fi, Rhodes', values: { instrumental: true, duration: 30 } })
+    expect(r.ok).toBe(true)
+    await new Promise(res => setTimeout(res, 10))
+    expect(seen!.cmd).toBe('/bundled/python3')
+    expect(seen!.args.slice(0, 7)).toEqual(['-B', '-s', '-u', '-m', 'vmlx_engine.audio.job', 'music', '--model'])
+    expect(seen!.args).toContain('mlx-community/MiniMax-Music3-4bit')
+    expect(seen!.args.slice(seen!.args.indexOf('--duration'), seen!.args.indexOf('--duration') + 2)).toEqual(['--duration', '30'])
+    expect(seen!).toMatchObject({ caption: 'lo-fi, Rhodes', lyrics: '[instrumental]' })
+    const job = rows.get((r as any).job.id)
+    expect(job).toMatchObject({ status: 'done', downloadedModel: true })
+    expect(job.outputs[0]).toMatchObject({ kind: 'file', mime: 'audio/wav' })
+    expect(job).not.toHaveProperty('lyrics')
+    // A song with vocals and no lyrics is refused before anything runs.
+    expect((await runner.submit({ modelId: 'local:minimax-music-3-4bit', prompt: 'pop', values: {} }) as any).error).toMatch(/lyrics/)
   })
 })
 

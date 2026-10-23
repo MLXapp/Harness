@@ -14,7 +14,7 @@
  *    completed or succeeded; failed or timeout ends it.
  */
 
-import type { CloudMediaModel, MediaKind, MediaParam, MediaProviderId } from './catalog'
+import { controlsFor, type CloudMediaModel, type MediaKind, type MediaModel, type MediaParam, type MediaProviderId } from './catalog'
 
 export const WAVESPEED_API = 'https://api.wavespeed.ai/api/v3'
 export const ATLAS_API = 'https://api.atlascloud.ai/api/v1'
@@ -52,17 +52,63 @@ export function coerceParam(param: MediaParam, raw: unknown): string | number | 
   return param.options.some(o => o === raw) ? raw as string | number : param.default
 }
 
+/** Every control's value, coerced (the Instrumental switch included). */
+export function coerceValues(model: MediaModel, raw: Record<string, unknown> | undefined): Record<string, string | number | boolean> {
+  return Object.fromEntries(controlsFor(model).map(p => [p.key, coerceParam(p, raw?.[p.key])]))
+}
+
+export interface SongText {
+  prompt: string
+  /** What goes in the lyrics field (models with one). */
+  lyrics?: string
+  instrumental: boolean
+}
+
+/**
+ * The prompt and lyrics a music model gets, from the one Lyrics box and the
+ * Instrumental switch: lyrics go to the model's field or into the prompt; an
+ * instrumental is asked for the way the model understands. Throws (English,
+ * like the other request errors) when a song with vocals has no lyrics and the
+ * model needs them.
+ */
+export function songText(model: MediaModel, input: MediaInput): SongText {
+  let prompt = input.prompt.trim()
+  if (!prompt) throw new Error('Write a prompt first')
+  const instrumental = !!model.instrumental && input.values.instrumental === true
+  const lyrics = instrumental ? '' : (input.lyrics ?? '').trim()
+  if (!instrumental && model.lyricsRequired && !lyrics) throw new Error(`${model.name} sings your lyrics: add lyrics, or turn on Instrumental`)
+  if (lyrics && model.lyricsInPrompt) prompt = `${prompt}\n\nLyrics:\n${lyrics}`
+  if (instrumental && model.instrumental && 'prompt' in model.instrumental) prompt = `${prompt}\n\n${model.instrumental.prompt}`
+  const max = Math.min(MAX_PROMPT_CHARS, model.maxPrompt ?? MAX_PROMPT_CHARS)
+  if (prompt.length > max) throw new Error(`Keep the prompt${lyrics && model.lyricsInPrompt ? ' and lyrics' : ''} under ${max} characters`)
+  const out: SongText = { prompt, instrumental }
+  if (model.lyricsField) {
+    out.lyrics = instrumental && model.instrumental && 'lyrics' in model.instrumental ? model.instrumental.lyrics : lyrics
+  }
+  return out
+}
+
 export function buildCloudRequest(model: CloudMediaModel, input: MediaInput): CloudRequest {
-  const prompt = input.prompt.trim()
+  const song = model.kind === 'music' ? songText(model, input) : null
+  const prompt = song?.prompt ?? input.prompt.trim()
   if (!prompt) throw new Error('Write a prompt first')
   if (prompt.length > MAX_PROMPT_CHARS) throw new Error(`Keep the prompt under ${MAX_PROMPT_CHARS} characters`)
-  const fields: Record<string, unknown> = { [model.promptField]: prompt }
-  if (model.lyricsField) {
-    const lyrics = (input.lyrics ?? '').trim()
-    // ACE-Step needs lyrics; an empty string asks for an instrumental.
-    fields[model.lyricsField] = lyrics
+  const instrumental = song?.instrumental ? model.instrumental : undefined
+  // Mureka's instrumental is its own endpoint, which takes only the prompt.
+  if (instrumental && 'path' in instrumental) {
+    const body = { [model.promptField]: prompt, ...(model.fixed ?? {}) }
+    return model.provider === 'wavespeed'
+      ? { url: `${WAVESPEED_API}/${instrumental.path}`, body }
+      : { url: `${ATLAS_API}/model/${ATLAS_ENDPOINT[model.kind]}`, body: { model: instrumental.path, ...body } }
   }
-  for (const param of model.params) fields[param.field] = coerceParam(param, input.values[param.key])
+  const fields: Record<string, unknown> = { [model.promptField]: prompt }
+  if (model.lyricsField) fields[model.lyricsField] = song?.lyrics ?? (input.lyrics ?? '').trim()
+  for (const param of model.params) {
+    const value = coerceParam(param, input.values[param.key])
+    // An empty choice ("Any singer") leaves the field out.
+    if (value !== '') fields[param.field] = value
+  }
+  if (model.instrumental && 'field' in model.instrumental) fields[model.instrumental.field] = !!song?.instrumental
   Object.assign(fields, model.fixed ?? {})
   if (model.provider === 'wavespeed') {
     return { url: `${WAVESPEED_API}/${model.path}`, body: fields }

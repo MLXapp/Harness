@@ -84,7 +84,10 @@ describe('web search failure reporting', () => {
  */
 describe('working-directory precondition scope', () => {
   const dispatch = (() => {
-    const start = executor.indexOf('export async function executeBuiltinTool(')
+    // executeBuiltinTool wraps the dispatcher (it carries the Changes hook), so
+    // read the dispatcher itself.
+    const inner = executor.indexOf('async function executeBuiltinToolInner(')
+    const start = inner >= 0 ? inner : executor.indexOf('export async function executeBuiltinTool(')
     return executor.slice(start, executor.indexOf('\n}\n', start))
   })()
 
