@@ -439,6 +439,20 @@ const api = {
     readText: (): Promise<string> => ipcRenderer.invoke('clipboard:readText'),
   },
 
+  memory: {
+    list: (): Promise<Array<{ id: string; text: string; createdAt: number; updatedAt: number; sourceChatId?: string }>> => ipcRenderer.invoke('memory:list'),
+    enabled: (): Promise<boolean> => ipcRenderer.invoke('memory:enabled'),
+    setEnabled: (on: boolean): Promise<boolean> => ipcRenderer.invoke('memory:setEnabled', on),
+    add: (text: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('memory:add', text),
+    update: (id: string, text: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('memory:update', id, text),
+    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('memory:delete', id),
+    clear: (): Promise<boolean> => ipcRenderer.invoke('memory:clear'),
+    onChanged: (callback: () => void) => {
+      const listener = () => callback()
+      ipcRenderer.on('memory:changed', listener)
+      return () => { ipcRenderer.removeListener('memory:changed', listener) }
+    },
+  },
   skills: {
     list: (): Promise<Array<{ name: string; description: string; scope: 'user' | 'project'; dir: string }>> => ipcRenderer.invoke('skills:list'),
     openFolder: (): Promise<boolean> => ipcRenderer.invoke('skills:openFolder'),

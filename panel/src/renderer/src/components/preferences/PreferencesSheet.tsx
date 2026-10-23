@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Blocks, BookOpen, Check, ChevronDown, Cpu, Info, KeyRound, SlidersHorizontal, UserRound, X, type LucideIcon } from 'lucide-react'
+import { Blocks, BookOpen, Brain, Check, ChevronDown, Cpu, Info, KeyRound, SlidersHorizontal, UserRound, X, type LucideIcon } from 'lucide-react'
 import { useAppState } from '../../contexts/AppStateContext'
 import { useTranslation, LOCALES, LOCALE_NAMES, LOCALE_FLAGS } from '../../i18n'
 import { useTheme, type ThemePreference } from '../../providers/ThemeProvider'
@@ -11,12 +11,14 @@ import { MlxNodePreference } from '../network/MlxNodePreference'
 import { ApiKeysSection } from './ApiKeysSection'
 import { AppsPreference } from '../apps/AppsPreference'
 import { SkillsPreference } from '../apps/SkillsPreference'
+import { MemoryPreference } from './MemoryPreference'
 
 const SECTIONS: Array<[PreferencesSection, LucideIcon]> = [
   ['general', SlidersHorizontal],
   ['accounts', UserRound],
   ['apps', Blocks],
   ['skills', BookOpen],
+  ['memory', Brain],
   ['node', Cpu],
   ['keys', KeyRound],
   ['about', Info],
@@ -102,6 +104,7 @@ export function PreferencesSheet() {
             {section === 'accounts' && <AccountsPreference embedded />}
             {section === 'apps' && <AppsPreference />}
             {section === 'skills' && <SkillsPreference />}
+            {section === 'memory' && <MemoryPreference />}
             {section === 'node' && <MlxNodePreference />}
             {section === 'keys' && <ApiKeysSection />}
             {section === 'about' && <AboutSection />}

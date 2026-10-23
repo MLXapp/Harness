@@ -58,6 +58,7 @@ import { ApprovalBroker, type ApprovalCard } from "../agent/approvals";
 import { appsService } from "./apps";
 import { appsInCall, decideAppCall, wrapUntrusted } from "../apps/composioPolicy";
 import { discoverSkills, renderSkillIndex } from "../agent/skills";
+import { looksSecret, renderMemoryBlock } from "../memory/store";
 import { t as tMain } from "../i18n";
 import {
   looksLikeSandboxDenial,
@@ -822,8 +823,45 @@ const UTILITY_TOOLS = new Set([
 // always be available regardless of the utilityToolsEnabled toggle.
 
 /** Build set of disabled tool names based on per-category toggle overrides */
+/** Memory on (Preferences → Memory). Default on. */
+function memoryEnabled(): boolean {
+  try { return db.getSetting("memory_enabled") !== "0"; } catch { return false; }
+}
+
+/** remember / recall / forget against the app's memory store. */
+function runMemoryTool(name: string, args: Record<string, any>, chatId: string): { text: string; isError: boolean } {
+  if (!memoryEnabled()) return { text: "Memory is off in Preferences → Memory.", isError: true };
+  const store = db.memory;
+  const notify = () => {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send("memory:changed");
+  };
+  try {
+    if (name === "remember") {
+      const text = String(args.text ?? "").trim();
+      if (!text) return { text: "Nothing to remember: pass text.", isError: true };
+      if (looksSecret(text)) return { text: "Not saved: that looks like a password, key or card number. Memory never stores secrets.", isError: true };
+      const { entry, duplicate } = store.add(text, chatId);
+      notify();
+      return { text: duplicate ? `Already remembered [${entry.id}]: ${entry.text}` : `Remembered [${entry.id}]: ${entry.text}`, isError: false };
+    }
+    if (name === "recall") {
+      const found = store.search(String(args.query ?? ""), 8);
+      return { text: found.length ? found.map((e) => `[${e.id}] ${e.text}`).join("\n") : "Nothing saved matches that.", isError: false };
+    }
+    const id = String(args.id ?? "").trim();
+    const entry = store.get(id);
+    if (!entry) return { text: `No memory with id ${id}. Use recall to find it.`, isError: true };
+    store.delete(id);
+    notify();
+    return { text: `Forgot [${id}]: ${entry.text}`, isError: false };
+  } catch (err: any) {
+    return { text: `Memory error: ${err?.message ?? err}`, isError: true };
+  }
+}
+
 function getDisabledTools(overrides: any): Set<string> {
   const disabled = new Set<string>();
+  if (!memoryEnabled()) ["remember", "recall", "forget"].forEach((t) => disabled.add(t));
   // use_skill only when there are skills to load (catalog stays stable while
   // the skill folders are unchanged).
   if (discoverSkills(overrides?.workingDirectory || undefined).length === 0) disabled.add("use_skill");
@@ -2389,6 +2427,20 @@ export function registerChatHandlers(
           head.content = `${head.content}\n\n${skillIndex}`;
         } else {
           requestMessages.unshift({ role: "system", content: skillIndex });
+        }
+      }
+      // Memory: the newest saved facts, after the skills (follows the
+      // persistent settings and the stored entries only).
+      const memoryBlock =
+        overrides?.builtinToolsEnabled === true && !chatUsesZayaAppleScriptToolBundle && !leanToolPreset && memoryEnabled()
+          ? renderMemoryBlock(db.memory.list())
+          : null;
+      if (memoryBlock) {
+        const head = requestMessages[0];
+        if (head?.role === "system" && typeof head.content === "string") {
+          head.content = `${head.content}\n\n${memoryBlock}`;
+        } else {
+          requestMessages.unshift({ role: "system", content: memoryBlock });
         }
       }
       if (toolCapabilityEpoch) {
@@ -5092,6 +5144,10 @@ export function registerChatHandlers(
                   }, 300000);
                 });
                 emitToolStatus("result", "ask_user", resultText, toolIteration, tc.id);
+              } else if (tc.function.name === "remember" || tc.function.name === "recall" || tc.function.name === "forget") {
+                const r = runMemoryTool(tc.function.name, toolArgs, chatId);
+                resultText = r.text;
+                emitToolStatus(r.isError ? "error" : "result", tc.function.name, resultText, toolIteration, tc.id);
               } else if (tc.function.name === "todo_write") {
                 // Whole-list replacement, stored per chat (needs the chat id,
                 // so it runs here rather than in the executor).

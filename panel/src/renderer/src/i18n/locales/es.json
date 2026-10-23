@@ -3000,7 +3000,8 @@
       "keys": "Claves de API",
       "about": "Acerca de",
       "apps": "Apps",
-      "skills": "Habilidades"
+      "skills": "Habilidades",
+      "memory": "Memoria"
     }
   },
   "media": {
@@ -3209,5 +3210,21 @@
     "openFolder": "Abrir carpeta",
     "none": "Aún no hay habilidades. Añade una carpeta con un SKILL.md en ~/.mlx-harness/skills; también se encuentran las de ~/.claude/skills.",
     "footer": "Las habilidades propias de un proyecto (.claude/skills o .agents/skills en su carpeta) se usan en sus sesiones de Code y prevalecen sobre las tuyas con el mismo nombre."
+  },
+  "memory": {
+    "toggle": "Recordar cosas entre chats",
+    "help": "El agente puede guardar datos breves que le cuentes (preferencias, proyectos, cómo te gusta trabajar) y usarlos en chats posteriores. Cada cambio se ve en el chat y aquí. Nunca guarda contraseñas, claves ni números de tarjeta. Solo se guarda en este Mac.",
+    "saved": "Guardado ({n})",
+    "add": "Añadir",
+    "addPlaceholder": "Algo que el agente siempre debería saber…",
+    "addSave": "Guardar",
+    "none": "Aún no hay nada guardado. Dile al agente \"recuerda que…\" en cualquier chat o añádelo aquí.",
+    "edit": "Editar",
+    "forget": "Olvidar",
+    "clear": "Olvidarlo todo",
+    "clearConfirm": "¿Eliminar todas las entradas guardadas?",
+    "clearYes": "Olvidarlo todo",
+    "secret": "No se guardó: parece una contraseña, clave o número de tarjeta.",
+    "failed": "No se pudo guardar. Inténtalo de nuevo."
   }
 }

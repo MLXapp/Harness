@@ -709,6 +709,42 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
         required: ['name']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remember',
+      description: 'Save one short, lasting fact or preference about the user or their work for future chats (shown to the user; they can remove it). Never passwords, keys, card numbers or health details.',
+      parameters: {
+        type: 'object',
+        properties: { text: { type: 'string', description: 'The fact, as one short sentence' } },
+        required: ['text']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'recall',
+      description: 'Search saved memories from earlier chats.',
+      parameters: {
+        type: 'object',
+        properties: { query: { type: 'string', description: 'What to look for' } },
+        required: ['query']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'forget',
+      description: 'Remove a saved memory by its id (e.g. m1a2b3c4d), when it is wrong or the user asks.',
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'string', description: 'The memory id' } },
+        required: ['id']
+      }
+    }
   }
 ]
 

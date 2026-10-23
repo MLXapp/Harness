@@ -3000,7 +3000,8 @@
       "keys": "API keys",
       "about": "About",
       "apps": "Apps",
-      "skills": "Skills"
+      "skills": "Skills",
+      "memory": "Memory"
     }
   },
   "media": {
@@ -3209,5 +3210,21 @@
     "openFolder": "Open folder",
     "none": "No skills yet. Add a folder with a SKILL.md to ~/.mlx-harness/skills; skills in ~/.claude/skills are found too.",
     "footer": "A project's own skills (.claude/skills or .agents/skills in its folder) are used in its Code sessions and win over yours with the same name."
+  },
+  "memory": {
+    "toggle": "Remember things across chats",
+    "help": "The agent can save short facts you tell it (preferences, projects, how you like things done) and use them in later chats. Every change shows in the chat and here. It never saves passwords, keys or card numbers. Stored only on this Mac.",
+    "saved": "Saved ({n})",
+    "add": "Add",
+    "addPlaceholder": "Something the agent should always know…",
+    "addSave": "Save",
+    "none": "Nothing saved yet. Tell the agent \"remember that …\" in any chat, or add something here.",
+    "edit": "Edit",
+    "forget": "Forget",
+    "clear": "Forget everything",
+    "clearConfirm": "Remove every saved entry?",
+    "clearYes": "Forget everything",
+    "secret": "Not saved: that looks like a password, key or card number.",
+    "failed": "Could not save that. Try again."
   }
 }

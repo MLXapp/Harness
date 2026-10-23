@@ -461,6 +461,16 @@ declare global {
       chrome?: {
         vibrancy: () => boolean;
       };
+      memory?: {
+        list: () => Promise<Array<{ id: string; text: string; createdAt: number; updatedAt: number; sourceChatId?: string }>>;
+        enabled: () => Promise<boolean>;
+        setEnabled: (on: boolean) => Promise<boolean>;
+        add: (text: string) => Promise<{ ok: boolean; error?: string }>;
+        update: (id: string, text: string) => Promise<{ ok: boolean; error?: string }>;
+        delete: (id: string) => Promise<boolean>;
+        clear: () => Promise<boolean>;
+        onChanged: (callback: () => void) => () => void;
+      };
       skills?: {
         list: () => Promise<Array<{ name: string; description: string; scope: 'user' | 'project'; dir: string }>>;
         openFolder: () => Promise<boolean>;

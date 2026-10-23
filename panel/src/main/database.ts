@@ -13,6 +13,7 @@ import {
 import { decryptSecret, decryptValue, encryptValue } from "./secretStorage";
 import { ensureProviderSchema, ProviderStore, type SecretBox } from "./providers/store";
 import { MediaJobStore } from "./media/store";
+import { MemoryStore } from "./memory/store";
 
 /** Provider credentials: Keychain-backed safeStorage, refusing plaintext both ways. */
 const keychainSecretBox: SecretBox = {
@@ -1332,6 +1333,19 @@ class DatabaseManager {
   private providerStoreDb?: Database.Database;
   private mediaStore?: MediaJobStore;
   private mediaStoreDb?: Database.Database;
+
+  private memoryStore?: MemoryStore;
+  private memoryStoreDb?: Database.Database;
+
+  /** Memory across chats (Preferences → Memory, remember/recall/forget). */
+  get memory(): MemoryStore {
+    this.ensureOpen();
+    if (!this.memoryStore || this.memoryStoreDb !== this.db) {
+      this.memoryStore = new MemoryStore(this.db);
+      this.memoryStoreDb = this.db;
+    }
+    return this.memoryStore;
+  }
 
   /** Image (cloud), Video, Audio and Music generations. */
   get media(): MediaJobStore {

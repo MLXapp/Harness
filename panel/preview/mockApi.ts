@@ -505,6 +505,23 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       readText: async () => 'sk-preview-0123456789abcdef',
     },
 
+    memory: (() => {
+      let on = true
+      let items = [
+        { id: 'm1a2b3c4d', text: 'Prefers TypeScript with 2-space indents and no semicolons', createdAt: Date.now() - 86400000, updatedAt: Date.now() - 86400000 },
+        { id: 'm5e6f7a8b', text: 'Works on harness.mlx.app; deploys go through Vercel', createdAt: Date.now() - 3600000, updatedAt: Date.now() - 3600000 },
+      ]
+      return {
+        list: async () => items,
+        enabled: async () => on,
+        setEnabled: async (v: boolean) => { on = v; return v },
+        add: async (text: string) => { items = [{ id: `m${Math.random().toString(16).slice(2, 10)}`, text, createdAt: Date.now(), updatedAt: Date.now() }, ...items]; events.emit('memory:changed'); return { ok: true } },
+        update: async (id: string, text: string) => { items = items.map(i => (i.id === id ? { ...i, text, updatedAt: Date.now() } : i)); events.emit('memory:changed'); return { ok: true } },
+        delete: async (id: string) => { items = items.filter(i => i.id !== id); events.emit('memory:changed'); return true },
+        clear: async () => { items = []; events.emit('memory:changed'); return true },
+        onChanged: (cb: () => void) => events.on('memory:changed', cb as any),
+      }
+    })(),
     skills: {
       list: async () => [
         { name: 'pdf', description: 'Read, fill and merge PDF files', scope: 'user' as const, dir: '~/.claude/skills/pdf' },
