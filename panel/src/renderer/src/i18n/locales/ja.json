@@ -748,7 +748,10 @@
         "tool": "MLX Harness にこのツールの使用を許可しますか？",
         "app": "MLX Harness にアプリでこの操作を許可しますか？"
       },
-      "alwaysAllowApp": "このチャットではこれらのアプリで常に許可"
+      "alwaysAllowApp": "このチャットではこれらのアプリで常に許可",
+      "instead": "代わりにすることを伝える",
+      "insteadPlaceholder": "代わりにこうして…",
+      "insteadSend": "拒否して送信"
     },
     "switcher": {
       "title": "モデルを切り替え (⌘⇧M)",
@@ -3175,8 +3178,15 @@
       "auto": "自動で実行",
       "full": "フルアクセスで実行",
       "dismiss": "閉じる",
-      "go": "計画どおりに進めてください。"
-    }
+      "go": "計画どおりに進めてください。",
+      "keepPlanning": "計画を続ける",
+      "revisePlaceholder": "計画のどこを変えますか？",
+      "reviseSend": "計画を修正",
+      "revise": "計画を修正してください（まだファイルは変更しないでください）：{note}"
+    },
+    "openIn": "{app} で開く",
+    "openInMore": "別のアプリで開く",
+    "openInFailed": "そのアプリでフォルダを開けませんでした。"
   },
   "apps": {
     "title": "Composio 経由であなたのアプリを",
@@ -3343,5 +3353,20 @@
     },
     "atLine": "{n} 行目",
     "editComment": "編集"
+  },
+  "aside": {
+    "menu": "横で質問…",
+    "title": "横で質問",
+    "hint": "チャットには追加されません",
+    "placeholder": "このチャットについて質問…",
+    "ask": "質問",
+    "failed": "回答を得られませんでした。モデルが実行中か確認してください。",
+    "empty": "回答がありませんでした。別の聞き方を試してください。",
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "inChat": "チャットで質問"
+  },
+  "needsYou": {
+    "menu": "次の承認リクエスト"
   }
 }

@@ -748,7 +748,10 @@
         "tool": "Allow MLX Harness to use this tool?",
         "app": "Allow MLX Harness to do this in your apps?"
       },
-      "alwaysAllowApp": "Always allow this in these apps for this chat"
+      "alwaysAllowApp": "Always allow this in these apps for this chat",
+      "instead": "Tell It What to Do Instead",
+      "insteadPlaceholder": "Do this instead…",
+      "insteadSend": "Deny and Send"
     },
     "switcher": {
       "title": "Switch model (⌘⇧M)",
@@ -3175,8 +3178,15 @@
       "auto": "Run in Auto",
       "full": "Run with full access",
       "dismiss": "Dismiss",
-      "go": "Go ahead with the plan."
-    }
+      "go": "Go ahead with the plan.",
+      "keepPlanning": "Keep Planning",
+      "revisePlaceholder": "What should change in the plan?",
+      "reviseSend": "Revise Plan",
+      "revise": "Revise the plan (don't change any files yet): {note}"
+    },
+    "openIn": "Open in {app}",
+    "openInMore": "Open in another app",
+    "openInFailed": "Couldn't open the folder in that app."
   },
   "apps": {
     "title": "Your apps, through Composio",
@@ -3343,5 +3353,20 @@
     },
     "atLine": "Line {n}",
     "editComment": "Edit"
+  },
+  "aside": {
+    "menu": "Ask Aside…",
+    "title": "Ask aside",
+    "hint": "Not added to the chat",
+    "placeholder": "Ask about this chat…",
+    "ask": "Ask",
+    "failed": "Couldn't get an answer. Check that the model is running.",
+    "empty": "No answer came back. Try asking another way.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "inChat": "Ask in Chat"
+  },
+  "needsYou": {
+    "menu": "Next Request for Approval"
   }
 }

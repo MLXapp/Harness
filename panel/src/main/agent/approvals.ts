@@ -38,6 +38,8 @@ export interface ApprovalCard {
 
 export interface ApprovalRequestInput extends Omit<ApprovalCard, 'id' | 'expiresAt'> {
   signal?: AbortSignal
+  /** A note the user typed with a Deny ("use pnpm instead"), for the model. */
+  onNote?: (note: string) => void
 }
 
 export interface ApprovalTransport {
@@ -50,6 +52,7 @@ export interface ApprovalTransport {
 interface Pending {
   card: ApprovalCard
   resolve: (outcome: ApprovalOutcome) => void
+  onNote?: (note: string) => void
 }
 
 export const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000
@@ -74,7 +77,7 @@ export class ApprovalBroker {
   }
 
   request(input: ApprovalRequestInput): Promise<ApprovalOutcome> {
-    const { signal, ...rest } = input
+    const { signal, onNote, ...rest } = input
     const now = this.options.now ?? Date.now
     const setTimer = this.options.setTimer ?? ((fn, ms) => setTimeout(fn, ms))
     const clearTimer = this.options.clearTimer ?? (h => clearTimeout(h as ReturnType<typeof setTimeout>))
@@ -99,7 +102,7 @@ export class ApprovalBroker {
         resolvePromise(outcome)
       }
       // Register before showing so an answer racing the send still lands.
-      this.pending.set(id, { card, resolve: finish })
+      this.pending.set(id, { card, resolve: finish, onNote })
       let shown = false
       try {
         shown = this.transport.show(card)
@@ -116,11 +119,14 @@ export class ApprovalBroker {
   }
 
   /** Apply the user's answer. Returns false when it was not accepted. */
-  answer(id: string, answer: unknown): boolean {
+  answer(id: string, answer: unknown, note?: unknown): boolean {
     const entry = this.pending.get(id)
     if (!entry) return false
     if (answer !== 'allow-once' && answer !== 'allow-always' && answer !== 'deny') return false
     if (answer === 'allow-always' && !entry.card.allowAlways) return false
+    // Only a Deny carries a note: it tells the model what to do instead.
+    const text = answer === 'deny' && typeof note === 'string' ? note.trim().slice(0, 2000) : ''
+    if (text) { try { entry.onNote?.(text) } catch { /* the note is a courtesy */ } }
     entry.resolve(answer)
     return true
   }

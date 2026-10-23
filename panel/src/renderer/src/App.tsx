@@ -223,8 +223,23 @@ function App() {
     const onOpen = (e: Event) => { const id = (e as CustomEvent).detail?.chatId; if (typeof id === 'string') void open(id) }
     window.addEventListener('vmlx:open-chat', onOpen)
     const off = window.api.chat.onOpenFromNotification?.(({ chatId }) => { void open(chatId) })
-    return () => { window.removeEventListener('vmlx:open-chat', onOpen); off?.() }
-  }, [handleChatSelect, setMode])
+    // ⌥⌘J: the oldest request waiting for your OK, in whichever chat it is.
+    const onNext = async () => {
+      const cards = await window.api.chat.getPendingApprovals('').catch(() => [])
+      if (!cards.length) return
+      const first = [...cards].sort((a, b) => a.expiresAt - b.expiresAt)[0]
+      if (first.chatId !== state.activeChatId) await open(first.chatId)
+      // Bring the card into view and onto Allow (⌘↩ / ⌘.) once it is drawn.
+      window.setTimeout(() => {
+        const btn = document.querySelector<HTMLElement>('[data-vmlx-control="approval-allow"]')
+        btn?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+        btn?.focus({ preventScroll: true })
+      }, 450)
+    }
+    const onNextEvent = () => { void onNext() }
+    window.addEventListener('vmlx:next-approval', onNextEvent)
+    return () => { window.removeEventListener('vmlx:open-chat', onOpen); window.removeEventListener('vmlx:next-approval', onNextEvent); off?.() }
+  }, [handleChatSelect, setMode, state.activeChatId])
 
   /** The Code tab's project folder and access level for a chat (agent tools on that folder). */
   const readCodeInfo = useCallback(async (chatId: string | null) => {
@@ -405,6 +420,9 @@ function App() {
       })
     } else if (action === 'preferences') {
       dispatch({ type: 'OPEN_PREFERENCES' })
+    } else if (action === 'ask-aside' || action === 'next-approval') {
+      // Handled by the open chat (ChatInterface) and the approvals list.
+      window.dispatchEvent(new CustomEvent(`vmlx:${action}`))
     } else if (action === 'servers') {
       setMode('server')
       dispatch({ type: 'SET_SERVER_PANEL', panel: 'dashboard' })

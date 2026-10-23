@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react'
-import { Eye, FolderOpen, PenLine, ShieldAlert, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import * as Dropdown from '@radix-ui/react-dropdown-menu'
+import { Check, ChevronDown, Eye, FolderOpen, PenLine, ShieldAlert, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { FEATURED_CLOUD_MODELS, featuredAccount } from '../../../../shared/curated'
 import { AccountGlyph } from '../accounts/AccountGlyph'
@@ -169,13 +170,74 @@ function CodeHome({ onStart }: { onStart: (start: CodeStart) => Promise<void> | 
   )
 }
 
-/** Above an open Code session: the project folder (the mode lives in the composer). */
+/** Above an open Code session: the project folder and "Open in" (the mode lives in the composer). */
 function ProjectBar({ folder }: { folder: string }) {
   return (
     <div data-vmlx-section="code-project-bar" className="flex h-11 shrink-0 items-center gap-2 px-5 mlx-hair-b">
       <FolderOpen className="h-4 w-4 shrink-0 text-primary" strokeWidth={1.8} />
       <span className="truncate text-[13.5px] font-medium" title={folder}>{folderName(folder)}</span>
-      <span className="hidden min-w-0 truncate text-[12.5px] text-muted-foreground md:inline">{folder}</span>
+      <span className="hidden min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground md:inline">{folder}</span>
+      <span className="flex-1 md:hidden" />
+      <OpenIn folder={folder} />
+    </div>
+  )
+}
+
+type OpenInApp = { id: string; name: string; kind: 'finder' | 'terminal' | 'editor' }
+const OPEN_IN_KEY = 'mlx.code.openIn'
+
+/**
+ * Split button: "Open in Xcode" (the app you used last; Finder at first) and
+ * a menu of every installed editor and terminal.
+ */
+function OpenIn({ folder }: { folder: string }) {
+  const { t } = useTranslation()
+  const [apps, setApps] = useState<OpenInApp[]>([])
+  const [last, setLast] = useState<string>(() => readStored(OPEN_IN_KEY) ?? 'finder')
+  const [error, setError] = useState(false)
+  useEffect(() => { window.api.code?.openInApps().then(setApps).catch(() => setApps([])) }, [])
+  if (apps.length === 0) return null
+  const primary = apps.find(a => a.id === last) ?? apps[0]
+  const open = async (app: OpenInApp) => {
+    setLast(app.id)
+    writeStored(OPEN_IN_KEY, app.id)
+    const r = await window.api.code!.openIn(app.id, folder).catch(() => ({ ok: false }))
+    setError(!r.ok)
+    if (!r.ok) window.setTimeout(() => setError(false), 2400)
+  }
+  const label = (a: OpenInApp) => t('code.openIn', { app: a.name })
+  const groups: Array<OpenInApp['kind']> = ['finder', 'terminal', 'editor']
+  return (
+    <div className={`mlx-split ${error ? 'is-error' : ''}`} data-vmlx-control="code-open-in">
+      <button type="button" className="mlx-split-main" onClick={() => void open(primary)} title={error ? t('code.openInFailed') : label(primary)}>
+        {label(primary)}
+      </button>
+      <Dropdown.Root modal={false}>
+        <Dropdown.Trigger asChild>
+          <button type="button" className="mlx-split-more" aria-label={t('code.openInMore')}><ChevronDown className="h-3.5 w-3.5" /></button>
+        </Dropdown.Trigger>
+        <Dropdown.Portal>
+          <Dropdown.Content align="end" sideOffset={4}
+            className="z-[60] min-w-[200px] rounded-[10px] border border-border bg-popover p-1 text-popover-foreground shadow-[0_12px_32px_-12px_var(--shadow-deep)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-200">
+            {groups.map((kind, gi) => {
+              const list = apps.filter(a => a.kind === kind)
+              if (list.length === 0) return null
+              return (
+                <div key={kind}>
+                  {gi > 0 && <Dropdown.Separator className="my-1 h-px bg-border" />}
+                  {list.map(a => (
+                    <Dropdown.Item key={a.id} onSelect={() => void open(a)}
+                      className="flex h-7 cursor-default select-none items-center gap-2 rounded-[6px] px-2.5 text-[13px] outline-none transition-colors data-[highlighted]:bg-primary data-[highlighted]:text-primary-foreground">
+                      <span className="flex-1">{a.name}</span>
+                      {a.id === primary.id && <Check className="h-3.5 w-3.5" />}
+                    </Dropdown.Item>
+                  ))}
+                </div>
+              )
+            })}
+          </Dropdown.Content>
+        </Dropdown.Portal>
+      </Dropdown.Root>
     </div>
   )
 }

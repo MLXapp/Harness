@@ -3,6 +3,7 @@ import { Sparkles, Loader2, X } from 'lucide-react'
 import { Reveal } from '../ui/Reveal'
 import { BrowserLiveView } from './BrowserLiveView'
 import { ChangesProvider } from './ChangesReview'
+import { AskAside } from './AskAside'
 import { MessageList } from './MessageList'
 import { ApprovalCards } from './ApprovalCards'
 import { InputBox, MediaAttachment } from './InputBox'
@@ -998,14 +999,18 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
         </div>
       )}
       <QueuedMessages steering={steering} items={queued} onRemove={id => setQueued(q => q.filter(m => m.id !== id))} />
-      <InputBox
-        onSend={handleSend}
-        onAbort={handleAbort}
-        disabled={!sessionEndpoint && !!sessionId}
-        loading={loading}
-        sessionEndpoint={sessionEndpoint}
-        sessionId={sessionId}
-      />
+      <div className="relative">
+        {/* ⌘; Ask aside: floats above the composer. */}
+        <AskAside chatId={chatId} endpoint={sessionEndpoint} onAskInChat={text => { void handleSend(text) }} />
+        <InputBox
+          onSend={handleSend}
+          onAbort={handleAbort}
+          disabled={!sessionEndpoint && !!sessionId}
+          loading={loading}
+          sessionEndpoint={sessionEndpoint}
+          sessionId={sessionId}
+        />
+      </div>
     </div>
     </ChangesProvider>
   )

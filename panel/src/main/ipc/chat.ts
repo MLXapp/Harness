@@ -757,6 +757,29 @@ const STEER_NOTE = "[The user added this while you were working. Take it into ac
 /** U+2063 (invisible) marks the real additions, so typed text never splits. */
 const STEER_ADDED_PREFIX = "\u2063[Added while working]";
 
+/** The note that turns the last user message into a side question. */
+export const ASIDE_NOTE = "(A quick side question from the user. Answer it briefly from the conversation so far. Do not use tools, do not continue the task, and do not change any plan: this answer is not part of the conversation.)";
+
+/** Request messages for a side question: everything as is, the question last. */
+export function asideMessages(messages: any[]): any[] {
+  const out = messages.slice();
+  for (let i = out.length - 1; i >= 0; i--) {
+    const m = out[i];
+    if (m?.role !== "user") continue;
+    if (typeof m.content === "string") out[i] = { ...m, content: `${m.content}\n\n${ASIDE_NOTE}` };
+    else if (Array.isArray(m.content)) out[i] = { ...m, content: [...m.content, { type: "text", text: ASIDE_NOTE }] };
+    break;
+  }
+  return out;
+}
+
+/** A Deny the user explained: the model gets their words with the refusal. */
+function withDenyNote(message: string, note: string): string {
+  const text = note.trim();
+  if (!text) return message;
+  return `${message}\n\nThe user said instead: ${JSON.stringify(text)}. Do what they asked.`;
+}
+
 /** Steers a turn never picked up go back to the renderer's queue for that chat. */
 function returnUnusedSteers(chatId: string, _getWindow?: () => BrowserWindow | null): void {
   const unused = steerQueues.get(chatId);
@@ -1202,6 +1225,14 @@ export function registerChatHandlers(
       /* notifications are a convenience */
     }
   };
+  /** The Dock shows how many requests wait for your OK (any chat). */
+  const updateNeedsYouBadge = () => {
+    try {
+      if (process.platform !== "darwin" || !app.dock) return;
+      const n = approvalBroker?.size ?? 0;
+      app.dock.setBadge(n > 0 ? String(n) : "");
+    } catch (_) { /* no Dock (tests) */ }
+  };
   approvalBroker = new ApprovalBroker({
     show: (card) => {
       const win = getWindow();
@@ -1209,9 +1240,12 @@ export function registerChatHandlers(
       watchWindowGone(win);
       win.webContents.send("chat:approvalRequest", card);
       notifyIfAway(win, card);
+      // Registered before show(): the count already includes this card.
+      setTimeout(updateNeedsYouBadge, 0);
       return true;
     },
     settled: (card, outcome) => {
+      setTimeout(updateNeedsYouBadge, 0);
       const win = getWindow();
       if (win && !win.isDestroyed()) {
         win.webContents.send("chat:approvalSettled", {
@@ -1224,13 +1258,13 @@ export function registerChatHandlers(
   });
   ipcMain.handle(
     "chat:answerApproval",
-    (event: any, id: string, answer: string) => {
+    (event: any, id: string, answer: string, note?: string) => {
       // Only the chat window may answer (not another BrowserWindow).
       const win = getWindow();
       if (!win || win.isDestroyed() || event?.sender !== win.webContents) {
         return { accepted: false };
       }
-      return { accepted: approvalBroker?.answer(id, answer) ?? false };
+      return { accepted: approvalBroker?.answer(id, answer, note) ?? false };
     },
   );
   ipcMain.handle("chat:pendingApprovals", (_, chatId: string) =>
@@ -1492,11 +1526,12 @@ export function registerChatHandlers(
         size?: number;
         text?: string;
       }>,
-      mode: "send" | "compact" = "send",
+      mode: "send" | "compact" | "aside" = "send",
     ): Promise<any> => {
       // B6: Concurrency guard — reject if a request is already active for this chat
       // B6: Concurrency guard with stale lock recovery
-      const existing = activeRequests.get(chatId);
+      // A side question ("aside") runs next to a running reply and leaves it alone.
+      const existing = mode === "aside" ? undefined : activeRequests.get(chatId);
       if (existing) {
         const age = Date.now() - existing.startedAt;
         // Use the timeout configured when that request started, plus 30s buffer
@@ -1746,12 +1781,14 @@ export function registerChatHandlers(
       // guard. Arming it at entry made load/wake queue waiting consume the
       // generation timeout — exactly the premature timeout the user hit. It
       // is armed immediately before the inference fetch below.
-      repeatCallTracker.newTurn(chatId);
-      // Left over from a turn that was cleared as stale: back to the queue.
-      returnUnusedSteers(chatId, getWindow);
+      if (mode !== "aside") {
+        repeatCallTracker.newTurn(chatId);
+        // Left over from a turn that was cleared as stale: back to the queue.
+        returnUnusedSteers(chatId, getWindow);
+      }
       /** Set when this turn checkpoints files for the Changes review. */
       let turnChangeMessageId: string | null = null;
-      activeRequests.set(chatId, {
+      if (mode !== "aside") activeRequests.set(chatId, {
         controller: abortController,
         startedAt: Date.now(),
         turnStartedAt: Date.now(),
@@ -2285,6 +2322,7 @@ export function registerChatHandlers(
           return { ok: false, message: approvalRefusalMessage("unavailable", toolName) };
         }
         const broker = approvalBroker;
+        let denyNote = "";
         const outcome = broker
           ? await broker.request({
               chatId,
@@ -2299,6 +2337,7 @@ export function registerChatHandlers(
               why: decision.why,
               allowAlways: decision.allowAlways,
               signal: abortController.signal,
+              onNote: (n) => { denyNote = n; },
             })
           : "unavailable";
         const key = alwaysAllowKey(toolName, toolArgs.command);
@@ -2318,11 +2357,11 @@ export function registerChatHandlers(
         if (decision.kind === "escalation") refusedEscalations.add(key);
         return {
           ok: false,
-          message: approvalRefusalMessage(
+          message: withDenyNote(approvalRefusalMessage(
             outcome,
             toolName,
             Math.round((broker?.timeoutMs ?? 300000) / 60000),
-          ),
+          ), outcome === "deny" ? denyNote : ""),
         };
       };
       let lastReplaySafeToolResultKey: string | null = null;
@@ -3569,6 +3608,20 @@ export function registerChatHandlers(
           }
         };
 
+        if (mode === "aside") {
+          // Side question: the chat as the model sees it (same prefix, so a
+          // local model reuses its cache), then the question, answered briefly
+          // without tools. Nothing is saved.
+          try {
+            const asked = asideMessages(requestMessages);
+            const res = await runSummaryRequest(asked, 1200);
+            if (res.error) return { success: false, error: res.error };
+            return { success: true, text: (res.text || "").trim() };
+          } catch (err) {
+            if (abortController.signal.aborted) return { success: false, error: "aborted" };
+            return { success: false, error: (err as Error)?.message || String(err) };
+          }
+        }
         if (mode === "compact") {
           try {
             const outcome = await compactRequestHistory("manual");
@@ -5351,6 +5404,7 @@ export function registerChatHandlers(
                   !(decision.allowAlways && alwaysAllowedCommands.get(chatId)?.has(alwaysKey))
                 ) {
                   const broker = approvalBroker;
+                  let appDenyNote = "";
                   const outcome = broker
                     ? await broker.request({
                         chatId,
@@ -5362,6 +5416,7 @@ export function registerChatHandlers(
                         why: "app-write",
                         allowAlways: decision.allowAlways,
                         signal: abortController.signal,
+                        onNote: (n) => { appDenyNote = n; },
                       })
                     : "unavailable";
                   console.log(`[CHAT] Approval for app action (${decision.apps.join(",")}): ${outcome}`);
@@ -5372,7 +5427,7 @@ export function registerChatHandlers(
                     set.add(alwaysKey);
                   }
                   if (outcome !== "allow-once" && outcome !== "allow-always") {
-                    appRefusal = approvalRefusalMessage(outcome, tc.function.name, Math.round((broker?.timeoutMs ?? 300000) / 60000));
+                    appRefusal = withDenyNote(approvalRefusalMessage(outcome, tc.function.name, Math.round((broker?.timeoutMs ?? 300000) / 60000)), outcome === "deny" ? appDenyNote : "");
                   }
                 }
                 if (appRefusal) {
@@ -6757,6 +6812,19 @@ export function registerChatHandlers(
       unattendedTurns.delete(chatId);
     }
   };
+  // Ask aside (⌘;): a side question about this chat, answered outside it.
+  ipcMain.handle(
+    "chat:aside",
+    async (event, chatId: string, question: string, endpoint?: { host: string; port: number }) => {
+      const q = typeof question === "string" ? question.trim().slice(0, 4000) : "";
+      if (!q || typeof chatId !== "string") return { success: false, error: "empty" };
+      try {
+        return await handleSendMessage(event, chatId, q, endpoint, undefined, "aside");
+      } catch (err) {
+        return { success: false, error: (err as Error)?.message || String(err) };
+      }
+    },
+  );
   // Manual compaction (/compact): summarize the older history now.
   ipcMain.handle(
     "chat:compact",

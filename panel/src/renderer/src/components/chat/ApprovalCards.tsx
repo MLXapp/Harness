@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { useTranslation } from '../../i18n'
+import { Reveal } from '../ui/Reveal'
 
 /**
  * Inline approval cards for the coding agent (permission presets).
@@ -80,9 +81,11 @@ export function ApprovalCards({ chatId }: { chatId: string }) {
     return () => clearInterval(h)
   }, [shown.length])
 
-  const respond = (id: string, answer: 'allow-once' | 'allow-always' | 'deny') => {
+  // "Tell it what to do instead": a Deny that carries the user's words.
+  const [notes, setNotes] = useState<Record<string, string | null>>({})
+  const respond = (id: string, answer: 'allow-once' | 'allow-always' | 'deny', note?: string) => {
     setShown(prev => prev.map(s => (s.card.id === id ? { ...s, busy: true } : s)))
-    window.api.chat.answerApproval(id, answer)
+    window.api.chat.answerApproval(id, answer, note)
       .then(res => {
         // Not accepted: the card already settled (timeout/stop); the settled
         // event removes it. Re-enable only if it is somehow still listed.
@@ -191,10 +194,34 @@ export function ApprovalCards({ chatId }: { chatId: string }) {
                         {t(card.kind === 'mcp' ? 'chat.approval.alwaysAllowTool' : card.kind === 'app' ? 'chat.approval.alwaysAllowApp' : 'chat.approval.alwaysAllow')}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      data-vmlx-control="approval-note"
+                      aria-expanded={notes[card.id] != null}
+                      onClick={() => setNotes(n => ({ ...n, [card.id]: n[card.id] == null ? '' : null }))}
+                      className="px-2 py-1.5 text-[12.5px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline disabled:opacity-40"
+                    >
+                      {t('chat.approval.instead')}
+                    </button>
                     <span className="ml-auto text-[11.5px] text-muted-foreground tabular-nums">
                       {t('chat.approval.autoDeny', { time: formatRemaining(card.expiresAt - now) })}
                     </span>
                   </div>
+                  <Reveal open={notes[card.id] != null}>
+                    <form className="flex items-center gap-2 pt-2.5"
+                      onSubmit={e => { e.preventDefault(); const n = (notes[card.id] ?? '').trim(); if (n) respond(card.id, 'deny', n) }}>
+                      <input value={notes[card.id] ?? ''} autoFocus={notes[card.id] === ''}
+                        onChange={e => setNotes(n => ({ ...n, [card.id]: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setNotes(n => ({ ...n, [card.id]: null })) } }}
+                        placeholder={t('chat.approval.insteadPlaceholder')} data-vmlx-control="approval-note-input" maxLength={2000}
+                        className="h-8 min-w-0 flex-1 rounded-[9px] border border-input bg-background px-2.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring/50" />
+                      <button type="submit" disabled={busy || !(notes[card.id] ?? '').trim()} data-vmlx-control="approval-note-send"
+                        className="flex h-8 items-center rounded-full bg-foreground/[0.07] px-3.5 text-[13px] font-medium hover:bg-foreground/[0.11] disabled:opacity-40">
+                        {t('chat.approval.insteadSend')}
+                      </button>
+                    </form>
+                  </Reveal>
                 </div>
               </div>
             </div>

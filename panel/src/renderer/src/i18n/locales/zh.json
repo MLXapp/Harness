@@ -748,7 +748,10 @@
         "tool": "允许 MLX Harness 使用此工具吗？",
         "app": "允许 MLX Harness 在你的应用中执行此操作吗？"
       },
-      "alwaysAllowApp": "在此对话中始终允许这些应用执行"
+      "alwaysAllowApp": "在此对话中始终允许这些应用执行",
+      "instead": "告诉它改做什么",
+      "insteadPlaceholder": "改为这样做…",
+      "insteadSend": "拒绝并发送"
     },
     "switcher": {
       "title": "切换模型 (⌘⇧M)",
@@ -3175,8 +3178,15 @@
       "auto": "以自动模式执行",
       "full": "以完全访问执行",
       "dismiss": "关闭",
-      "go": "按计划执行。"
-    }
+      "go": "按计划执行。",
+      "keepPlanning": "继续规划",
+      "revisePlaceholder": "计划中哪里需要修改？",
+      "reviseSend": "修改计划",
+      "revise": "请修改计划（暂时不要改动任何文件）：{note}"
+    },
+    "openIn": "在 {app} 中打开",
+    "openInMore": "在其他应用中打开",
+    "openInFailed": "无法在该应用中打开文件夹。"
   },
   "apps": {
     "title": "通过 Composio 使用你的应用",
@@ -3343,5 +3353,20 @@
     },
     "atLine": "第 {n} 行",
     "editComment": "编辑"
+  },
+  "aside": {
+    "menu": "旁问…",
+    "title": "旁问",
+    "hint": "不会加入对话",
+    "placeholder": "就这个对话提问…",
+    "ask": "提问",
+    "failed": "未能获得回答。请检查模型是否在运行。",
+    "empty": "没有收到回答。换个问法试试。",
+    "copy": "复制",
+    "copied": "已复制",
+    "inChat": "在对话中提问"
+  },
+  "needsYou": {
+    "menu": "下一个待批准请求"
   }
 }
