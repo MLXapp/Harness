@@ -45,7 +45,7 @@ describe('memory store', () => {
   it('is wired into the chat loop and the system prompt', () => {
     const chat = readFileSync('src/main/ipc/chat.ts', 'utf8')
     expect(chat).toContain('} else if (tc.function.name === "remember" || tc.function.name === "recall" || tc.function.name === "forget") {')
-    expect(chat).toContain('renderMemoryBlock(db.memory.list())')
+    expect(chat).toContain('renderMemoryBlock((() => { try { return db.memory?.list() ?? []; } catch { return []; } })())')
     expect(chat).toContain('if (!memoryEnabled()) ["remember", "recall", "forget"].forEach((t) => disabled.add(t));')
   })
 })

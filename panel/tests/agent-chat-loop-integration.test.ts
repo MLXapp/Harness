@@ -300,7 +300,7 @@ describe('automatic compaction in the chat loop', () => {
 
 describe('compaction inside a tool loop', () => {
   it('compacts between tool rounds and still persists every tool call of the turn', async () => {
-    h.state.maxPromptTokens = 16000
+    h.state.maxPromptTokens = 18000 // fits the full built-in catalog (memory, tasks, browser tools included)
     h.state.messages = []
     h.state.overrides = { ...h.state.overrides, toolResultMaxChars: 40000 }
     writeFileSync(join(workDir, 'big.log'), 'start\n' + 'x'.repeat(60_000) + '\nTHE END\n')
