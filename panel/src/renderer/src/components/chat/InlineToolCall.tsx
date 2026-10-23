@@ -65,12 +65,12 @@ export function InlineToolCall({ group, isStreaming }: InlineToolCallProps) {
       data-vmlx-proof-tool-phase={lastPhase.phase}
       data-vmlx-proof-tool-elapsed-s={!isDone && elapsed != null ? elapsed : undefined}
       data-vmlx-proof-tool-duration-ms={durationMs != null ? durationMs : undefined}
-      className={`my-1.5 rounded-lg border overflow-hidden transition-all duration-150 ${
-      !isDone && isStreaming ? 'border-warning/40 border-l-warning border-l-2' : 'border-border/60'
-    } bg-popover/80`}>
+      className={`mlx-tool-row my-0.5 overflow-hidden rounded-[10px] ${expanded ? 'is-open' : ''} ${!isDone && isStreaming ? 'is-live' : ''}`}>
+      {/* One quiet line per call (DeepSeek Harness / Atomic Agent style): what it did, where, how long. */}
       <button
         onClick={() => { setUserToggled(true); setExpanded(!expanded) }}
-        className="w-full px-2.5 py-1.5 flex items-center gap-1.5 text-xs hover:bg-accent/30 transition-colors"
+        aria-expanded={expanded}
+        className="w-full h-8 px-2 flex items-center gap-2 text-[13px] rounded-[10px] hover:bg-foreground/[0.04] transition-colors"
       >
         {/* Status indicator */}
         {isDone ? (
@@ -84,11 +84,11 @@ export function InlineToolCall({ group, isStreaming }: InlineToolCallProps) {
         )}
 
         {/* Tool label */}
-        <span className="font-medium text-foreground/90">{summary.label}</span>
+        <span className="font-medium text-foreground/85 flex-shrink-0">{summary.label}</span>
 
         {/* Context (file path, command, etc.) */}
         {summary.context && (
-          <span className="font-mono text-muted-foreground truncate" title={summary.context}>
+          <span className="font-mono text-[12.5px] text-muted-foreground truncate min-w-0" title={summary.context}>
             {summary.context}
           </span>
         )}
@@ -102,11 +102,11 @@ export function InlineToolCall({ group, isStreaming }: InlineToolCallProps) {
 
         {/* Phase label (only when not done) */}
         {!isDone && (
-          <span className="text-muted-foreground text-[11px] flex-shrink-0">
-            {!isStreaming ? 'interrupted' :
-              lastPhase.phase === 'calling' ? 'detected' :
-              lastPhase.phase === 'asking' ? 'waiting\u2026' :
-              lastPhase.phase === 'executing' ? 'running\u2026' : ''}
+          <span className={`text-[12px] flex-shrink-0 ${lastPhase.phase === 'asking' ? 'text-[color:var(--link)] font-medium' : 'text-muted-foreground'}`}>
+            {!isStreaming ? t('chat.inlineTool.interrupted') :
+              lastPhase.phase === 'calling' ? '' :
+              lastPhase.phase === 'asking' ? t('chat.inlineTool.waitingOk') :
+              lastPhase.phase === 'executing' ? t('chat.inlineTool.running') : ''}
             {isStreaming && elapsed != null && elapsed >= 1 && lastPhase.phase !== 'asking' ? ` ${elapsed}s` : ''}
           </span>
         )}
@@ -125,7 +125,7 @@ export function InlineToolCall({ group, isStreaming }: InlineToolCallProps) {
       </button>
 
       {expanded && (
-        <div className="border-t border-border/40">
+        <div className="ml-[17px] mb-1.5 border-l border-[var(--hair-strong)] pl-2 mlx-fade-in">
           <ToolCallBody
             toolName={group.name}
             args={args}

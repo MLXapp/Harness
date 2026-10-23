@@ -197,6 +197,11 @@ const api = {
 
     // Coding agent: todo list written by the todo_write tool
     getTodos: (chatId: string) => ipcRenderer.invoke('chat:getTodos', chatId),
+    onOpenFromNotification: (callback: (data: { chatId: string }) => void) => {
+      const handler = (_: unknown, data: { chatId: string }) => callback(data)
+      ipcRenderer.on('chat:openFromNotification', handler)
+      return () => { ipcRenderer.removeListener('chat:openFromNotification', handler) }
+    },
     onTodos: (callback: (data: any) => void) => {
       const handler = (_: any, data: any) => callback(data)
       ipcRenderer.on('chat:todos', handler)

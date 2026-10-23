@@ -600,7 +600,8 @@
       "justNow": "방금 전",
       "yesterdayAt": "어제 {time}",
       "videoPreviewUnavailable": "동영상을 미리 볼 수 없습니다",
-      "videoPreviewUnavailableDetail": "이 앱에서 동영상을 재생하지 못했습니다. 모델이 사용할 원본 첨부 파일은 유지됩니다."
+      "videoPreviewUnavailableDetail": "이 앱에서 동영상을 재생하지 못했습니다. 모델이 사용할 원본 첨부 파일은 유지됩니다.",
+      "working": "작업 중…"
     },
     "messages": {
       "emptyPrimary": "메시지를 보내 대화를 시작하세요",
@@ -648,7 +649,10 @@
       "errorLabel": "오류",
       "diffRemoved": "제거됨",
       "diffAdded": "추가됨",
-      "durationMeasuredTitle": "실행기 자체 타임스탬프로 측정"
+      "durationMeasuredTitle": "실행기 자체 타임스탬프로 측정",
+      "interrupted": "중단됨",
+      "waitingOk": "승인 대기 중",
+      "running": "실행 중…"
     },
     "voice": {
       "stopRecordingTitle": "클릭하여 녹음 중지",
@@ -2402,7 +2406,9 @@
       "preparing": "준비 중..."
     },
     "notify": {
-      "approvalTitle": "MLX Harness에서 승인이 필요합니다"
+      "approvalTitle": "MLX Harness에서 승인이 필요합니다",
+      "turnDone": "MLX Harness 작업 완료",
+      "turnFailed": "MLX Harness가 오류로 중단됨"
     }
   },
   "tools": {
