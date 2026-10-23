@@ -794,7 +794,12 @@
     "queue": {
       "label": "다음",
       "remove": "대기열에서 삭제",
-      "placeholder": "다음 메시지를 입력하세요. 이 답변이 끝나면 전송됩니다…"
+      "placeholder": "이 답변에 추가… (⌥↩는 답변이 끝난 뒤 전송)"
+    },
+    "steer": {
+      "waiting": "답변에 추가하는 중…",
+      "joined": "답변에 추가됨",
+      "added": "작업 중에 추가됨"
     }
   },
   "sessions": {

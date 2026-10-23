@@ -794,7 +794,12 @@
     "queue": {
       "label": "Next",
       "remove": "Remove from the queue",
-      "placeholder": "Type the next message; it sends when this reply ends…"
+      "placeholder": "Add to this reply… (⌥↩ sends it after the reply instead)"
+    },
+    "steer": {
+      "waiting": "Joining the reply…",
+      "joined": "Added to the reply",
+      "added": "Added while it was working"
     }
   },
   "sessions": {

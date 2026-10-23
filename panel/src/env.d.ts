@@ -290,6 +290,9 @@ declare global {
         ) => Promise<{ success: boolean }>;
         getOverrides: (chatId: string) => Promise<any>;
         setPlanMode: (chatId: string, on: boolean) => Promise<boolean>;
+        steer?: (chatId: string, id: string, text: string) => Promise<{ accepted: boolean }>;
+        onSteered?: (callback: (data: { chatId: string; ids: string[]; messageId?: string; content?: string | null }) => void) => () => void;
+        onSteerUnused?: (callback: (data: { chatId: string; items: Array<{ id: string; text: string }> }) => void) => () => void;
         getPlanMode: (chatId: string) => Promise<boolean>;
         clearOverrides: (chatId: string) => Promise<{ success: boolean }>;
         pickImages: () => Promise<Array<{ dataUrl: string; name: string }>>;
