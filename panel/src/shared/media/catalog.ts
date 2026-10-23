@@ -35,6 +35,8 @@ export type ParamLabel = 'duration' | 'aspect' | 'resolution' | 'audio' | 'voice
 
 export interface MediaPrice {
   usd: number
+  /** Per-second price by the `resolution` setting, where it changes the price. */
+  byResolution?: Record<string, number>
   /** What one `usd` buys. 'second' = per second of output video/audio. */
   per: 'image' | 'second' | 'run' | '1k-chars' | 'song'
   /** Price depends on settings (e.g. sound on); shown as "from". */
@@ -114,7 +116,8 @@ const VIDEO: MediaModel[] = [
     id: 'ws:wan-3.0', kind: 'video', task: 'text-to-video', where: 'cloud', provider: 'wavespeed',
     path: 'alibaba/wan-3.0/text-to-video', name: 'Wan 3.0', maker: 'Alibaba',
     blurb: '2 to 30 second clips with sound, up to 1080p.', badge: 'Best value',
-    price: { usd: 0.475, per: 'run', from: true },
+    // WaveSpeed quotes (23 Oct 2026, 5 s with sound): 480p $0.2375, 720p $0.475, 1080p $0.95.
+    price: { usd: 0.0475, per: 'second', from: true, byResolution: { '480p': 0.0475, '720p': 0.095, '1080p': 0.19 } },
     license: { name: 'Alibaba Wan 3.0 (API only)', commercial: true },
     promptField: 'prompt',
     params: [seconds('duration', range(2, 30), 5), aspect('aspect_ratio', ['16:9', '9:16', '1:1', '4:3', '3:4']),
@@ -280,6 +283,7 @@ const AUDIO: MediaModel[] = [
     id: 'ws:qwen3-tts', kind: 'audio', task: 'text-to-speech', where: 'cloud', provider: 'wavespeed',
     path: 'wavespeed-ai/qwen3-tts/text-to-speech', name: 'Qwen3-TTS', maker: 'Alibaba Qwen',
     blurb: 'Ten languages, nine voices, style instructions.',
+    price: { usd: 0.005, per: 'run', from: true },
     license: { name: 'Apache-2.0', commercial: true },
     promptField: 'text',
     params: [
@@ -326,6 +330,7 @@ const MUSIC: MediaModel[] = [
     id: 'ws:elevenlabs-music', kind: 'music', task: 'song', where: 'cloud', provider: 'wavespeed',
     path: 'elevenlabs/music', name: 'ElevenLabs Music', maker: 'ElevenLabs',
     blurb: 'Soundtracks and songs from a description.',
+    price: { usd: 0.01, per: 'second' },
     license: { name: 'ElevenLabs (API only)', commercial: true },
     promptField: 'prompt',
     params: [
@@ -388,5 +393,6 @@ export function estimateCost(model: MediaModel, values: Record<string, unknown>,
   if (!Number.isFinite(duration) || duration <= 0) return undefined
   // ElevenLabs-style lengths are in milliseconds.
   const secondsOut = duration > 1000 ? duration / 1000 : duration
-  return usd * secondsOut
+  const rate = model.price.byResolution?.[String(values.resolution)] ?? usd
+  return rate * secondsOut
 }

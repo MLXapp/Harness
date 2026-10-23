@@ -18,7 +18,7 @@ import { pipeline } from 'stream/promises'
 import type { ChildProcess } from 'child_process'
 import { estimateCost, mediaModel, MEDIA_PROVIDER_NAMES, type MediaKind, type MediaProviderId } from '../../shared/media/catalog'
 import type { MediaJob, MediaJobOutput, MediaResult, MediaSubmitRequest } from '../../shared/media/jobs'
-import { buildCloudRequest, coerceParam, nextPollDelayMs, outputExtension, parsePoll, parseSubmit, pollUrl } from '../../shared/media/request'
+import { buildCloudRequest, buildQuoteRequest, coerceParam, nextPollDelayMs, outputExtension, parsePoll, parseQuote, parseSubmit, pollUrl } from '../../shared/media/request'
 import { mediaUrl, mimeFor } from './protocol'
 import { publicJob, type MediaJobStore, type StoredMediaJob } from './store'
 
@@ -131,6 +131,34 @@ export class MediaRunner {
       }
     })()
     return { ok: true, job: publicJob(job) }
+  }
+
+  /** The provider's own price for this request (nothing runs, nothing is charged). */
+  async quote(request: MediaSubmitRequest): Promise<MediaResult<{ usd: number }>> {
+    const model = mediaModel(request.modelId)
+    if (!model || model.where !== 'cloud') return { ok: false, error: 'No quote for this model' }
+    const key = this.deps.resolveKey(model.provider)
+    if (!key) return { ok: false, error: 'Not connected' }
+    const values = Object.fromEntries(model.params.map(p => [p.key, coerceParam(p, request.values?.[p.key])]))
+    let req
+    try {
+      req = buildQuoteRequest(model, { prompt: String(request.prompt || 'preview'), lyrics: request.lyrics, values })
+    } catch (error) {
+      return { ok: false, error: (error as Error).message }
+    }
+    try {
+      const res = await this.fetch(req.url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(req.body),
+        signal: AbortSignal.timeout(15_000),
+      })
+      const json = await res.json().catch(() => ({}))
+      const usd = res.ok ? parseQuote(json) : undefined
+      return usd === undefined ? { ok: false, error: 'No quote' } : { ok: true, usd }
+    } catch {
+      return { ok: false, error: 'No quote' }
+    }
   }
 
   cancel(id: string): MediaResult<object> {

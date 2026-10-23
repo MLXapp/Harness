@@ -420,6 +420,7 @@ const api = {
   media: {
     list: (kind: import('../shared/media/catalog').MediaKind): Promise<import('../shared/media/jobs').MediaJob[]> => ipcRenderer.invoke('media:list', kind),
     submit: (request: import('../shared/media/jobs').MediaSubmitRequest): Promise<import('../shared/media/jobs').MediaResult<{ job: import('../shared/media/jobs').MediaJob }>> => ipcRenderer.invoke('media:submit', request),
+    quote: (request: import('../shared/media/jobs').MediaSubmitRequest): Promise<import('../shared/media/jobs').MediaResult<{ usd: number }>> => ipcRenderer.invoke('media:quote', request),
     cancel: (id: string): Promise<import('../shared/media/jobs').MediaResult<object>> => ipcRenderer.invoke('media:cancel', id),
     delete: (id: string): Promise<import('../shared/media/jobs').MediaResult<object>> => ipcRenderer.invoke('media:delete', id),
     reveal: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('media:reveal', id),
