@@ -3226,6 +3226,18 @@ export function registerChatHandlers(
           attachToolsForCurrentTurn ? availableToolDefinitions() : [];
         const notePromptSent = () => {
           lastSentHeuristicTokens = estimateRequestTokens(requestMessages, toolsForEstimate());
+          // Context gauge in the composer: how full the window is now.
+          try {
+            const win = getWindow();
+            if (win && !win.isDestroyed() && contextWindow.tokens > 0) {
+              win.webContents.send("chat:context", {
+                chatId,
+                tokens: Math.round(tokenCalibrator.estimate(lastSentHeuristicTokens)),
+                window: contextWindow.tokens,
+                known: contextWindow.known,
+              });
+            }
+          } catch (_) {}
         };
         const emitCompactionEvent = (event: Record<string, unknown>) => {
           try {

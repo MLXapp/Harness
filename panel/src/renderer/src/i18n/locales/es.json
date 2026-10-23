@@ -787,6 +787,9 @@
       "apple": "Dictado de Apple",
       "whisper": "Whisper",
       "hint": "El dictado de Apple usa el dictado del sistema de macOS. Whisper graba y transcribe con un modelo en este Mac."
+    },
+    "context": {
+      "title": "Contexto: {used} de {window} tokens ({pct} %). Los mensajes antiguos se resumen al {at} %. Haz clic para resumir ahora."
     }
   },
   "sessions": {

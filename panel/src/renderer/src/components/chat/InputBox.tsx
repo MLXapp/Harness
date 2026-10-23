@@ -4,6 +4,7 @@ import { VoiceChat } from './VoiceChat'
 import { ModelSwitcher } from './ModelSwitcher'
 import { AgentModeChip, PlanHandoff } from '../code/AgentMode'
 import { AppsButton } from '../apps/AppsButton'
+import { ContextGauge } from './ContextGauge'
 import { useChatModel } from './ChatModelContext'
 import { useVoiceInput } from './voiceInput'
 import { useTranslation } from '../../i18n'
@@ -427,6 +428,7 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
           {workspace === 'code' && <AgentModeChip compact={compact} />}
           <AppsButton compact={compact} />
           <div className="min-w-0 flex-1" />
+          <ContextGauge onCompact={() => onSend('/compact')} disabled={!!loading} />
           <VoiceChat
             onTranscription={handleTranscription}
             endpoint={sessionEndpoint}

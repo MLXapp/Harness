@@ -193,6 +193,11 @@ const api = {
     answerApproval: (id: string, answer: 'allow-once' | 'allow-always' | 'deny') =>
       ipcRenderer.invoke('chat:answerApproval', id, answer),
     getPendingApprovals: (chatId: string) => ipcRenderer.invoke('chat:pendingApprovals', chatId),
+    onContext: (callback: (data: { chatId: string; tokens: number; window: number; known: boolean }) => void) => {
+      const listener = (_e: unknown, data: { chatId: string; tokens: number; window: number; known: boolean }) => callback(data)
+      ipcRenderer.on('chat:context', listener)
+      return () => { ipcRenderer.removeListener('chat:context', listener) }
+    },
     sandboxStatus: () => ipcRenderer.invoke('chat:sandboxStatus'),
 
     // Coding agent: todo list written by the todo_write tool

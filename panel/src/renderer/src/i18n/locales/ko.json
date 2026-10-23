@@ -787,6 +787,9 @@
       "apple": "Apple 받아쓰기",
       "whisper": "Whisper",
       "hint": "Apple 받아쓰기는 macOS 시스템 받아쓰기를 사용합니다. Whisper는 이 Mac의 모델로 녹음하고 받아씁니다."
+    },
+    "context": {
+      "title": "컨텍스트: {window} 토큰 중 {used} ({pct}%). {at}%가 되면 이전 메시지를 요약합니다. 클릭하면 지금 요약합니다."
     }
   },
   "sessions": {
