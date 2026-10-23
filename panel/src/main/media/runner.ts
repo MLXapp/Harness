@@ -19,7 +19,7 @@ import type { ChildProcess } from 'child_process'
 import { estimateCost, mediaModel, MEDIA_PROVIDER_NAMES, type MediaKind, type MediaProviderId } from '../../shared/media/catalog'
 import type { MediaJob, MediaJobOutput, MediaResult, MediaSubmitRequest } from '../../shared/media/jobs'
 import { buildCloudRequest, buildQuoteRequest, coerceParam, nextPollDelayMs, outputExtension, parsePoll, parseQuote, parseSubmit, pollUrl } from '../../shared/media/request'
-import { mediaUrl, mimeFor } from './protocol'
+import { mediaUrl, mimeFor } from './paths'
 import { publicJob, type MediaJobStore, type StoredMediaJob } from './store'
 
 type Fetch = typeof fetch
