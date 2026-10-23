@@ -723,13 +723,15 @@
         "network": "Este comando de git se conecta a un remoto.",
         "outside": "Este comando de git puede actuar fuera del directorio de trabajo.",
         "git-internals": "Esto cambia hooks o ajustes de git, que luego se ejecutan fuera del sandbox.",
-        "workspace": "Los permisos de Espacio de trabajo piden aprobación para esto."
+        "workspace": "Los permisos de Espacio de trabajo piden aprobación para esto.",
+        "mcp-write": "Esta herramienta puede cambiar cosas fuera de MLX Harness, así que pregunta antes."
       },
       "reason": "Motivo del modelo",
       "allowOnce": "Permitir una vez",
       "deny": "Denegar",
       "alwaysAllow": "Permitir siempre este comando en este chat",
-      "autoDeny": "Se denegará automáticamente en {time}"
+      "autoDeny": "Se denegará automáticamente en {time}",
+      "alwaysAllowTool": "Permitir siempre esta herramienta en este chat"
     },
     "switcher": {
       "title": "Cambiar de modelo (⌘⇧M)",
@@ -3104,14 +3106,16 @@
     "access": "Acceso",
     "recommended": "Recomendado",
     "mode": {
-      "read-only": "Solo lectura",
-      "workspace": "Escritura en el proyecto",
-      "full": "Acceso total"
+      "read-only": "Preguntar antes",
+      "workspace": "Automático",
+      "full": "Acceso total",
+      "plan": "Planificar"
     },
     "modeHelp": {
       "read-only": "Lee archivos y busca. Pregunta antes de escribir un archivo o ejecutar un comando.",
       "workspace": "Edita archivos de esta carpeta y ejecuta comandos en un entorno aislado sin red. Pregunta antes de salir de ella.",
-      "full": "Edita cualquier cosa y ejecuta cualquier comando sin preguntar. Úsalo solo con proyectos de confianza."
+      "full": "Edita cualquier cosa y ejecuta cualquier comando sin preguntar. Úsalo solo con proyectos de confianza.",
+      "plan": "Lee y busca, y luego propone un plan. No cambia nada hasta que digas que siga."
     },
     "models": "Modelo",
     "modelsHelp": "Lo eliges en el cuadro de mensaje y puedes cambiarlo cuando quieras. Buenas opciones para programar:",
@@ -3128,6 +3132,14 @@
         "2": "Busca errores y código arriesgado",
         "3": "Escribe un README para este proyecto"
       }
+    },
+    "modeTitle": "Modo",
+    "handoff": {
+      "ready": "Plan listo. ¿Lo llevamos a cabo?",
+      "auto": "Ejecutar en Automático",
+      "full": "Ejecutar con acceso total",
+      "dismiss": "Descartar",
+      "go": "Adelante con el plan."
     }
   }
 }

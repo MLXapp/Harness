@@ -6,11 +6,38 @@
 import { readFileSync, writeFileSync, copyFileSync, renameSync, unlinkSync, rmdirSync, mkdirSync, readdirSync, statSync, existsSync, realpathSync } from 'fs'
 import { resolve, relative, dirname, basename, isAbsolute, join, sep } from 'path'
 import { execFileSync, spawn, ChildProcess } from 'child_process'
-import { clipboard } from 'electron'
+import * as electron from 'electron'
 import { db } from '../database'
 import { attachChildProcessStreamErrorGuard } from '../childProcessStreamGuards'
 import { looksLikeSandboxDenial, sandboxExec, seatbeltSupport } from '../agent/seatbelt'
 import { sandboxEscalationMarker } from '../agent/permissions'
+import { findLoose, nearestFragment, spliceLines } from '../agent/editMatch'
+import { FileBackups, ago, shownPath } from '../agent/fileBackups'
+import { tmpdir } from 'os'
+
+/** An Electron export, or undefined outside Electron (a mocked module throws on missing exports). */
+function electronPart<T>(name: string): T | undefined {
+  try { return (electron as any)?.[name] as T | undefined } catch { return undefined }
+}
+
+
+// ─── Undo safety ─────────────────────────────────────────────────────────────
+
+function backupRoot(): string {
+  if (process.env.MLX_HARNESS_BACKUP_DIR) return process.env.MLX_HARNESS_BACKUP_DIR
+  try {
+    const app = electronPart<typeof electron.app>('app')
+    if (app?.getPath) return join(app.getPath('userData'), 'agent-backups')
+  } catch { /* not in Electron (tests) */ }
+  return join(tmpdir(), 'mlx-harness-agent-backups')
+}
+
+/** Copies of files the agent changed, for restore_file. */
+export const fileBackups = new FileBackups(backupRoot)
+
+function backup(fullPath: string, workingDir: string, tool: string): void {
+  fileBackups.save(fullPath, workingDir, tool)
+}
 
 // ─── Spawned Process Tracking ────────────────────────────────────────────────
 
@@ -258,7 +285,9 @@ export async function executeBuiltinTool(
       case 'create_directory':
         result = createDirectory(args.path, workingDir); break
       case 'delete_file':
-        result = deleteFile(args.path, workingDir); break
+        result = await deleteFile(args.path, workingDir); break
+      case 'restore_file':
+        result = restoreFile(args.path, args.id, workingDir); break
       case 'move_file':
         result = moveFile(args.source, args.destination, workingDir); break
       case 'copy_file':
@@ -370,11 +399,15 @@ function writeFile(path: string, content: string, workingDir: string): ToolResul
   if (!path) return { content: 'Missing required parameter: path', is_error: true }
   if (content === undefined || content === null) return { content: 'Missing required parameter: content', is_error: true }
   const fullPath = resolvePath(workingDir, path)
+  const existed = existsSync(fullPath)
+  const saved = existed ? fileBackups.save(fullPath, workingDir, 'write_file') : null
   mkdirSync(dirname(fullPath), { recursive: true })
   writeFileSync(fullPath, content, 'utf-8')
+  if (!existed) fileBackups.noteCreated(fullPath)
   const lines = fileDisplayLines(content).length
   const bytes = Buffer.byteLength(content, 'utf-8')
-  return { content: `Wrote ${fullPath} (${lines} lines, ${bytes} bytes)`, is_error: false }
+  const note = saved && 'saved' in saved ? ' — replaced an existing file; its previous version can be put back with restore_file' : ''
+  return { content: `Wrote ${fullPath} (${lines} lines, ${bytes} bytes)${note}`, is_error: false }
 }
 
 function editFile(
@@ -399,12 +432,36 @@ function editFile(
   // Exact match
   const idx = content.indexOf(searchText)
   if (idx === -1) {
+    // Second chance for near misses (trailing spaces, line ends, indent).
+    const loose = replaceAll ? { kind: 'none' as const } : findLoose(content, searchText)
+    if (loose.kind === 'unique') {
+      backup(fullPath, workingDir, 'edit_file')
+      writeFileSync(fullPath, spliceLines(content, loose.start, loose.end, loose.reindent(replacementText)), 'utf-8')
+      const how = loose.level === 'trailing' ? 'trailing whitespace or line endings' : 'indentation or blank lines'
+      return {
+        content: `Edited ${path}: replaced lines ${loose.start + 1}–${loose.end} (matched ignoring ${how}; read the file again before the next edit)`,
+        is_error: false
+      }
+    }
     const allLines = content.split('\n')
-    const showLines = Math.min(allLines.length, 300)
+    if (loose.kind === 'ambiguous') {
+      return {
+        content: `search_text not found exactly in ${path}, and it matches ${loose.count} places when whitespace is ignored. Copy the exact text from read_file and add a line or two of surrounding context.`,
+        is_error: true
+      }
+    }
+    const near = nearestFragment(content, searchText)
+    if (near) {
+      return {
+        content: `search_text not found in ${path} (${allLines.length} lines). The closest part of the file is lines ${near.from}–${near.to}:\n\n${near.text}\n\nCopy the text exactly from these lines (including indentation) and try again.`,
+        is_error: true
+      }
+    }
+    const showLines = Math.min(allLines.length, 120)
     const preview = allLines.slice(0, showLines).map((l, i) => `${String(i + 1).padStart(5)} | ${l}`).join('\n')
-    const truncMsg = allLines.length > showLines ? `\n[...${allLines.length - showLines} more lines]` : ''
+    const truncMsg = allLines.length > showLines ? `\n[...${allLines.length - showLines} more lines; use read_file with offset to see them]` : ''
     return {
-      content: `search_text not found in ${path} (${allLines.length} lines). The search_text must match EXACTLY including whitespace and indentation. Here is the file content:\n\n${preview}${truncMsg}`,
+      content: `search_text not found in ${path} (${allLines.length} lines), and nothing in the file looks like it. The search_text must match EXACTLY including whitespace and indentation. Here is the start of the file:\n\n${preview}${truncMsg}`,
       is_error: true
     }
   }
@@ -413,6 +470,7 @@ function editFile(
     // Replace all occurrences
     const newContent = content.split(searchText).join(replacementText)
     const occurrences = (content.split(searchText).length - 1)
+    backup(fullPath, workingDir, 'edit_file')
     writeFileSync(fullPath, newContent, 'utf-8')
     return {
       content: `Edited ${path}: replaced ${occurrences} occurrence(s)`,
@@ -429,7 +487,8 @@ function editFile(
     }
   }
 
-  const newContent = content.replace(searchText, replacementText)
+  const newContent = content.slice(0, idx) + replacementText + content.slice(idx + searchText.length)
+  backup(fullPath, workingDir, 'edit_file')
   writeFileSync(fullPath, newContent, 'utf-8')
 
   const oldLines = searchText.split('\n').length
@@ -602,28 +661,50 @@ function createDirectory(path: string, workingDir: string): ToolResult {
   return { content: `Created directory: ${fullPath}`, is_error: false }
 }
 
-function deleteFile(path: string, workingDir: string): ToolResult {
+/**
+ * delete_file moves the file or folder to the macOS Trash, so the user can put
+ * it back from Finder. Without a Trash (not in Electron), a file is copied
+ * aside for restore_file first and only empty folders are removed.
+ */
+async function deleteFile(path: string, workingDir: string): Promise<ToolResult> {
   if (!path) return { content: 'Missing required parameter: path', is_error: true }
   const fullPath = resolvePath(workingDir, path)
   if (!existsSync(fullPath)) {
     return { content: `Path not found: ${path}`, is_error: true }
   }
+  const realWorkingDir = (() => { try { return realpathSync(workingDir) } catch { return workingDir } })()
+  if (fullPath === realWorkingDir) {
+    return { content: 'Refusing to delete the working folder itself.', is_error: true }
+  }
   const stat = statSync(fullPath)
+  const trashItem = electronPart<typeof electron.shell>('shell')?.trashItem
+  if (typeof trashItem === 'function') {
+    try {
+      await trashItem(fullPath)
+      return { content: `Moved ${stat.isDirectory() ? 'folder' : 'file'} to the Trash: ${path} (it can be put back from the Trash in Finder)`, is_error: false }
+    } catch (err: any) {
+      if (stat.isDirectory()) return { content: `Could not move ${path} to the Trash: ${err?.message ?? err}`, is_error: true }
+      // Fall through to the copy-aside path for a file.
+    }
+  }
   if (stat.isDirectory()) {
     try {
       rmdirSync(fullPath) // Only removes empty directories
     } catch (err: any) {
       if (err.code === 'ENOTEMPTY') {
-        return { content: `Directory is not empty: ${path}. Remove contents first or use run_command with rm -rf.`, is_error: true }
+        return { content: `Directory is not empty: ${path}. Remove its files first.`, is_error: true }
       }
       throw err
     }
     return { content: `Deleted directory: ${path}`, is_error: false }
   }
+  const saved = fileBackups.save(fullPath, workingDir, 'delete_file')
   unlinkSync(fullPath)
-  return { content: `Deleted file: ${path}`, is_error: false }
+  const note = 'saved' in saved ? ' (a copy was kept; restore_file can put it back)' : ''
+  return { content: `Deleted file: ${path}${note}`, is_error: false }
 }
 
+/** Moves never overwrite: an existing destination is refused. */
 function moveFile(source: string, destination: string, workingDir: string): ToolResult {
   if (!source) return { content: 'Missing required parameter: source', is_error: true }
   if (!destination) return { content: 'Missing required parameter: destination', is_error: true }
@@ -632,9 +713,33 @@ function moveFile(source: string, destination: string, workingDir: string): Tool
   if (!existsSync(srcPath)) {
     return { content: `Source not found: ${source}`, is_error: true }
   }
+  if (existsSync(dstPath) && srcPath.toLowerCase() !== dstPath.toLowerCase()) {
+    return { content: `Destination already exists: ${destination}. Moves never overwrite; choose another name, or delete the destination first.`, is_error: true }
+  }
   mkdirSync(dirname(dstPath), { recursive: true })
   renameSync(srcPath, dstPath)
   return { content: `Moved ${source} → ${destination}`, is_error: false }
+}
+
+/**
+ * restore_file: without arguments, list the saved copies; with a path, put
+ * back its newest copy; with an id, put back that copy.
+ */
+function restoreFile(path: string | undefined, id: string | undefined, workingDir: string): ToolResult {
+  const fullPath = path ? resolvePath(workingDir, path) : undefined
+  if (!fullPath && !id) {
+    const list = fileBackups.list(workingDir).slice(0, 20)
+    if (list.length === 0) return { content: 'No saved copies for this folder yet.', is_error: false }
+    const rows = list.map(e => `${e.id}  ${shownPath(e.path, workingDir)}  (${ago(e.at)}, before ${e.reason}, ${formatBytes(e.size)})`)
+    return { content: `Saved copies, newest first:\n${rows.join('\n')}\n\nCall restore_file with path (newest copy of that file) or id.`, is_error: false }
+  }
+  const result = fileBackups.restore(workingDir, { id, fullPath })
+  if (!result.ok) {
+    return { content: `${result.error} Call restore_file without arguments to list the saved copies.`, is_error: true }
+  }
+  const shown = shownPath(result.entry.path, workingDir)
+  const undo = result.undo ? ` The version it replaced was saved as ${result.undo.id}.` : ''
+  return { content: `Restored ${shown} to its copy from ${ago(result.entry.at)} (before ${result.entry.reason}).${undo}`, is_error: false }
 }
 
 function copyFile(source: string, destination: string, workingDir: string): ToolResult {
@@ -649,8 +754,11 @@ function copyFile(source: string, destination: string, workingDir: string): Tool
   if (stat.isDirectory()) {
     return { content: `Cannot copy a directory. Use run_command with cp -r instead.`, is_error: true }
   }
+  const existed = existsSync(dstPath)
+  if (existed) backup(dstPath, workingDir, 'copy_file')
   mkdirSync(dirname(dstPath), { recursive: true })
   copyFileSync(srcPath, dstPath)
+  if (!existed) fileBackups.noteCreated(dstPath)
   return { content: `Copied ${source} → ${destination}`, is_error: false }
 }
 
@@ -849,6 +957,7 @@ function patchFile(path: string, patch: string, workingDir: string): ToolResult 
     applied++
   }
 
+  backup(fullPath, workingDir, 'patch_file')
   writeFileSync(fullPath, lines.join('\n'), 'utf-8')
   return { content: `Patched ${path}: applied ${applied} hunk(s)`, is_error: false }
 }
@@ -895,6 +1004,7 @@ function batchEdit(
 
   const okCount = results.filter(r => r.includes('OK')).length
   if (okCount > 0) {
+    backup(fullPath, workingDir, 'batch_edit')
     writeFileSync(fullPath, content, 'utf-8')
   }
   return {
@@ -1254,6 +1364,7 @@ function insertText(path: string, line: number, text: string, workingDir: string
   const insertIdx = (line <= 0 || line > lines.length) ? lines.length : line - 1
   const newLines = text.split('\n')
   lines.splice(insertIdx, 0, ...newLines)
+  backup(fullPath, workingDir, 'insert_text')
   writeFileSync(fullPath, lines.join('\n'), 'utf-8')
   return { content: `Inserted ${newLines.length} line(s) at line ${insertIdx + 1} in ${path}`, is_error: false }
 }
@@ -1279,6 +1390,7 @@ function replaceLines(path: string, startLine: number, endLine: number, text: st
   const newLines = text.split('\n')
   const removedCount = endLine - startLine + 1
   lines.splice(startLine - 1, removedCount, ...newLines)
+  backup(fullPath, workingDir, 'replace_lines')
   writeFileSync(fullPath, lines.join('\n'), 'utf-8')
   return { content: `Replaced lines ${startLine}-${endLine} (${removedCount} lines) with ${newLines.length} line(s) in ${path}`, is_error: false }
 }
@@ -1416,6 +1528,7 @@ function applyRegex(pattern: string, replacement: string, path: string, glob: st
       const content = readFileSync(file, 'utf-8')
       const matches = content.match(regex)
       if (matches && matches.length > 0) {
+        backup(file, workingDir, 'apply_regex')
         writeFileSync(file, content.replace(regex, replacement), 'utf-8')
         results.push(`${relative(workingDir, file)}: ${matches.length} replacement(s)`)
         totalReplacements += matches.length
@@ -1612,14 +1725,14 @@ function countTokens(text: string): ToolResult {
 // ─── Clipboard ───────────────────────────────────────────────────────────────
 
 async function clipboardRead(): Promise<ToolResult> {
-  const text = await clipboard.readText()
+  const text = await electronPart<typeof electron.clipboard>('clipboard')!.readText()
   if (!text) return { content: '(clipboard is empty)', is_error: false }
   return { content: `Clipboard (${text.length} chars):\n\n${text}`, is_error: false }
 }
 
 async function clipboardWrite(text: string): Promise<ToolResult> {
   if (text === undefined || text === null) return { content: 'Missing required parameter: text', is_error: true }
-  await clipboard.writeText(text)
+  await electronPart<typeof electron.clipboard>('clipboard')!.writeText(text)
   return { content: `Written ${text.length} characters to clipboard.`, is_error: false }
 }
 

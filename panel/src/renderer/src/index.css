@@ -548,8 +548,11 @@ html.vibrancy .mlx-sidebar { background: var(--sidebar-wash), var(--sidebar-glas
   font-size: 13.5px; text-align: left;
 }
 .mlx-menu-item:hover { background: rgb(var(--primary) / 0.12); }
+.mlx-menu-item.is-tall { height: auto; min-height: 32px; padding: 8px 10px; align-items: flex-start; }
 @keyframes mlx-menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
 .mlx-menu-in { animation: mlx-menu-in 180ms var(--ease) both; transform-origin: top right; }
+@keyframes mlx-menu-up { from { opacity: 0; transform: translateY(4px) scale(0.98); } to { opacity: 1; transform: none; } }
+.mlx-menu-in.mlx-menu-up { animation-name: mlx-menu-up; transform-origin: bottom left; }
 
 @keyframes mlx-fade-in { from { opacity: 0; } to { opacity: 1; } }
 .mlx-fade-in { animation: mlx-fade-in var(--dur) var(--ease) both; }

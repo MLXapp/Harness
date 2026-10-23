@@ -64,8 +64,48 @@ export function repeatReminderText(toolName: string, count: number, canonical: s
   )
 }
 
+/**
+ * Loop guard (pattern from Atomic Agent, MIT): from the 5th identical call in
+ * a session the call is no longer run; the model gets a short refusal instead.
+ * Small local models otherwise retry the same failing call until the tool
+ * budget is gone. After VETOES_BEFORE_ANSWER refusals in one turn the model is
+ * told to stop using tools and answer.
+ */
+export const VETO_AT = 5
+export const VETOES_BEFORE_ANSWER = 3
+
+export function vetoText(toolName: string, count: number, finalNotice: boolean): string {
+  return (
+    `[Not run: this would be call #${count} of ${toolName} with exactly the same arguments, and the earlier ones did not change anything. ` +
+    'Use the results you already have, change the arguments, or try a different tool.' +
+    (finalNotice ? ' Tools are paused for the rest of this turn: answer the user now with what you have, and say what is still unknown.' : '') +
+    ']'
+  )
+}
+
 export class RepeatCallTracker {
   private readonly sessions = new Map<string, Map<string, number>>()
+  private readonly vetoes = new Map<string, number>()
+
+  /**
+   * Before running a call: null when it may run, else the refusal text to
+   * return instead (the call is counted either way).
+   */
+  veto(sessionId: string, toolName: string, args: unknown): { text: string; stopTools: boolean } | null {
+    const canonical = canonicalArguments(args)
+    const prior = this.sessions.get(sessionId)?.get(`${toolName}\u0000${canonical}`) ?? 0
+    if (prior + 1 < VETO_AT) return null
+    this.record(sessionId, toolName, args)
+    const n = (this.vetoes.get(sessionId) ?? 0) + 1
+    this.vetoes.set(sessionId, n)
+    const stopTools = n >= VETOES_BEFORE_ANSWER
+    return { text: vetoText(toolName, prior + 1, stopTools), stopTools }
+  }
+
+  /** A new user turn: refusals count again from zero (call counts stay). */
+  newTurn(sessionId: string): void {
+    this.vetoes.delete(sessionId)
+  }
 
   /** Count one executed call and return the advisory note to append, if any. */
   record(sessionId: string, toolName: string, args: unknown): string | null {
@@ -83,6 +123,7 @@ export class RepeatCallTracker {
 
   clear(sessionId: string): void {
     this.sessions.delete(sessionId)
+    this.vetoes.delete(sessionId)
   }
 }
 

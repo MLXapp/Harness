@@ -1,10 +1,11 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { Check, ChevronDown, Eye, FolderOpen, PenLine, ShieldAlert, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { Eye, FolderOpen, PenLine, ShieldAlert, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { FEATURED_CLOUD_MODELS, featuredAccount } from '../../../../shared/curated'
 import { AccountGlyph } from '../accounts/AccountGlyph'
 import { readStored, writeStored } from '../media/hooks'
 import { WorkspaceKindContext } from './workspaceKind'
+import { CodeModeContext, type CodeModeValue } from './AgentMode'
 
 export type AccessMode = 'read-only' | 'workspace' | 'full'
 
@@ -43,21 +44,23 @@ const folderName = (path: string) => path.replace(/\/+$/, '').split('/').pop() |
  * no session open it shows the start screen: folder, access, a word on
  * models. With one open it shows the chat with a project bar above it.
  */
-export function CodeWorkspace({ codeDirectory, access, onStart, onAccessChange, children }: {
+export function CodeWorkspace({ codeDirectory, mode, onStart, children }: {
   /** The open chat's project folder, when it is a Code session. */
   codeDirectory: string | null
-  access: AccessMode
+  /** The session's agent mode (the composer's mode chip changes it). */
+  mode: CodeModeValue
   onStart: (start: CodeStart) => Promise<void> | void
-  onAccessChange: (mode: AccessMode) => void
   /** The chat view for an open session. */
   children: ReactNode
 }) {
   if (codeDirectory) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <ProjectBar folder={codeDirectory} access={access} onAccessChange={onAccessChange} />
+        <ProjectBar folder={codeDirectory} />
         <WorkspaceKindContext.Provider value="code">
-          <div className="min-h-0 flex-1">{children}</div>
+          <CodeModeContext.Provider value={mode}>
+            <div className="min-h-0 flex-1">{children}</div>
+          </CodeModeContext.Provider>
         </WorkspaceKindContext.Provider>
       </div>
     )
@@ -166,45 +169,13 @@ function CodeHome({ onStart }: { onStart: (start: CodeStart) => Promise<void> | 
   )
 }
 
-/** Above an open Code session: the project and its access level (changeable). */
-function ProjectBar({ folder, access, onAccessChange }: { folder: string; access: AccessMode; onAccessChange: (m: AccessMode) => void }) {
-  const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
-  useEffect(() => {
-    if (!open) return
-    const close = () => setOpen(false)
-    window.addEventListener('mousedown', close)
-    return () => window.removeEventListener('mousedown', close)
-  }, [open])
-  const Icon = ACCESS.find(([m]) => m === access)?.[1] ?? PenLine
+/** Above an open Code session: the project folder (the mode lives in the composer). */
+function ProjectBar({ folder }: { folder: string }) {
   return (
     <div data-vmlx-section="code-project-bar" className="flex h-11 shrink-0 items-center gap-2 px-5 mlx-hair-b">
       <FolderOpen className="h-4 w-4 shrink-0 text-primary" strokeWidth={1.8} />
       <span className="truncate text-[13.5px] font-medium" title={folder}>{folderName(folder)}</span>
       <span className="hidden min-w-0 truncate text-[12.5px] text-muted-foreground md:inline">{folder}</span>
-      <span className="flex-1" />
-      <div className="relative" onMouseDown={e => e.stopPropagation()}>
-        <button type="button" data-vmlx-control="code-access" onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}
-          className={`mlx-chip ${access === 'full' ? 'text-warning' : ''}`}>
-          <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />{t(`code.mode.${access}`)}<ChevronDown className="h-3 w-3" />
-        </button>
-        {open && (
-          <div role="menu" className="mlx-menu mlx-menu-in absolute right-0 top-[34px] z-50 w-[300px]">
-            {ACCESS.map(([mode, ModeIcon]) => (
-              <button key={mode} type="button" role="menuitemradio" aria-checked={access === mode}
-                onClick={() => { onAccessChange(mode); setOpen(false) }}
-                className="mlx-menu-item h-auto items-start py-2">
-                <ModeIcon className={`mt-0.5 h-4 w-4 shrink-0 ${mode === 'full' ? 'text-warning' : 'text-muted-foreground'}`} />
-                <span className="flex-1">
-                  <span className="block font-medium">{t(`code.mode.${mode}`)}</span>
-                  <span className="block text-[12.5px] leading-[17px] text-muted-foreground">{t(`code.modeHelp.${mode}`)}</span>
-                </span>
-                {access === mode && <Check className="mt-0.5 h-4 w-4 text-primary" />}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   )
 }

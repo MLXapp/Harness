@@ -163,7 +163,7 @@ export function ApprovalCards({ chatId }: { chatId: string }) {
                         onClick={() => respond(card.id, 'allow-always')}
                         className="px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline disabled:opacity-40"
                       >
-                        {t('chat.approval.alwaysAllow')}
+                        {t(card.kind === 'mcp' ? 'chat.approval.alwaysAllowTool' : 'chat.approval.alwaysAllow')}
                       </button>
                     )}
                     <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">

@@ -355,7 +355,9 @@ export function getToolSummary(
     case "get_tree":
       return { label: "Tree", context: args.path || "." };
     case "delete_file":
-      return { label: "Delete", context: args.path || "" };
+      return { label: "Trash", context: args.path || "" };
+    case "restore_file":
+      return { label: "Restore", context: args.path || args.id || "" };
     case "move_file":
       return {
         label: "Move",

@@ -723,13 +723,15 @@
         "network": "This git command connects to a remote.",
         "outside": "This git command can act outside the working directory.",
         "git-internals": "This changes git hooks or settings, which later run outside the sandbox.",
-        "workspace": "Workspace permissions ask before this."
+        "workspace": "Workspace permissions ask before this.",
+        "mcp-write": "This tool may change things outside MLX Harness, so it asks first."
       },
       "reason": "Model's reason",
       "allowOnce": "Allow once",
       "deny": "Deny",
       "alwaysAllow": "Always allow this command in this chat",
-      "autoDeny": "Denied automatically in {time}"
+      "autoDeny": "Denied automatically in {time}",
+      "alwaysAllowTool": "Always allow this tool in this chat"
     },
     "switcher": {
       "title": "Switch model (⌘⇧M)",
@@ -3104,14 +3106,16 @@
     "access": "Access",
     "recommended": "Recommended",
     "mode": {
-      "read-only": "Read only",
-      "workspace": "Workspace write",
-      "full": "Full access"
+      "read-only": "Ask first",
+      "workspace": "Auto",
+      "full": "Full access",
+      "plan": "Plan"
     },
     "modeHelp": {
       "read-only": "Reads files and searches. Asks before it writes a file or runs a command.",
       "workspace": "Edits files in this folder and runs commands in a sandbox with no network. Asks before anything outside it.",
-      "full": "Edits anything and runs any command without asking. Use it only for projects you trust."
+      "full": "Edits anything and runs any command without asking. Use it only for projects you trust.",
+      "plan": "Reads and searches, then proposes a plan. Changes nothing until you say go."
     },
     "models": "Model",
     "modelsHelp": "You pick it in the composer and can switch any time. Strong choices for code:",
@@ -3128,6 +3132,14 @@
         "2": "Find bugs and risky code",
         "3": "Write a README for this project"
       }
+    },
+    "modeTitle": "Mode",
+    "handoff": {
+      "ready": "Plan ready. Carry it out?",
+      "auto": "Run in Auto",
+      "full": "Run with full access",
+      "dismiss": "Dismiss",
+      "go": "Go ahead with the plan."
     }
   }
 }

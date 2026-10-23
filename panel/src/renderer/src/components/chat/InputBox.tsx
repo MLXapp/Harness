@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, KeyboardEvent, DragEvent, Cli
 import { Paperclip, ArrowUp, Square, ImagePlus, X, Film, Music, FileText } from 'lucide-react'
 import { VoiceChat } from './VoiceChat'
 import { ModelSwitcher } from './ModelSwitcher'
+import { AgentModeChip, PlanHandoff } from '../code/AgentMode'
 import { useChatModel } from './ChatModelContext'
 import { useVoiceInput } from './voiceInput'
 import { useTranslation } from '../../i18n'
@@ -383,6 +384,7 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
         </div>
       )}
 
+      {workspace === 'code' && <PlanHandoff loading={!!loading} onSend={(text) => onSend(text)} />}
       <div
         ref={composerRef}
         data-vmlx-surface="chat-composer"
@@ -421,6 +423,7 @@ export function InputBox({ onSend, onAbort, disabled, loading, sessionEndpoint, 
             <Paperclip className="h-[18px] w-[18px]" />
           </button>
           <ModelSwitcher compact={compact} />
+          {workspace === 'code' && <AgentModeChip compact={compact} />}
           <div className="min-w-0 flex-1" />
           <VoiceChat
             onTranscription={handleTranscription}
