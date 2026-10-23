@@ -210,7 +210,7 @@ function App() {
   // A turn finished while the window was in the background and its
   // notification was clicked: open that chat in its tab.
   useEffect(() => {
-    return window.api.chat.onOpenFromNotification?.(async ({ chatId }) => {
+    const open = async (chatId: string) => {
       try {
         const chat = await window.api.chat.get(chatId)
         if (!chat) return
@@ -218,7 +218,12 @@ function App() {
         setMode(o?.builtinToolsEnabled && o?.workingDirectory ? 'code' : 'chat')
         handleChatSelect(chatId, chat.modelPath || chat.modelId || '')
       } catch { /* the chat is gone */ }
-    })
+    }
+    // Also from inside the app (a task's "Open chat").
+    const onOpen = (e: Event) => { const id = (e as CustomEvent).detail?.chatId; if (typeof id === 'string') void open(id) }
+    window.addEventListener('vmlx:open-chat', onOpen)
+    const off = window.api.chat.onOpenFromNotification?.(({ chatId }) => { void open(chatId) })
+    return () => { window.removeEventListener('vmlx:open-chat', onOpen); off?.() }
   }, [handleChatSelect, setMode])
 
   /** The Code tab's project folder and access level for a chat (agent tools on that folder). */

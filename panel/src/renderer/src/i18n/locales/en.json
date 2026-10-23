@@ -727,7 +727,8 @@
         "workspace": "Workspace permissions ask before this.",
         "mcp-write": "This tool may change things outside MLX Harness, so it asks first.",
         "app-write": "This sends or changes something in your apps. Check the fields before you allow it.",
-        "exfil": "App data is in this chat, so web requests ask first: text in an email could try to send it elsewhere."
+        "exfil": "App data is in this chat, so web requests ask first: text in an email could try to send it elsewhere.",
+        "schedule": "This sets up something that runs later on its own."
       },
       "reason": "Model's reason",
       "allowOnce": "Allow once",
@@ -2437,7 +2438,9 @@
     "notify": {
       "approvalTitle": "MLX Harness needs your approval",
       "turnDone": "MLX Harness finished",
-      "turnFailed": "MLX Harness stopped with an error"
+      "turnFailed": "MLX Harness stopped with an error",
+      "taskDone": "Scheduled task finished",
+      "taskFailed": "Scheduled task failed"
     }
   },
   "tools": {
@@ -3001,7 +3004,8 @@
       "about": "About",
       "apps": "Apps",
       "skills": "Skills",
-      "memory": "Memory"
+      "memory": "Memory",
+      "tasks": "Tasks"
     }
   },
   "media": {
@@ -3226,5 +3230,39 @@
     "clearYes": "Forget everything",
     "secret": "Not saved: that looks like a password, key or card number.",
     "failed": "Could not save that. Try again."
+  },
+  "tasks": {
+    "sidebar": "Scheduled tasks",
+    "intro": "A task sends a prompt on a schedule, each run in its own chat, with the model and settings of the chat it was made from. Ask the agent (\"every weekday at 8, summarize my mail\") or make one here. Runs happen while MLX Harness is open; a run missed while the Mac slept happens once when it wakes, and says so.",
+    "yours": "Your tasks",
+    "new": "New task",
+    "footer": "Runs are unattended: anything that needs your OK (a command outside the sandbox, sending an email) is refused, so the run says what it could not do.",
+    "needChat": "Open a chat with the model the task should use first.",
+    "titlePlaceholder": "Name (e.g. Morning brief)",
+    "promptPlaceholder": "What should it do each time? Write it in full: each run starts fresh.",
+    "kind": {
+      "once": "Once",
+      "daily": "Daily",
+      "weekly": "Weekly",
+      "interval": "Repeat"
+    },
+    "create": "Schedule",
+    "none": "No tasks yet.",
+    "enabled": "On",
+    "next": "next {at}",
+    "paused": "paused",
+    "running": "Running now…",
+    "lastOk": "Last run {at}",
+    "lastFailed": "Last run {at} failed",
+    "runNow": "Run now",
+    "openChat": "Open chat",
+    "delete": "Delete",
+    "when": {
+      "once": "Once, {at}",
+      "daily": "Every day at {time}",
+      "weekly": "{days} at {time}",
+      "hours": "Every {n} h",
+      "minutes": "Every {n} min"
+    }
   }
 }

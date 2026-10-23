@@ -52,7 +52,7 @@ export function MemoryPreference() {
             disabled={on === null}
             onClick={async () => setOn(await window.api.memory!.setEnabled(!on))}
             className={`relative mt-0.5 h-[26px] w-[44px] shrink-0 rounded-full transition-colors duration-200 ${on ? 'bg-[color:var(--acc)]' : 'bg-foreground/15'}`}>
-            <span className={`absolute top-[3px] h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ease-mlx ${on ? 'translate-x-[21px]' : 'translate-x-[3px]'}`} />
+            <span className={`absolute left-0 top-[3px] h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ease-mlx ${on ? 'translate-x-[21px]' : 'translate-x-[3px]'}`} />
           </button>
         </div>
       </Group>

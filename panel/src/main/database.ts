@@ -14,6 +14,7 @@ import { decryptSecret, decryptValue, encryptValue } from "./secretStorage";
 import { ensureProviderSchema, ProviderStore, type SecretBox } from "./providers/store";
 import { MediaJobStore } from "./media/store";
 import { MemoryStore } from "./memory/store";
+import { TaskStore } from "./tasks/scheduler";
 
 /** Provider credentials: Keychain-backed safeStorage, refusing plaintext both ways. */
 const keychainSecretBox: SecretBox = {
@@ -1333,6 +1334,19 @@ class DatabaseManager {
   private providerStoreDb?: Database.Database;
   private mediaStore?: MediaJobStore;
   private mediaStoreDb?: Database.Database;
+
+  private taskStore?: TaskStore;
+  private taskStoreDb?: Database.Database;
+
+  /** Scheduled tasks. */
+  get tasks(): TaskStore {
+    this.ensureOpen();
+    if (!this.taskStore || this.taskStoreDb !== this.db) {
+      this.taskStore = new TaskStore(this.db);
+      this.taskStoreDb = this.db;
+    }
+    return this.taskStore;
+  }
 
   private memoryStore?: MemoryStore;
   private memoryStoreDb?: Database.Database;

@@ -439,6 +439,18 @@ const api = {
     readText: (): Promise<string> => ipcRenderer.invoke('clipboard:readText'),
   },
 
+  tasks: {
+    list: (): Promise<Array<import('../shared/schedule').ScheduledTask & { running: boolean }>> => ipcRenderer.invoke('tasks:list'),
+    create: (sourceChatId: string, input: { title: string; prompt: string; schedule: import('../shared/schedule').Schedule }): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('tasks:create', sourceChatId, input),
+    setEnabled: (id: string, on: boolean): Promise<unknown> => ipcRenderer.invoke('tasks:setEnabled', id, on),
+    runNow: (id: string): Promise<boolean> => ipcRenderer.invoke('tasks:runNow', id),
+    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('tasks:delete', id),
+    onChanged: (callback: () => void) => {
+      const listener = () => callback()
+      ipcRenderer.on('tasks:changed', listener)
+      return () => { ipcRenderer.removeListener('tasks:changed', listener) }
+    },
+  },
   memory: {
     list: (): Promise<Array<{ id: string; text: string; createdAt: number; updatedAt: number; sourceChatId?: string }>> => ipcRenderer.invoke('memory:list'),
     enabled: (): Promise<boolean> => ipcRenderer.invoke('memory:enabled'),

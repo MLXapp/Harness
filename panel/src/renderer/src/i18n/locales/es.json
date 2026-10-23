@@ -727,7 +727,8 @@
         "workspace": "Los permisos de Espacio de trabajo piden aprobación para esto.",
         "mcp-write": "Esta herramienta puede cambiar cosas fuera de MLX Harness, así que pregunta antes.",
         "app-write": "Esto envía o cambia algo en tus apps. Revisa los campos antes de permitirlo.",
-        "exfil": "Hay datos de apps en este chat, así que las peticiones web preguntan antes: el texto de un correo podría intentar enviarlos a otro sitio."
+        "exfil": "Hay datos de apps en este chat, así que las peticiones web preguntan antes: el texto de un correo podría intentar enviarlos a otro sitio.",
+        "schedule": "Esto configura algo que se ejecutará solo más adelante."
       },
       "reason": "Motivo del modelo",
       "allowOnce": "Permitir una vez",
@@ -2437,7 +2438,9 @@
     "notify": {
       "approvalTitle": "MLX Harness necesita tu aprobación",
       "turnDone": "MLX Harness ha terminado",
-      "turnFailed": "MLX Harness se detuvo con un error"
+      "turnFailed": "MLX Harness se detuvo con un error",
+      "taskDone": "Tarea programada terminada",
+      "taskFailed": "La tarea programada falló"
     }
   },
   "tools": {
@@ -3001,7 +3004,8 @@
       "about": "Acerca de",
       "apps": "Apps",
       "skills": "Habilidades",
-      "memory": "Memoria"
+      "memory": "Memoria",
+      "tasks": "Tareas"
     }
   },
   "media": {
@@ -3226,5 +3230,39 @@
     "clearYes": "Olvidarlo todo",
     "secret": "No se guardó: parece una contraseña, clave o número de tarjeta.",
     "failed": "No se pudo guardar. Inténtalo de nuevo."
+  },
+  "tasks": {
+    "sidebar": "Tareas programadas",
+    "intro": "Una tarea envía un prompt según un horario, cada ejecución en su propio chat, con el modelo y los ajustes del chat de origen. Pídeselo al agente (\"cada día laborable a las 8, resume mi correo\") o créala aquí. Se ejecutan mientras MLX Harness está abierto; una ejecución perdida mientras el Mac dormía se hace una vez al despertar, y lo indica.",
+    "yours": "Tus tareas",
+    "new": "Nueva tarea",
+    "footer": "Las ejecuciones son desatendidas: lo que necesite tu OK (un comando fuera del sandbox, enviar un correo) se rechaza, y la ejecución indica qué no pudo hacer.",
+    "needChat": "Abre primero un chat con el modelo que debe usar la tarea.",
+    "titlePlaceholder": "Nombre (p. ej., Resumen matinal)",
+    "promptPlaceholder": "¿Qué debe hacer cada vez? Escríbelo completo: cada ejecución empieza de cero.",
+    "kind": {
+      "once": "Una vez",
+      "daily": "Diaria",
+      "weekly": "Semanal",
+      "interval": "Repetir"
+    },
+    "create": "Programar",
+    "none": "Aún no hay tareas.",
+    "enabled": "Activada",
+    "next": "próxima {at}",
+    "paused": "en pausa",
+    "running": "Ejecutándose…",
+    "lastOk": "Última ejecución {at}",
+    "lastFailed": "La última ejecución {at} falló",
+    "runNow": "Ejecutar ahora",
+    "openChat": "Abrir chat",
+    "delete": "Eliminar",
+    "when": {
+      "once": "Una vez, {at}",
+      "daily": "Cada día a las {time}",
+      "weekly": "{days} a las {time}",
+      "hours": "Cada {n} h",
+      "minutes": "Cada {n} min"
+    }
   }
 }

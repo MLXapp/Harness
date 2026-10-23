@@ -727,7 +727,8 @@
         "workspace": "작업 공간 권한에서는 이 작업 전에 확인합니다.",
         "mcp-write": "이 도구는 MLX Harness 밖의 것을 바꿀 수 있어 먼저 묻습니다.",
         "app-write": "앱에서 무언가를 보내거나 바꿉니다. 허용하기 전에 내용을 확인하세요.",
-        "exfil": "이 채팅에 앱 데이터가 있어 웹 요청은 먼저 묻습니다. 이메일 속 문구가 데이터를 다른 곳으로 보내려 할 수 있습니다."
+        "exfil": "이 채팅에 앱 데이터가 있어 웹 요청은 먼저 묻습니다. 이메일 속 문구가 데이터를 다른 곳으로 보내려 할 수 있습니다.",
+        "schedule": "나중에 스스로 실행될 작업을 설정합니다."
       },
       "reason": "모델이 밝힌 이유",
       "allowOnce": "한 번 허용",
@@ -2437,7 +2438,9 @@
     "notify": {
       "approvalTitle": "MLX Harness에서 승인이 필요합니다",
       "turnDone": "MLX Harness 작업 완료",
-      "turnFailed": "MLX Harness가 오류로 중단됨"
+      "turnFailed": "MLX Harness가 오류로 중단됨",
+      "taskDone": "예약된 작업 완료",
+      "taskFailed": "예약된 작업 실패"
     }
   },
   "tools": {
@@ -3001,7 +3004,8 @@
       "about": "정보",
       "apps": "앱",
       "skills": "스킬",
-      "memory": "메모리"
+      "memory": "메모리",
+      "tasks": "작업"
     }
   },
   "media": {
@@ -3226,5 +3230,39 @@
     "clearYes": "모두 잊기",
     "secret": "저장하지 않음: 비밀번호, 키 또는 카드 번호처럼 보입니다.",
     "failed": "저장할 수 없습니다. 다시 시도하세요."
+  },
+  "tasks": {
+    "sidebar": "예약된 작업",
+    "intro": "작업은 일정에 따라 프롬프트를 보내며, 매번 별도의 채팅에서 원래 채팅의 모델과 설정으로 실행됩니다. 에이전트에게 요청하거나(\"평일 8시에 메일 요약해 줘\") 여기서 만드세요. MLX Harness가 열려 있을 때 실행되며, Mac이 잠자는 동안 놓친 실행은 깨어난 뒤 한 번 실행되고 그 사실을 알려줍니다.",
+    "yours": "내 작업",
+    "new": "새 작업",
+    "footer": "실행은 무인으로 진행됩니다. 승인이 필요한 작업(샌드박스 밖 명령, 이메일 보내기)은 거부되며, 실행 결과에 하지 못한 일이 표시됩니다.",
+    "needChat": "먼저 작업에 사용할 모델의 채팅을 여세요.",
+    "titlePlaceholder": "이름(예: 아침 브리핑)",
+    "promptPlaceholder": "매번 무엇을 할까요? 매 실행은 새로 시작하니 빠짐없이 적어 주세요.",
+    "kind": {
+      "once": "한 번",
+      "daily": "매일",
+      "weekly": "매주",
+      "interval": "반복"
+    },
+    "create": "예약",
+    "none": "아직 작업이 없습니다.",
+    "enabled": "켜짐",
+    "next": "다음 {at}",
+    "paused": "일시 중지됨",
+    "running": "실행 중…",
+    "lastOk": "마지막 실행 {at}",
+    "lastFailed": "마지막 실행 {at} 실패",
+    "runNow": "지금 실행",
+    "openChat": "채팅 열기",
+    "delete": "삭제",
+    "when": {
+      "once": "한 번, {at}",
+      "daily": "매일 {time}",
+      "weekly": "{days} {time}",
+      "hours": "{n}시간마다",
+      "minutes": "{n}분마다"
+    }
   }
 }

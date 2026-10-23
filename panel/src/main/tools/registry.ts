@@ -745,6 +745,33 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
         required: ['id']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'schedule_task',
+      description: 'Schedule a prompt to run later or repeatedly in its own chat, with this chat\'s model and settings (the user approves it). Runs unattended: anything needing approval is refused. Times are the Mac\'s local time.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Short name, e.g. "Morning news brief"' },
+          prompt: { type: 'string', description: 'The complete instruction to run each time (it starts with no memory of this chat)' },
+          schedule: {
+            type: 'object',
+            description: 'One of: {"kind":"once","at":"2026-10-24T09:00"} · {"kind":"daily","time":"08:00"} · {"kind":"weekly","days":[1,3,5],"time":"18:30"} (0 = Sunday) · {"kind":"interval","minutes":60} (at least 15)',
+            properties: {
+              kind: { type: 'string', enum: ['once', 'daily', 'weekly', 'interval'] },
+              at: { type: 'string' },
+              time: { type: 'string' },
+              days: { type: 'array', items: { type: 'integer' } },
+              minutes: { type: 'integer' }
+            },
+            required: ['kind']
+          }
+        },
+        required: ['title', 'prompt', 'schedule']
+      }
+    }
   }
 ]
 

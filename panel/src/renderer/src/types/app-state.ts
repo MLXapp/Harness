@@ -4,7 +4,7 @@ export type AppMode = 'code' | 'chat' | 'server' | 'tools' | 'api' | 'image' | '
 export type WorkspaceTab = 'chat' | 'image' | 'video' | 'audio' | 'music' | 'code'
 
 /** Preferences is a sheet over the window; these are its sections. */
-export type PreferencesSection = 'general' | 'accounts' | 'apps' | 'skills' | 'memory' | 'node' | 'keys' | 'about'
+export type PreferencesSection = 'general' | 'accounts' | 'apps' | 'skills' | 'memory' | 'tasks' | 'node' | 'keys' | 'about'
 
 export type ServerPanel = 'dashboard' | 'session' | 'create' | 'settings' | 'about'
 
