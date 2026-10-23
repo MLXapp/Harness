@@ -7,13 +7,17 @@ describe('Download System', () => {
   describe('Image Model Registry', () => {
     it('all models have required fields', async () => {
       const { IMAGE_MODELS } = await import('../src/shared/imageModels')
+      // Local native adapters (FIBO, SeedVR2) have no download repository, and
+      // Klein Edit runs over its generation model's bundle (imageModelForTask).
+      const sharesBundle = (m: (typeof IMAGE_MODELS)[number]) =>
+        m.mfluxClass === 'Flux2KleinEdit' || m.mfluxClass === 'FIBO' || m.mfluxClass === 'SeedVR2'
       for (const m of IMAGE_MODELS) {
         expect(m.id).toBeTruthy()
         expect(m.name).toBeTruthy()
         expect(m.category).toMatch(/^(generate|edit)$/)
         expect(m.steps).toBeGreaterThan(0)
         expect(m.quantizeOptions.length).toBeGreaterThan(0)
-        expect(Object.keys(m.repoMap).length).toBeGreaterThan(0)
+        if (!sharesBundle(m)) expect(Object.keys(m.repoMap).length, m.id).toBeGreaterThan(0)
         expect(m.mfluxClass).toBeTruthy()
         expect(m.mfluxName).toBeTruthy()
         expect(typeof m.supportsImg2Img).toBe('boolean')
@@ -25,7 +29,11 @@ describe('Download System', () => {
       const klein = IMAGE_MODELS.filter(m => m.id.includes('klein'))
       expect(klein.length).toBeGreaterThan(0)
       for (const m of klein) {
-        expect(m.mfluxClass).toBe('Flux2Klein')
+        expect(m.mfluxClass).toBe(m.category === 'edit' ? 'Flux2KleinEdit' : 'Flux2Klein')
+      }
+      // Each Klein Edit entry has a generation model whose bundle it runs on.
+      for (const e of klein.filter(m => m.category === 'edit')) {
+        expect(klein.some(g => g.category === 'generate' && g.mfluxName === e.mfluxName && Object.keys(g.repoMap).length > 0), e.id).toBe(true)
       }
     })
 
