@@ -1,7 +1,7 @@
 {
   "name": "mlx-harness",
   "productName": "MLX Harness",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "MLX Harness: run, chat with and serve AI models locally on Apple Silicon. Built on vMLX by JANGQ AI.",
   "main": "dist/main/index.mjs",
   "author": "Flex UK Limited (MLX Network) <info@mlx.app>",
@@ -119,7 +119,10 @@
       "notarize": {
         "teamId": "CCKXS9W488"
       },
-      "minimumSystemVersion": "14.5.0"
+      "minimumSystemVersion": "14.5.0",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "MLX Harness uses the microphone when you speak to a model or record a voice sample. The audio stays on this Mac."
+      }
     },
     "dmg": {
       "sign": true,

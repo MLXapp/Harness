@@ -62,6 +62,8 @@ export function ApiDashboard() {
   const [lanKey, setLanKey] = useState<string | null>(null);
   const [origins, setOrigins] = useState("");
   const [originsSaved, setOriginsSaved] = useState("");
+  const [hosts, setHosts] = useState("");
+  const [hostsSaved, setHostsSaved] = useState("");
   const [portError, setPortError] = useState<string | null>(null);
   const [format, setFormat] = useState<ApiFormat>("openai");
   const portRef = useRef<HTMLInputElement>(null);
@@ -102,6 +104,8 @@ export function ApiDashboard() {
         setLanKey(status?.lanKey ?? null);
         setOrigins(status?.allowedOrigins ?? "");
         setOriginsSaved(status?.allowedOrigins ?? "");
+        setHosts(status?.trustedHosts ?? "");
+        setHostsSaved(status?.trustedHosts ?? "");
       })
       .catch(() => {});
   }, []);
@@ -187,6 +191,12 @@ export function ApiDashboard() {
     if (origins.trim() === originsSaved.trim()) return;
     const status = await window.api.gateway?.setAllowedOrigins?.(origins).catch(() => null);
     if (status) { setOrigins(status.allowedOrigins ?? ""); setOriginsSaved(status.allowedOrigins ?? ""); }
+  };
+
+  const saveHosts = async () => {
+    if (hosts.trim() === hostsSaved.trim()) return;
+    const status = await window.api.gateway?.setTrustedHosts?.(hosts).catch(() => null);
+    if (status) { setHosts(status.trustedHosts ?? ""); setHostsSaved(status.trustedHosts ?? ""); }
   };
 
   const handlePortKeyDown = (e: React.KeyboardEvent) => {
@@ -335,6 +345,18 @@ export function ApiDashboard() {
                   placeholder={t('api.webPagesPlaceholder')} spellCheck={false} data-vmlx-control="gateway-origins"
                   className="w-full px-2 py-1 bg-background rounded border border-border font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
                 <p className="text-[11px] text-muted-foreground">{t('api.webPagesHint')}</p>
+              </div>
+            </div>
+
+            {/* Other names this Mac answers to (a tailnet or proxy name). */}
+            <div className="flex items-start gap-2 pt-1 text-xs" data-vmlx-section="gateway-hosts">
+              <span className="text-muted-foreground w-20 flex-shrink-0 pt-1">{t('api.hostNames')}</span>
+              <div className="min-w-0 flex-1 space-y-1">
+                <input value={hosts} onChange={e => setHosts(e.target.value)} onBlur={() => void saveHosts()}
+                  onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur() }}
+                  placeholder={t('api.hostNamesPlaceholder')} spellCheck={false} data-vmlx-control="gateway-hosts"
+                  className="w-full px-2 py-1 bg-background rounded border border-border font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
+                <p className="text-[11px] text-muted-foreground">{t('api.hostNamesHint')}</p>
               </div>
             </div>
           </div>

@@ -52,7 +52,8 @@ export function shq(value: string): string {
 }
 
 function tomlString(value: string): string {
-  return JSON.stringify(value)
+  // JSON escapes are TOML escapes, except DEL, which TOML wants escaped too.
+  return JSON.stringify(value).replace(/\u007f/g, '\\u007F')
 }
 
 export function launchPlan(tool: LaunchToolId, input: LaunchInput): LaunchPlan {

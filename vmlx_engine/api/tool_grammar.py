@@ -40,7 +40,8 @@ CLOSE_TAG = "</tool_call>"
 # Qwen3, Hermes 2/3): {"name": <function-name>, "arguments": <args-json-object>}.
 _JSON_TEMPLATE_MARKERS = ("<function-name>", "<args-json-object>")
 
-_LL_TOKENIZERS: Dict[int, Any] = {}
+# id(tokenizer) -> (tokenizer, llguidance tokenizer); the tokenizer is kept so its id is never reused.
+_LL_TOKENIZERS: Dict[int, Tuple[Any, Any]] = {}
 # Agents send the same tools every turn: keep the checked grammar (small, bounded).
 _LARK_CACHE: Dict[Tuple[int, str], Optional[str]] = {}
 _LARK_CACHE_MAX = 32
@@ -162,8 +163,18 @@ class ToolCallGrammar:
 
     def __init__(self, matcher: Any, bitmask: Any, open_id: int, close_id: int,
                  think_ids: Tuple[Optional[int], Optional[int]], thinking: bool,
-                 fill: Callable[..., Any], apply: Callable[..., Any]) -> None:
+                 fill: Callable[..., Any], apply: Callable[..., Any], mx: Any = None,
+                 history: Optional[Callable[[], Any]] = None) -> None:
         self.matcher = matcher
+        # The request's committed output (a Python list the scheduler keeps):
+        # reading it never waits for the GPU, unlike the token context.
+        self.history = history
+        self._mx = mx
+        # The mask for the first token after <tool_call> (a fresh matcher's), kept
+        # so the newest token can be checked without waiting for the GPU.
+        bitmask.fill(-1)
+        fill(matcher, bitmask, 0)
+        self.first_mask = bitmask.copy()
         self.bitmask = bitmask
         self.open_id = open_id
         self.close_id = close_id
@@ -202,31 +213,77 @@ class ToolCallGrammar:
     def __call__(self, tokens: Any, logits: Any) -> Any:
         if self.broken:
             return logits
+        if self.history is not None:
+            return self._call_with_history(tokens, logits)
         try:
             count = max(len(tokens) - 1, 0)
-        except Exception:
-            return logits
-        if count < self.seen:  # a fresh context (resumed request): start over, unconstrained
-            self.seen, self.active = count, False
-        if count > self.seen:
-            # Only the new tokens are read (the context can be long).
-            for token in _generated(tokens[1 + self.seen:]):
-                self._advance(token)
-            self.seen = count
-        if not self.active:
-            return logits
-        try:
-            self.bitmask.fill(-1)
-            self._fill(self.matcher, self.bitmask, 0)
-            return self._apply(logits, self.bitmask)
+            if count < self.seen:  # a fresh context (resumed request): start over, unconstrained
+                self.seen, self.active = max(count - 1, 0), False
+            # Read the generated tokens except the newest, which may still be
+            # computing (reading it would stall mlx-lm's pipelining). Inside a
+            # call the newest is read too: the matcher needs it.
+            while True:
+                upto = count if self.active else count - 1
+                if upto > self.seen:
+                    for token in _generated(tokens[1 + self.seen:1 + upto]):
+                        self._advance(token)
+                    self.seen = upto
+                if self.active and self.seen < count:
+                    continue
+                break
+            if self.active:
+                self.bitmask.fill(-1)
+                self._fill(self.matcher, self.bitmask, 0)
+                return self._apply(logits, self.bitmask)
+            if self.thinking or count < 1:
+                return logits
+            return self._gate(tokens[count], logits)
         except Exception as exc:
-            logger.debug("tool grammar mask failed: %s", exc)
+            logger.debug("tool grammar off for this request: %s", exc)
             self.broken = True
             return logits
 
+    def _call_with_history(self, tokens: Any, logits: Any) -> Any:
+        """Settled tokens from the request, the in-flight ones from the context only inside a call."""
+        try:
+            settled = list(self.history() or [])
+            if len(settled) < self.seen:  # the request restarted: start over, unconstrained
+                self.seen, self.active = 0, False
+            for token in settled[self.seen:]:
+                self._advance(int(token))
+            self.seen = max(self.seen, len(settled))
+            count = max(len(tokens) - 1, 0)  # generated tokens in the context (shape only)
+            if self.active and count > self.seen:
+                # Inside a call the matcher needs the newest token too (a short wait, only here).
+                for token in _generated(tokens[1 + self.seen:1 + count]):
+                    self._advance(token)
+                self.seen = count
+            if self.active:
+                self.bitmask.fill(-1)
+                self._fill(self.matcher, self.bitmask, 0)
+                return self._apply(logits, self.bitmask)
+            if self.thinking or count < 1 or count <= self.seen:
+                return logits
+            return self._gate(tokens[count], logits)
+        except Exception as exc:
+            logger.debug("tool grammar off for this request: %s", exc)
+            self.broken = True
+            return logits
+
+    def _gate(self, newest: Any, logits: Any) -> Any:
+        """If the newest token opens a call, this step already gets the call's first mask."""
+        mx = self._mx
+        if mx is not None and isinstance(logits, mx.array):
+            masked = self._apply(logits, self.first_mask)
+            return mx.where(mx.array(newest) == self.open_id, masked, logits)
+        if int(newest) == self.open_id:
+            return self._apply(logits, self.first_mask.copy())
+        return logits
+
 
 def build_tool_call_logits_processor(tools: Optional[List[Any]], tokenizer: Any,
-                                     thinking_open: bool = False) -> Optional[ToolCallGrammar]:
+                                     thinking_open: bool = False,
+                                     history: Optional[Callable[[], Any]] = None) -> Optional[ToolCallGrammar]:
     """A processor for this request's tools, or None (other formats, no tools, off, or unavailable)."""
     if not tools or tokenizer is None or not tool_grammar_enabled():
         return None
@@ -240,7 +297,9 @@ def build_tool_call_logits_processor(tools: Optional[List[Any]], tokenizer: Any,
         from llguidance.numpy import allocate_token_bitmask, fill_next_token_bitmask
         try:
             from llguidance.mlx import apply_token_bitmask
+            import mlx.core as mx_core
         except Exception:  # not on a Mac (tests): numpy logits
+            mx_core = None
             from llguidance.numpy import apply_token_bitmask_inplace
 
             def apply_token_bitmask(logits, mask):
@@ -252,10 +311,11 @@ def build_tool_call_logits_processor(tools: Optional[List[Any]], tokenizer: Any,
 
     hf = _hf_tokenizer(tokenizer)
     try:
-        ll_tokenizer = _LL_TOKENIZERS.get(id(hf))
-        if ll_tokenizer is None:
-            ll_tokenizer = from_tokenizer(hf)
-            _LL_TOKENIZERS[id(hf)] = ll_tokenizer
+        entry = _LL_TOKENIZERS.get(id(hf))
+        if entry is None or entry[0] is not hf:
+            entry = (hf, from_tokenizer(hf))
+            _LL_TOKENIZERS[id(hf)] = entry
+        ll_tokenizer = entry[1]
 
         def compiles(lark: str) -> bool:
             try:
@@ -263,7 +323,7 @@ def build_tool_call_logits_processor(tools: Optional[List[Any]], tokenizer: Any,
             except Exception:
                 return False
 
-        key = (id(hf), json.dumps([_tool_function(t) for t in tools], sort_keys=True, default=str))
+        key = (close_id, json.dumps([_tool_function(t) for t in tools], sort_keys=True, default=str))
         if key in _LARK_CACHE:
             lark = _LARK_CACHE[key]
         else:
@@ -283,8 +343,12 @@ def build_tool_call_logits_processor(tools: Optional[List[Any]], tokenizer: Any,
         return None
 
     think_ids = (_single_token_id(tokenizer, "<think>"), _single_token_id(tokenizer, "</think>"))
-    return ToolCallGrammar(matcher, bitmask, open_id, close_id, think_ids, thinking_open,
-                           fill_next_token_bitmask, apply_token_bitmask)
+    try:
+        return ToolCallGrammar(matcher, bitmask, open_id, close_id, think_ids, thinking_open,
+                               fill_next_token_bitmask, apply_token_bitmask, mx_core, history)
+    except Exception as exc:
+        logger.debug("tool grammar setup failed: %s", exc)
+        return None
 
 
 def prompt_leaves_thinking_open(prompt: Any) -> bool:

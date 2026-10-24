@@ -172,7 +172,10 @@
     "lanKeyHint": "ほかのデバイスはこれを API キーとして送信します。この Mac では不要です。",
     "webPages": "Web ページ",
     "webPagesHint": "この Mac のページ(localhost)とアプリの Web ビューはいつでも API を使えます。ほかのサイトは、ここにカンマ区切りで書いたものだけです。",
-    "webPagesPlaceholder": "https://chat.example.com"
+    "webPagesPlaceholder": "https://chat.example.com",
+    "hostNames": "ホスト名",
+    "hostNamesPlaceholder": "mac.tailnet.ts.net",
+    "hostNamesHint": "Tailscale やプロキシの名前など、この Mac が応答する他の名前。IP アドレスと .local、.internal の名前はそのまま使えます。*.example.com はサブドメインも含みます。"
   },
   "endpoints": {
     "title": "エンドポイント",

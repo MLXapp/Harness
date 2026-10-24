@@ -4026,6 +4026,8 @@ class Scheduler:
                     spec.get("tools"),
                     getattr(self, "_actual_tokenizer", None) or getattr(self, "tokenizer", None),
                     thinking_open=bool(spec.get("thinking_open")),
+                    # Committed output, read without waiting for the GPU.
+                    history=lambda request=request: getattr(request, "output_token_ids", None) or [],
                 )
             except Exception as exc:  # never block a request over this
                 logger.debug("tool grammar skipped: %s", exc)

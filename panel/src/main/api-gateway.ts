@@ -11,6 +11,7 @@
 import { GATEWAY_SINGLE_MODEL_MODE_KEY, isGatewaySettingEnabled } from '../shared/gatewaySettingsKeys'
 import { checkGatewayRequest, parseList, type GatewayPolicy } from "./gatewaySecurity";
 import { randomBytes } from "crypto";
+import os from "os";
 import {
   ClientRequest,
   createServer,
@@ -85,6 +86,19 @@ function parsePositiveTimeoutSeconds(value: unknown): number | undefined {
 
 function timeoutSecondsToMs(timeoutSeconds: number): number {
   return timeoutSeconds <= 0 ? 86_400_000 : timeoutSeconds * 1000;
+}
+
+/** This Mac's host names and interface addresses (refreshed every 30 s: Wi-Fi changes). */
+let identityCache: { at: number; names: string[]; addresses: string[] } | null = null;
+function ownIdentity(): { ownNames: string[]; ownAddresses: string[] } {
+  const now = Date.now();
+  if (!identityCache || now - identityCache.at > 30_000) {
+    const host = os.hostname().toLowerCase();
+    const names = [host, host.replace(/\.local$/, ""), `${host.replace(/\.local$/, "")}.local`];
+    const addresses = Object.values(os.networkInterfaces()).flat().filter(Boolean).map((i) => i!.address);
+    identityCache = { at: now, names: [...new Set(names)], addresses };
+  }
+  return { ownNames: identityCache.names, ownAddresses: identityCache.addresses };
 }
 
 export class ApiGateway extends EventEmitter {
@@ -220,13 +234,25 @@ export class ApiGateway extends EventEmitter {
       bindHost: this.host,
       allowedOrigins: parseList(db.getSetting("gateway_allowed_origins")),
       trustedHosts: parseList(db.getSetting("gateway_trusted_hosts")),
+      ...ownIdentity(),
     };
+  }
+
+  /** The keys a request offers: Bearer and x-api-key. */
+  private offeredKeys(req: IncomingMessage): string[] {
+    const header = req.headers["x-api-key"];
+    return [this.bearerCredential(req), Array.isArray(header) ? header[0] : header].filter((v): v is string => !!v);
+  }
+
+  /** The network key opens every model: it is the owner's key for their other devices. */
+  private offersLanKey(req: IncomingMessage): boolean {
+    const lan = this.lanKey();
+    return !!lan && this.offeredKeys(req).includes(lan);
   }
 
   /** Any key this gateway accepts: a session's key or the network key (Bearer or x-api-key). */
   private hasValidKey(req: IncomingMessage): boolean {
-    const header = req.headers["x-api-key"];
-    const candidates = [this.bearerCredential(req), Array.isArray(header) ? header[0] : header].filter((v): v is string => !!v);
+    const candidates = this.offeredKeys(req);
     if (candidates.length === 0) return false;
     const keys = this.gatewayApiKeys();
     const lan = this.lanKey();
@@ -253,8 +279,7 @@ export class ApiGateway extends EventEmitter {
   ): boolean {
     const keys = this.gatewayApiKeys();
     if (keys.size === 0) return true;
-    const token = this.bearerCredential(req);
-    if (token && keys.has(token)) return true;
+    if (this.offeredKeys(req).some(k => keys.has(k)) || this.offersLanKey(req)) return true;
     this.sendUnauthorized(res);
     return false;
   }
@@ -266,7 +291,7 @@ export class ApiGateway extends EventEmitter {
   ): boolean {
     const key = this.sessionApiKey(session);
     if (!key) return true;
-    if (this.bearerCredential(req) === key) return true;
+    if (this.offeredKeys(req).includes(key) || this.offersLanKey(req)) return true;
     this.sendUnauthorized(res);
     return false;
   }
@@ -763,6 +788,7 @@ export class ApiGateway extends EventEmitter {
         host: req.headers.host,
         origin: Array.isArray(originHeader) ? originHeader[0] : originHeader,
         remoteAddress: req.socket?.remoteAddress,
+        secFetchSite: typeof req.headers["sec-fetch-site"] === "string" ? req.headers["sec-fetch-site"] : undefined,
         hasValidKey: this.hasValidKey(req),
       },
       this.policy(),
@@ -2815,5 +2841,11 @@ function withoutBrowserHeaders(headers: IncomingMessage["headers"]): IncomingMes
   const out: IncomingMessage["headers"] = { ...headers };
   delete out.origin;
   delete out.referer;
+  // The engine trusts forwarding headers from this Mac; a client's own must not pass through.
+  delete out["x-forwarded-for"];
+  delete out["x-forwarded-proto"];
+  delete out["x-forwarded-host"];
+  delete out["x-real-ip"];
+  delete out.forwarded;
   return out;
 }

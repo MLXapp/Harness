@@ -7,8 +7,8 @@
 
 export const VOICE_SAMPLE_RATE = 24000
 export const VOICE_SAMPLE_MAX_S = 20
-/** Shorter than this, the voice barely comes through. */
-export const VOICE_SAMPLE_MIN_S = 3
+/** Chatterbox needs more than 5 s of audio (mlx-audio asserts it); 6 leaves room. */
+export const VOICE_SAMPLE_MIN_S = 6
 
 /** Mix channels to one, trimming quiet lead-in and tail (below ~-50 dB). */
 export function mixToMono(channels: Float32Array[], rate: number, maxSeconds = VOICE_SAMPLE_MAX_S): Float32Array {

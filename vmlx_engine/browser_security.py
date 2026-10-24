@@ -3,15 +3,18 @@
 Who may use a model server's HTTP port: the same rules as MLX Harness's
 gateway (panel/src/main/gatewaySecurity.ts), as plain ASGI middleware.
 
-- Host: only this Mac's own names (localhost, 127.x, ::1, *.localhost), so a
-  web page cannot reach the server through a domain that resolves to
-  127.0.0.1 (DNS rebinding). When the server listens on the network, IP
-  addresses and .local names are accepted too, plus --trusted-hosts.
+- Host: names a web page cannot rebind to this Mac (DNS rebinding): this
+  Mac's own names, any IP address, and private names (.local, .internal,
+  .localhost, so Docker's host.docker.internal works), plus --trusted-hosts.
+  Public DNS names are refused.
 - Origin: native clients send none and pass. Web pages may call only from
   this Mac (localhost, any port), from desktop app webviews (app://, tauri://,
   vscode-webview://, vscode-file://), or from --allowed-origins ("*" = any).
+- A page's background GET (no-cors, no Origin) from another site is refused
+  by its Sec-Fetch-Site header.
 - Other devices: when no API key is set, a client that is not this Mac is
   refused, so a server on 0.0.0.0 is never open to the network by accident.
+  A connection to this Mac's own LAN address counts as this Mac.
 
 The idea and the shape follow Rapid-MLX's browser_security middleware
 (Apache-2.0); this is our own implementation.
@@ -21,6 +24,8 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import socket
+import time
 from typing import Iterable
 from urllib.parse import urlsplit
 
@@ -88,15 +93,57 @@ def _matches_trusted(name: str, trusted: Iterable[str]) -> bool:
     return False
 
 
-def host_allowed(header: str | None, bind_host: str, trusted: Iterable[str] = ()) -> bool:
+_PRIVATE_SUFFIXES = (".local", ".internal", ".home.arpa")
+_identity: tuple[float, set[str], set[str]] = (0.0, set(), set())
+
+
+def own_identity() -> tuple[set[str], set[str]]:
+    """This Mac's host names and interface addresses (refreshed every 30 s)."""
+    global _identity
+    at, names, addresses = _identity
+    if time.monotonic() - at < 30 and at:
+        return names, addresses
+    names, addresses = set(), set()
+    try:
+        host = socket.gethostname().lower().rstrip(".")
+        base = host[:-6] if host.endswith(".local") else host
+        names = {host, base, base + ".local"}
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import psutil
+
+        for entries in psutil.net_if_addrs().values():
+            for entry in entries:
+                if entry.family in (socket.AF_INET, socket.AF_INET6):
+                    addresses.add(entry.address.split("%", 1)[0].lower())
+    except Exception:  # noqa: BLE001 - psutil missing: loopback only
+        pass
+    _identity = (time.monotonic(), names, addresses)
+    return names, addresses
+
+
+def host_allowed(header: str | None, bind_host: str = "127.0.0.1", trusted: Iterable[str] = (),
+                 own_names: Iterable[str] | None = None) -> bool:
     name = host_name(header)
     if not name:
         return False
-    if _is_loopback_name(name) or _matches_trusted(name, trusted):
+    if _is_loopback_name(name) or _ip(name) is not None or name.endswith(_PRIVATE_SUFFIXES):
         return True
-    if not is_loopback_bind(bind_host):
-        return _ip(name) is not None or name.endswith(".local")
-    return False
+    own = own_identity()[0] if own_names is None else set(own_names)
+    return name in own or _matches_trusted(name, trusted)
+
+
+def is_this_mac(address: str | None, own_addresses: Iterable[str] | None = None) -> bool:
+    if is_loopback_address(address):
+        return True
+    if not address:
+        return False
+    a = address.strip().lower().strip("[]").split("%", 1)[0]
+    if a.startswith("::ffff:") and "." in a:
+        a = a[7:]
+    own = own_identity()[1] if own_addresses is None else {o.lower() for o in own_addresses}
+    return a in own
 
 
 def _normalize_origin(origin: str) -> str | None:
@@ -108,7 +155,10 @@ def _normalize_origin(origin: str) -> str | None:
         return f"{u.scheme}://{u.netloc}"
     if u.scheme not in ("http", "https") or not u.hostname:
         return None
-    port = f":{u.port}" if u.port else ""
+    try:
+        port = f":{u.port}" if u.port else ""
+    except ValueError:  # a port out of range
+        return None
     host = f"[{u.hostname}]" if ":" in u.hostname else u.hostname
     return f"{u.scheme}://{host.lower()}{port}"
 
@@ -135,7 +185,7 @@ def origin_allowed(origin: str | None, allowed: Iterable[str]) -> bool:
 
 # Used by CORSMiddleware so pages that pass the check above can read replies.
 LOCAL_ORIGIN_REGEX = (
-    r"^(https?://(localhost|127(\.\d{1,3}){3}|\[::1\]|[a-z0-9.-]+\.localhost)(:\d{1,5})?"
+    r"(?i)^(https?://(localhost|127(\.\d{1,3}){3}|\[::1\]|[a-z0-9.-]+\.localhost)(:\d{1,5})?"
     r"|(app|tauri|vscode-webview|vscode-file)://.*)$"
 )
 
@@ -151,12 +201,14 @@ class BrowserSecurityMiddleware:
         self.trusted_hosts = [h for h in trusted_hosts if h]
         self.api_key_set = api_key_set
 
-    def verdict(self, host: str | None, origin: str | None, client: str | None) -> tuple[int, str, str] | None:
+    def verdict(self, host: str | None, origin: str | None, client: str | None,
+                fetch_site: str | None = None) -> tuple[int, str, str] | None:
         if not host_allowed(host, self.bind_host, self.trusted_hosts):
             return 400, "invalid_host", "Invalid Host header. This server only answers requests addressed to this Mac."
-        if not origin_allowed(origin, self.allowed_origins):
+        blind_page = not origin and (fetch_site or "").lower() == "cross-site" and "*" not in self.allowed_origins
+        if blind_page or not origin_allowed(origin, self.allowed_origins):
             return 403, "origin_not_allowed", "Cross-origin requests from this site are not allowed (see --allowed-origins)."
-        if not self.api_key_set and client and not is_loopback_address(client):
+        if not self.api_key_set and client and not is_this_mac(client):
             return 403, "api_key_required", "Set an API key (--api-key) to accept requests from other devices."
         return None
 
@@ -168,7 +220,7 @@ class BrowserSecurityMiddleware:
             name = k.decode("latin-1").lower()
             if name in ("host", "origin") and name in headers:
                 headers[name] = None  # duplicated: refuse below
-            elif name in ("host", "origin"):
+            elif name in ("host", "origin", "sec-fetch-site"):
                 headers[name] = v.decode("latin-1")
         if "host" in headers and headers["host"] is None:
             bad = (400, "invalid_host", "Duplicate Host header.")
@@ -176,7 +228,7 @@ class BrowserSecurityMiddleware:
             bad = (403, "origin_not_allowed", "Duplicate Origin header.")
         else:
             client = (scope.get("client") or (None,))[0]
-            bad = self.verdict(headers.get("host"), headers.get("origin"), client)
+            bad = self.verdict(headers.get("host"), headers.get("origin"), client, headers.get("sec-fetch-site"))
         if bad is None:
             return await self.app(scope, receive, send)
         status, code, message = bad

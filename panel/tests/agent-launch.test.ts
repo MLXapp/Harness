@@ -41,6 +41,11 @@ describe('Open in Terminal launch plans', () => {
     expect(qwen.script).toContain("exec qwen --auth-type openai --model 'Qwen3.5-9B-4bit' --openai-base-url 'http://127.0.0.1:8080/v1'")
   })
 
+  it('Codex: control characters stay escaped in TOML', () => {
+    const toml = launchPlan('codex', { ...input, model: 'a\u007fb"c' }).files[`${input.root}/config.toml`]
+    expect(toml).toContain('model = "a\\u007Fb\\"c"')
+  })
+
   it('a hostile model name stays one word in every script', () => {
     for (const tool of LAUNCH_TOOLS) {
       const p = launchPlan(tool, { ...input, model: "x'; rm -rf ~; echo '" })

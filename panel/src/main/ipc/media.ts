@@ -54,6 +54,8 @@ export function registerMediaHandlers(getWindow: () => BrowserWindow | null): vo
     },
   })
   runner.resume()
+  // Voice samples last one visit to the Audio tab; anything left from before is removed.
+  try { rmSync(join(mediaRoot(), 'voices'), { recursive: true, force: true }) } catch { /* ignore */ }
 
   ipcMain.handle('media:list', (_, kind: MediaKind) => (KINDS.includes(kind) ? runner!.list(kind) : []))
   ipcMain.handle('media:submit', (_, request: MediaSubmitRequest) => runner!.submit(request))

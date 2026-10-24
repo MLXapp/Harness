@@ -37,20 +37,28 @@ export function VoiceSamplePanel({ sample, onChange, consent, onConsent }: {
   const fileRef = useRef<HTMLInputElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const timerRef = useRef<number | null>(null)
+  const mounted = useRef(true)
 
-  useEffect(() => () => {
-    if (timerRef.current) window.clearInterval(timerRef.current)
-    recorderRef.current?.stream.getTracks().forEach(track => track.stop())
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      if (timerRef.current) window.clearInterval(timerRef.current)
+      recorderRef.current?.stream.getTracks().forEach(track => track.stop())
+    }
   }, [])
 
   const accept = async (data: ArrayBuffer) => {
+    if (!mounted.current) return
     setWorking(true)
     setError(null)
     try {
       const { wav, seconds } = await toSample(data)
       if (seconds < VOICE_SAMPLE_MIN_S) { setError(t('media.voice.tooShort', { n: VOICE_SAMPLE_MIN_S })); return }
+      if (!mounted.current) return
       const saved = await window.api.media.saveVoiceSample(wav)
       if (!saved.ok) { setError(saved.error); return }
+      if (!mounted.current) { void window.api.media.deleteVoiceSample(saved.id); return }
       if (sample) void window.api.media.deleteVoiceSample(sample.id)
       if (sample) URL.revokeObjectURL(sample.url)
       onChange({ id: saved.id, seconds, url: URL.createObjectURL(new Blob([wav], { type: 'audio/wav' })) })
@@ -79,13 +87,21 @@ export function VoiceSamplePanel({ sample, onChange, consent, onConsent }: {
       return
     }
     const chunks: Blob[] = []
-    const recorder = new MediaRecorder(stream)
+    let recorder: MediaRecorder
+    try {
+      recorder = new MediaRecorder(stream)
+    } catch {
+      stream.getTracks().forEach(track => track.stop())
+      setError(t('media.voice.noMic'))
+      return
+    }
     recorderRef.current = recorder
     recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
     recorder.onstop = () => {
       stream.getTracks().forEach(track => track.stop())
       if (timerRef.current) window.clearInterval(timerRef.current)
       timerRef.current = null
+      if (!mounted.current) return
       setRecording(null)
       void new Blob(chunks).arrayBuffer().then(accept)
     }
