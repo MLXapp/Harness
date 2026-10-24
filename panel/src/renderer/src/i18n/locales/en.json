@@ -172,7 +172,10 @@
     "lanKeyHint": "Other devices send this as their API key. This Mac never needs it.",
     "webPages": "Web pages",
     "webPagesHint": "Pages on this Mac (localhost) and app webviews can always use the API. Other sites only when listed here, comma-separated.",
-    "webPagesPlaceholder": "https://chat.example.com"
+    "webPagesPlaceholder": "https://chat.example.com",
+    "hostNames": "Host names",
+    "hostNamesPlaceholder": "mac.tailnet.ts.net",
+    "hostNamesHint": "Other names this Mac answers to, such as a Tailscale or proxy name. IP addresses, .local and .internal names already work. *.example.com covers subdomains."
   },
   "endpoints": {
     "title": "Endpoints",

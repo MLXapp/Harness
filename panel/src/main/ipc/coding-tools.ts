@@ -806,7 +806,7 @@ export function registerCodingToolHandlers(): void {
     try {
       const limits = await getCodingToolModelLimits(base, modelName)
       const plan = launchPlan(tool, {
-        base, model: modelName, key: await localApiKey(), contextWindow: limits.context, root, cwd: homedir(),
+        base, model: modelName, key: await localApiKey(modelName), contextWindow: limits.context, root, cwd: homedir(),
       })
       mkdirSync(root, { recursive: true, mode: 0o700 })
       try { chmodSync(root, 0o700) } catch {}
@@ -965,15 +965,21 @@ export function registerCodingToolHandlers(): void {
  * A key the local API accepts: the first local model's own key, if any model
  * has one (the gateway then asks for one), else a placeholder it ignores.
  */
-async function localApiKey(): Promise<string> {
+/** The key of the local session that serves `modelName` (else any local session's key). */
+async function localApiKey(modelName?: string): Promise<string> {
   try {
     // Loaded here, not at import: the database needs the running app.
     const { db } = await import('../database')
+    let fallback: string | undefined
     for (const session of db.getSessions()) {
       if (session.type === 'remote') continue
       const cfg = session.config ? JSON.parse(session.config) : {}
-      if (typeof cfg.apiKey === 'string' && cfg.apiKey) return cfg.apiKey
+      if (typeof cfg.apiKey !== 'string' || !cfg.apiKey) continue
+      const names = [session.modelName, cfg.servedModelName, session.modelPath?.split('/').pop()].filter(Boolean)
+      if (modelName && names.includes(modelName)) return cfg.apiKey
+      fallback ??= cfg.apiKey
     }
+    if (fallback) return fallback
   } catch {}
   return API_KEY_PLACEHOLDER
 }

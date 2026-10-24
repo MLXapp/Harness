@@ -123,6 +123,7 @@ function gatewayStatusPayload() {
     // Shared on the network: other devices need this key (made on first share).
     lanKey: host === '0.0.0.0' || host === '::' ? apiGateway.lanKey(true) : undefined,
     allowedOrigins: db.getSetting('gateway_allowed_origins') || '',
+    trustedHosts: db.getSetting('gateway_trusted_hosts') || '',
   }
 }
 
@@ -424,6 +425,12 @@ function createWindow(): void {
       // Origins only (scheme://host[:port]); anything else is dropped.
       const list = String(value ?? '').split(/[,\n]/).map(s => s.trim()).filter(s => s === '*' || /^[a-z][a-z0-9+.-]*:\/\/[^/\s]+$/i.test(s))
       db.setSetting('gateway_allowed_origins', list.join(', '))
+      return gatewayStatusPayload()
+    })
+    ipcMain.handle('gateway:setTrustedHosts', (_e, value: string) => {
+      // Host names (optionally *.domain); anything else is dropped.
+      const list = String(value ?? '').split(/[,\n]/).map(s => s.trim().toLowerCase()).filter(s => /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(s))
+      db.setSetting('gateway_trusted_hosts', list.join(', '))
       return gatewayStatusPayload()
     })
     ipcMain.handle('gateway:setSingleModelMode', async (_e, enabled: boolean) => {

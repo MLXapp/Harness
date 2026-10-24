@@ -589,15 +589,17 @@ declare global {
           singleModelMode: boolean;
           lanKey?: string;
           allowedOrigins?: string;
+          trustedHosts?: string;
         }>;
-        setPort: (port: number) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean; lanKey?: string; allowedOrigins?: string }>;
-        setHostAndPort: (port: number, host: string) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean; lanKey?: string; allowedOrigins?: string }>;
-        setSingleModelMode: (enabled: boolean) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean; lanKey?: string; allowedOrigins?: string }>;
+        setPort: (port: number) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean; lanKey?: string; allowedOrigins?: string; trustedHosts?: string }>;
+        setHostAndPort: (port: number, host: string) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean; lanKey?: string; allowedOrigins?: string; trustedHosts?: string }>;
+        setSingleModelMode: (enabled: boolean) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean; lanKey?: string; allowedOrigins?: string; trustedHosts?: string }>;
         onSingleModelModeChanged: (
           callback: (data: { singleModelMode: boolean }) => void,
         ) => () => void;
-        newLanKey?: () => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean; lanKey?: string; allowedOrigins?: string }>;
-        setAllowedOrigins?: (value: string) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean; lanKey?: string; allowedOrigins?: string }>;
+        newLanKey?: () => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean; lanKey?: string; allowedOrigins?: string; trustedHosts?: string }>;
+        setAllowedOrigins?: (value: string) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean; lanKey?: string; allowedOrigins?: string; trustedHosts?: string }>;
+        setTrustedHosts?: (value: string) => Promise<{ running: boolean; port: number; host?: string; lanHost?: string; displayHost?: string; singleModelMode: boolean; lanKey?: string; allowedOrigins?: string; trustedHosts?: string }>;
       };
       developer: {
         info: (

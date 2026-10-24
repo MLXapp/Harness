@@ -47,6 +47,11 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
   const [voice, setVoice] = useState<VoiceSampleValue | null>(null)
   const [voiceOpen, setVoiceOpen] = useState(false)
   const [voiceConsent, setVoiceConsent] = useState(false)
+  // The sample's file stays for jobs still running and is removed at the next
+  // launch (ipc/media.ts) or with ✕; its preview URL goes with the tab.
+  const voiceRef = useRef<VoiceSampleValue | null>(null)
+  voiceRef.current = voice
+  useEffect(() => () => { if (voiceRef.current) URL.revokeObjectURL(voiceRef.current.url) }, [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const promptRef = useRef<HTMLTextAreaElement>(null)

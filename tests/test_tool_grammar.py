@@ -130,3 +130,47 @@ def test_continuous_batching_path_is_wired():
     assert "build_tool_call_logits_processor(" in scheduler
     assert "self._wrap_generated_only_logits_processor(grammar, max(len(tokens_to_process) - 1, 0))" in scheduler
 
+
+
+@needs_qwen
+def test_the_token_right_after_the_tag_is_held_without_reading_it_first(tok):
+    """The newest token is checked lazily: the step after <tool_call> already has the call's first mask."""
+    import numpy as np
+
+    proc = tg.build_tool_call_logits_processor(TOOLS, Wrapper(tok))
+    open_id = tok.convert_tokens_to_ids("<tool_call>")
+    hello = tok.encode("Hello", add_special_tokens=False)[0]
+    masked = proc(np.array([0, 9707, open_id]), np.zeros((1, len(tok)), dtype=np.float32))
+    assert not np.isfinite(masked[0, hello])
+    assert proc.seen == 1 and not proc.active  # the tag itself is read on the next step
+
+
+@needs_qwen
+def test_with_request_history_the_context_is_read_only_inside_a_call(tok):
+    """Scheduler path: committed tokens come from the request (one step behind the context)."""
+    import numpy as np
+
+    class Ctx(list):
+        reads = 0
+
+        def __getitem__(self, item):
+            if isinstance(item, slice):
+                Ctx.reads += 1
+            return list.__getitem__(self, item)
+
+    committed = []
+    proc = tg.build_tool_call_logits_processor(TOOLS, Wrapper(tok), history=lambda: committed)
+    text = ["Sure.", "<tool_call>", '\n{"name": "read_file", "arguments": {"path": "a.txt"}}\n', "</tool_call>"]
+    ids = [t for piece in text for t in tok.encode(piece, add_special_tokens=False)]
+    open_at = ids.index(tok.convert_tokens_to_ids("<tool_call>"))
+    generated = []
+    for i, t in enumerate(ids):
+        # The context ends with the newest sampled token; the request lags one behind.
+        logits = np.zeros((1, len(tok)), dtype=np.float32)
+        out = proc(Ctx([0, *generated]), logits)
+        assert np.isfinite(out[0, t]), (i, tok.decode([t]))
+        if i <= open_at:
+            assert Ctx.reads == 0, "read the context before any call"
+        committed[:] = generated[:]
+        generated.append(t)
+    assert Ctx.reads > 0

@@ -3,15 +3,18 @@
  * own ports; see vmlx_engine/browser_security.py). Pure, unit-tested in
  * tests/gateway-security.test.ts.
  *
- *  - Host: only this Mac's own names, so a web page cannot reach the API
- *    through a domain that resolves to 127.0.0.1 (DNS rebinding). When the
- *    gateway is shared on the network, IP addresses and .local names are
- *    allowed too.
+ *  - Host: names a web page cannot rebind to this Mac (DNS rebinding): this
+ *    Mac's own names, any IP address, and private names (.local, .internal,
+ *    .localhost, so Docker's host.docker.internal works), plus names the user
+ *    added. Public DNS names are refused.
  *  - Origin: native apps send none and always pass. Web pages may call the
  *    API only from this Mac (localhost, any port), from desktop app webviews
  *    (app://, tauri://, vscode-webview://, vscode-file://), or from origins the
  *    user added. CORS echoes the allowed origin instead of `*`.
- *  - Other devices (a client that is not this Mac) must send an API key.
+ *  - A page's background GET (no-cors, no Origin) from another site is refused
+ *    by its Sec-Fetch-Site header.
+ *  - Other devices (a client that is not this Mac) must send an API key. A
+ *    connection to this Mac's own LAN address counts as this Mac.
  *
  * The same defaults as Ollama's OLLAMA_ORIGINS, plus Rapid-MLX's host check.
  */
@@ -26,12 +29,17 @@ export interface GatewayPolicy {
   allowedOrigins: readonly string[]
   /** Extra Host names the user allowed ("*.example.com" matches subdomains). */
   trustedHosts: readonly string[]
+  /** This Mac's own host names and interface addresses (os.hostname(), os.networkInterfaces()). */
+  ownNames?: readonly string[]
+  ownAddresses?: readonly string[]
 }
 
 export interface GatewayRequestFacts {
   host?: string
   origin?: string
   remoteAddress?: string
+  /** Sec-Fetch-Site, which browsers send with every request. */
+  secFetchSite?: string
   /** The client sent a key the gateway accepts (any session's key or the network key). */
   hasValidKey: boolean
 }
@@ -87,13 +95,25 @@ function matchesTrusted(name: string, trusted: readonly string[]): boolean {
   })
 }
 
+/** Names no public DNS answers, so a web page cannot point them at this Mac. */
+function isPrivateName(name: string): boolean {
+  return name.endsWith('.local') || name.endsWith('.internal') || name.endsWith('.home.arpa')
+}
+
 export function hostAllowed(header: string | undefined, policy: GatewayPolicy): boolean {
   const name = hostName(header)
   if (!name) return false
-  if (isLoopbackName(name) || matchesTrusted(name, policy.trustedHosts)) return true
-  // Shared on the network: other devices reach it by IP address or Bonjour name.
-  if (!isLoopbackBind(policy.bindHost)) return isIP(name) !== 0 || name.endsWith('.local')
-  return false
+  if (isLoopbackName(name) || isIP(name) !== 0 || isPrivateName(name)) return true
+  const own = (policy.ownNames ?? []).map(n => n.toLowerCase().replace(/\.$/, ''))
+  return own.includes(name) || matchesTrusted(name, policy.trustedHosts)
+}
+
+/** This Mac: loopback, or one of its own interface addresses (a tool that dialed the LAN IP). */
+export function isThisMac(address: string | undefined, policy: GatewayPolicy): boolean {
+  if (isLoopbackAddress(address)) return true
+  if (!address) return false
+  const a = address.toLowerCase().replace(/^\[|\]$/g, '').replace(/^::ffff:(?=\d+\.)/, '').replace(/%.*$/, '')
+  return (policy.ownAddresses ?? []).some(o => o.toLowerCase().replace(/%.*$/, '') === a)
 }
 
 function normalizeOrigin(origin: string): string | null {
@@ -139,11 +159,13 @@ export function checkGatewayRequest(facts: GatewayRequestFacts, policy: GatewayP
   if (!hostAllowed(facts.host, policy)) {
     return { ok: false, status: 400, code: 'invalid_host', message: 'Invalid Host header. MLX Harness only answers requests addressed to this Mac.' }
   }
-  if (!originAllowed(facts.origin, policy)) {
+  const everySite = policy.allowedOrigins.some(o => o.trim() === '*')
+  const blindPage = !facts.origin && facts.secFetchSite?.toLowerCase() === 'cross-site' && !everySite
+  if (blindPage || !originAllowed(facts.origin, policy)) {
     return { ok: false, status: 403, code: 'origin_not_allowed', message: 'Web pages from other sites cannot use MLX Harness. Add this origin in Servers & API to allow it.' }
   }
   // A preflight carries no credentials; the request that follows is checked.
-  if (!preflight && !isLoopbackAddress(facts.remoteAddress) && !facts.hasValidKey) {
+  if (!preflight && !isThisMac(facts.remoteAddress, policy) && !facts.hasValidKey) {
     return { ok: false, status: 401, code: 'api_key_required', message: 'Other devices need the API key shown in MLX Harness → Servers & API.' }
   }
   return { ok: true, cors: corsHeaders(facts.origin, preflight) }
