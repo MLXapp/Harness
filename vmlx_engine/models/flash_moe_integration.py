@@ -220,7 +220,14 @@ class FlashMoEBlock(nn.Module):
             gates = mx.softmax(gates, axis=-1, precise=True)
             inds = mx.argpartition(-gates, kth=ne - 1, axis=-1)[..., :ne]
             scores = mx.take_along_axis(gates, inds, axis=-1)
-            scores = scores / (mx.sum(scores, axis=-1, keepdims=True) + 1e-20)
+            # Renormalise the top-k only where the model does (Qwen3-MoE's
+            # norm_topk_prob; Mixtral's softmax over the top-k is the same
+            # thing; Qwen2-MoE never renormalises).
+            renorm = getattr(orig, "norm_topk_prob", None)
+            if renorm is None:
+                renorm = "Qwen2Moe" not in type(orig).__name__
+            if renorm:
+                scores = scores / (mx.sum(scores, axis=-1, keepdims=True) + 1e-20)
             rsf = getattr(orig, "routed_scaling_factor", 1.0)
             scores = scores * rsf
             pes = getattr(orig, "per_expert_scale", None)

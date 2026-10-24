@@ -14,7 +14,7 @@ import {
 import { useTranslation } from '../../i18n'
 import { hasLiveLocalSession } from '../../../../shared/sessionConfigLifecycle'
 import { buildCacheLaunchArgs } from '../../../../shared/cacheLaunchArgs'
-import { explicitSlotBank, raisePrefillStepForStreaming } from '../../../../shared/flashMoeLaunch'
+import { launchSlotBank, raisePrefillStepForStreaming } from '../../../../shared/flashMoeLaunch'
 import {
   DISABLE_JANG_AFFINE_JIT_DEFAULT_ENV,
   isLagunaMixedSwaTurboQuantEffective,
@@ -292,7 +292,7 @@ const DSV4_ADDITIONAL_ARG_BLOCKLIST = new Set([
 export function buildCommandPreview(
   modelPath: string,
   config: SessionConfig,
-  detected?: { toolParser?: string; reasoningParser?: string; supportsThinking?: boolean; isMultimodal?: boolean; forceTextOnly?: boolean; runtimeModalities?: string[]; isTurboQuant?: boolean; usePagedCache?: boolean; enableAutoToolChoice?: boolean; cacheType?: string; cacheSubtype?: string; family?: string; nativeGlmSsd?: boolean; dsv4PoolQuantDefault?: boolean; architectureHints?: Record<string, string | number | boolean>; nativeMtp?: { supported?: boolean; depth?: number; depthSource?: string; defaultMode?: 'auto' | 'off'; blockedReason?: string } } | null,
+  detected?: { toolParser?: string; reasoningParser?: string; supportsThinking?: boolean; isMultimodal?: boolean; forceTextOnly?: boolean; runtimeModalities?: string[]; isTurboQuant?: boolean; usePagedCache?: boolean; enableAutoToolChoice?: boolean; cacheType?: string; cacheSubtype?: string; family?: string; nativeGlmSsd?: boolean; flashMoeAutoCandidate?: boolean; dsv4PoolQuantDefault?: boolean; architectureHints?: Record<string, string | number | boolean>; nativeMtp?: { supported?: boolean; depth?: number; depthSource?: string; defaultMode?: 'auto' | 'off'; blockedReason?: string } } | null,
   detectedDflash2Path = '',
   hasBundledDrafter = false,
   explicitDflash2?: boolean,
@@ -326,7 +326,11 @@ export function buildCommandPreview(
   const turboQuantActive = !!detected?.isTurboQuant
   const hybridCacheActive = cacheTypeRequiresPaged(detected?.cacheType)
   const effectiveDistributed = requestedDistributed && !dsv4Active
-  const effectiveFlashMoe = requestedFlashMoe && !effectiveDistributed && !dsv4Active
+  // Mirrors buildArgs: a listed MoE model over 75% of memory streams by itself.
+  const autoFlashMoe = !requestedFlashMoe && (config as any).flashMoeAuto !== false &&
+    detected?.flashMoeAutoCandidate === true &&
+    !(isVLM || effectiveSmelt || requestedDistributed || dsv4Active)
+  const effectiveFlashMoe = (requestedFlashMoe || autoFlashMoe) && !effectiveDistributed && !dsv4Active
   if (dsv4Active && typeof detected?.dsv4PoolQuantDefault === 'boolean') {
     parts[0] = `DSV4_POOL_QUANT=${detected.dsv4PoolQuantDefault ? '1' : '0'} ${parts[0]}`
   }
@@ -492,7 +496,7 @@ export function buildCommandPreview(
     parts.push('--flash-moe')
     raisePrefillStepForStreaming(parts)
     // No slot count = the engine sizes the expert cache from free memory.
-    const slotBank = explicitSlotBank((config as any).flashMoeSlotBank)
+    const slotBank = launchSlotBank((config as any).flashMoeSlotBank, (config as any).flashMoeSlotBankSet)
     if (slotBank != null) {
       parts.push('--flash-moe-slot-bank', slotBank.toString())
     }
@@ -607,7 +611,7 @@ export function SessionSettings({ sessionId, onBack }: SessionSettingsProps) {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [showPreview, setShowPreview] = useState(false)
   const [previewMetadataState, setPreviewMetadataState] = useState<'loading' | 'ready' | 'unavailable'>('loading')
-  const [detectedConfig, setDetectedConfig] = useState<{ toolParser?: string; reasoningParser?: string; supportsThinking?: boolean; cacheType?: string; cacheSubtype?: string; isMultimodal?: boolean; forceTextOnly?: boolean; runtimeModalities?: string[]; isTurboQuant?: boolean; usePagedCache?: boolean; enableAutoToolChoice?: boolean; family?: string; nativeGlmSsd?: boolean; dsv4PoolQuantDefault?: boolean; architectureHints?: Record<string, string | number | boolean>; maxContextLength?: number; nativeMtp?: { supported?: boolean; depth?: number; depthSource?: string; defaultMode?: 'auto' | 'off'; blockedReason?: string } } | null>(null)
+  const [detectedConfig, setDetectedConfig] = useState<{ toolParser?: string; reasoningParser?: string; supportsThinking?: boolean; cacheType?: string; cacheSubtype?: string; isMultimodal?: boolean; forceTextOnly?: boolean; runtimeModalities?: string[]; isTurboQuant?: boolean; usePagedCache?: boolean; enableAutoToolChoice?: boolean; family?: string; nativeGlmSsd?: boolean; flashMoeAutoCandidate?: boolean; dsv4PoolQuantDefault?: boolean; architectureHints?: Record<string, string | number | boolean>; maxContextLength?: number; nativeMtp?: { supported?: boolean; depth?: number; depthSource?: string; defaultMode?: 'auto' | 'off'; blockedReason?: string } } | null>(null)
   const [previewDrafters, setPreviewDrafters] = useState<Array<{ path: string; bundled?: boolean }>>([])
   const [previewDspark, setPreviewDspark] = useState<false | { default: boolean }>(false)
   const explicitDflash2 = useDflash2Selection(config.speculativeModel || '')

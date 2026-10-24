@@ -1,19 +1,23 @@
 /**
  * Turn Flash MoE (expert streaming from the SSD) on by itself for a mixture-
  * of-experts text model whose files are too big to sit comfortably in this
- * Mac's memory. Since 0.5.3 the engine streams experts from the moment the
- * model loads, so such a model starts instead of pushing the Mac into swap.
+ * Mac's memory. Since 0.5.3 the engine streams experts from the moment such a
+ * model loads, so it starts instead of pushing the Mac into swap.
  *
- * Only the engine's generic mlx-lm text path loads lazily, so JANG bundles,
- * multimodal models, DSV4 (its own expert hydration) and JANGTQ stay out.
+ * Only architectures the engine streams exactly from load qualify
+ * (STREAM_FROM_LOAD_MODEL_TYPES); JANG bundles (their own eager loader),
+ * multimodal models, DSV4 and anything else keep loading as before. The
+ * session setting "Turn on by itself" (flashMoeAuto, on by default) opts out.
  */
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
+import { STREAM_FROM_LOAD_MODEL_TYPES } from '../shared/flashMoeLaunch'
 
-/** Above this share of memory, a MoE model's experts stream (Strata's ~75% line). */
+/** Above this share of memory a listed MoE model streams (about where Metal's working-set limit sits). */
 export const AUTO_STREAM_SHARE = 0.75
 
-const EXPERT_KEYS = ['num_experts', 'n_routed_experts', 'num_local_experts', 'moe_num_experts', 'num_experts_per_layer']
+/** Same files vmlx_engine's is_jang_model looks for. */
+const JANG_CONFIG_FILES = ['jang_config.json', 'jjqf_config.json', 'jang_cfg.json']
 
 function readJson(path: string): Record<string, any> | null {
   try {
@@ -23,17 +27,11 @@ function readJson(path: string): Record<string, any> | null {
   }
 }
 
-/** Number of routed experts per layer from config.json, 0 for a dense model. */
-export function routedExpertCount(config: Record<string, any> | null): number {
-  if (!config) return 0
-  for (const scope of [config, config.text_config, config.language_config, config.llm_config]) {
-    if (!scope || typeof scope !== 'object') continue
-    for (const key of EXPERT_KEYS) {
-      const n = Number(scope[key])
-      if (Number.isFinite(n) && n > 1) return n
-    }
-  }
-  return 0
+/** Whether config.json names an architecture that streams exactly from load. */
+export function streamsFromLoad(config: Record<string, any> | null): boolean {
+  if (!config) return false
+  const types: readonly string[] = STREAM_FROM_LOAD_MODEL_TYPES
+  return [config, config.text_config].some(scope => scope && types.includes(String(scope.model_type)))
 }
 
 export interface AutoStreamInput {
@@ -42,17 +40,27 @@ export interface AutoStreamInput {
   totalBytes: number
   /** The user turned Flash MoE on (nothing to decide). */
   requested: boolean
-  /** Paths that can't stream from load: multimodal, smelt, distributed, DSV4. */
+  /** The user turned the automatic switch off. */
+  optedOut: boolean
+  /** Paths that can't stream from load: image, multimodal, smelt, distributed, DSV4. */
   excluded: boolean
 }
 
 export function shouldAutoStreamExperts(input: AutoStreamInput): boolean {
-  if (input.requested || input.excluded) return false
+  if (input.requested || input.optedOut || input.excluded) return false
   if (!(input.modelFileBytes > 0) || !(input.totalBytes > 0)) return false
   if (input.modelFileBytes <= input.totalBytes * AUTO_STREAM_SHARE) return false
-  // JANG bundles load through their own loader (not lazily); JANGTQ can't stream.
-  if (existsSync(join(input.modelPath, 'jang_config.json'))) return false
-  return routedExpertCount(readJson(join(input.modelPath, 'config.json'))) > 0
+  if (JANG_CONFIG_FILES.some(name => existsSync(join(input.modelPath, name)))) return false
+  return streamsFromLoad(readJson(join(input.modelPath, 'config.json')))
 }
 
-export { explicitSlotBank, raisePrefillStepForStreaming } from '../shared/flashMoeLaunch'
+/**
+ * The model-side half of the decision (listed architecture, not JANG, files
+ * over 75% of memory), for the command preview; the session settings decide
+ * the rest the same way buildArgs does.
+ */
+export function autoStreamCandidate(modelPath: string, modelFileBytes: number, totalBytes: number): boolean {
+  return shouldAutoStreamExperts({ modelPath, modelFileBytes, totalBytes, requested: false, optedOut: false, excluded: false })
+}
+
+export { launchSlotBank, raisePrefillStepForStreaming } from '../shared/flashMoeLaunch'

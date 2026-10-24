@@ -1545,7 +1545,7 @@ def load_model_with_fallback(model_name: str, tokenizer_config: dict = None, ski
     # Flash MoE: build the model without reading it, so the experts are swapped
     # for SSD streaming before a byte of them is loaded (0.5.3). Lets a MoE
     # model larger than memory start, as long as its other weights fit.
-    _stream_experts = _flash_moe_streams_from_load()
+    _stream_experts = _flash_moe_streams_from_load(local_model_path)
 
     if _needs_tokenizer_fallback(local_model_path):
         logger.info(
@@ -1589,11 +1589,17 @@ def load_model_with_fallback(model_name: str, tokenizer_config: dict = None, ski
             raise
 
 
-def _flash_moe_streams_from_load() -> bool:
+def _flash_moe_streams_from_load(model_path: str) -> bool:
+    """Flash MoE is on and this architecture streams experts exactly from load.
+
+    Others (GLM-5.3's accelerated layers, sigmoid or pre-routed gates, …) keep
+    the old order: full load, family warm-up, then patching by the server.
+    """
     try:
         from .. import server as _server_module
+        from .flash_moe_stream import model_type_streams_from_load
 
-        return bool(_server_module.flash_moe_streams_from_load())
+        return bool(_server_module.flash_moe_streams_from_load()) and model_type_streams_from_load(model_path)
     except Exception:
         return False
 

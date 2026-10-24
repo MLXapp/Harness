@@ -14,7 +14,9 @@ import {
 } from "fs/promises";
 import { existsSync, readFileSync } from "fs";
 import { join, basename, isAbsolute, relative, resolve, sep } from "path";
-import { homedir } from "os";
+import { homedir, totalmem } from "os";
+import { autoStreamCandidate } from "../flashMoeAuto";
+import { estimateModelFileBytes } from "../modelLaunchMemory";
 import { spawn, ChildProcess } from "child_process";
 import { db } from "../database";
 import { detectModelConfigFromDir } from "../model-config-registry";
@@ -1318,7 +1320,13 @@ export function registerModelHandlers(): void {
 
   // Detect model config (tool/reasoning parser, cache type) from model directory
   ipcMain.handle("models:detect-config", async (_, modelPath: string) => {
-    return readDetectedModelConfig(modelPath);
+    const detected = await readDetectedModelConfig(modelPath);
+    if (!detected || typeof detected !== "object") return detected;
+    // Lets the command preview show Flash MoE when the launch will turn it on.
+    return {
+      ...detected,
+      flashMoeAutoCandidate: autoStreamCandidate(modelPath, estimateModelFileBytes(modelPath), totalmem()),
+    };
   });
 
   // Detect model types (image vs text) by checking file structure, not names

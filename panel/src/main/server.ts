@@ -64,7 +64,11 @@ export interface ServerConfig {
   smelt?: boolean
   smeltExperts?: number
   flashMoe?: boolean
+  /** Turn Flash MoE on by itself when a listed MoE model is over 75% of memory (default on). */
+  flashMoeAuto?: boolean
   flashMoeSlotBank?: number
+  /** The user moved the slot slider (0.5.3), so 256 is a real limit, not the old default. */
+  flashMoeSlotBankSet?: boolean
   flashMoePrefetch?: 'none' | 'temporal'
   flashMoeIoSplit?: number
 

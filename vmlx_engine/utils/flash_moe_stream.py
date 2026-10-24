@@ -44,18 +44,47 @@ def memory_snapshot() -> tuple[int, int]:
         return int(total), int(total * 0.5)
 
 
-def size_expert_cache(cache, requested_gb: float = 0.0) -> int:
-    """Give the cache its byte budget, measured now that the rest is loaded."""
+def size_expert_cache(cache, requested_gb: float = 0.0, *, freed_bytes: int = 0, expert_count: int = 0) -> int:
+    """Give the cache its byte budget, measured now that the rest is loaded.
+
+    ``freed_bytes`` / ``expert_count`` (all experts, all layers) give the size
+    of one expert, so the budget never drops below the old fixed 256 experts
+    while that still fits under the process cap.
+    """
     from ..flash_moe_config import flash_moe_cache_bytes
 
+    # Freed expert buffers sit in MLX's buffer cache until cleared; macOS
+    # would not count them as available otherwise.
+    try:
+        mx.clear_cache()
+    except Exception:
+        pass
     total, available = memory_snapshot()
     try:
         resident = int(mx.get_active_memory())
     except Exception:
         resident = 0
-    budget = flash_moe_cache_bytes(total, available, resident, requested_gb)
+    per_expert = freed_bytes // expert_count if expert_count > 0 else 0
+    budget = flash_moe_cache_bytes(total, available, resident, requested_gb, floor_bytes=256 * per_expert)
     cache.set_max_bytes(budget)
     return budget
+
+
+def model_type_streams_from_load(model_path: str) -> bool:
+    """Whether this bundle's architecture may stream experts from load."""
+    import json
+    from pathlib import Path
+
+    from ..flash_moe_config import STREAM_FROM_LOAD_MODEL_TYPES
+
+    try:
+        config = json.loads((Path(model_path) / "config.json").read_text())
+    except Exception:
+        return False
+    for scope in (config, config.get("text_config") or {}):
+        if scope.get("model_type") in STREAM_FROM_LOAD_MODEL_TYPES:
+            return True
+    return False
 
 
 def stream_experts_on_load(
@@ -90,7 +119,9 @@ def stream_experts_on_load(
     # Read everything that stays resident. The experts were replaced by
     # 1-byte placeholders above, so their bytes are never read here.
     mx.eval(model.parameters())
-    budget = size_expert_cache(cache, cache_gb)
+    budget = size_expert_cache(
+        cache, cache_gb, freed_bytes=freed, expert_count=index.num_experts * index.num_moe_layers
+    )
     logger.info(
         "Flash MoE: streaming experts of %d layers from the SSD "
         "(%.1f GB not loaded; expert cache up to %.1f GB%s)",

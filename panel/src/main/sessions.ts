@@ -14,7 +14,7 @@ import { t as tMain } from './i18n'
 import { stopProcessGracefully } from './gracefulProcessStop'
 import { EventEmitter } from 'events'
 import { existsSync, readdirSync, readFileSync } from 'fs'
-import { explicitSlotBank, raisePrefillStepForStreaming, shouldAutoStreamExperts } from './flashMoeAuto'
+import { launchSlotBank, raisePrefillStepForStreaming, shouldAutoStreamExperts } from './flashMoeAuto'
 import { createServer } from 'net'
 import { homedir, totalmem, freemem } from 'os'
 import { join, basename, dirname } from 'path'
@@ -3888,7 +3888,7 @@ export class SessionManager extends EventEmitter {
     'speculativeModel', 'numDraftTokens', 'useBundledDflash2', 'useBundledDspark', 'smelt', 'smeltExperts',
     'nativeMtpMode',
     'omniBackend',
-    'flashMoe', 'flashMoeSlotBank', 'flashMoePrefetch', 'flashMoeIoSplit',
+    'flashMoe', 'flashMoeAuto', 'flashMoeSlotBank', 'flashMoeSlotBankSet', 'flashMoePrefetch', 'flashMoeIoSplit',
     'distributedEnabled', 'distributedMode', 'distributedSecret',
     'embeddingModel', 'additionalArgs', 'mfluxClass',
     'enableAutoToolChoice', 'chatTemplate',
@@ -5445,6 +5445,7 @@ export class SessionManager extends EventEmitter {
       modelFileBytes: requestedFlashMoe || isImage ? 0 : estimateModelFileBytes(config.modelPath),
       totalBytes: totalmem(),
       requested: requestedFlashMoe,
+      optedOut: (config as any).flashMoeAuto === false,
       excluded: isImage || isVLM || effectiveSmelt || requestedDistributed || dsv4Active,
     })
     if (autoFlashMoe) {
@@ -5507,7 +5508,7 @@ export class SessionManager extends EventEmitter {
       // 1,100 tok/s). Only the default 2048 is raised; a chosen size stays.
       raisePrefillStepForStreaming(args)
       // No slot count = the engine sizes the expert cache from free memory.
-      const slotBank = explicitSlotBank((config as any).flashMoeSlotBank)
+      const slotBank = launchSlotBank((config as any).flashMoeSlotBank, (config as any).flashMoeSlotBankSet)
       if (slotBank != null) {
         args.push('--flash-moe-slot-bank', slotBank.toString())
       }

@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir, totalmem } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { routedExpertCount, shouldAutoStreamExperts } from '../src/main/flashMoeAuto'
-import { explicitSlotBank, raisePrefillStepForStreaming } from '../src/shared/flashMoeLaunch'
+import { shouldAutoStreamExperts, streamsFromLoad } from '../src/main/flashMoeAuto'
+import { launchSlotBank, raisePrefillStepForStreaming } from '../src/shared/flashMoeLaunch'
 
 const { db } = vi.hoisted(() => ({
   db: {
@@ -39,38 +39,44 @@ const flag = (args: string[], name: string) => {
   return at < 0 ? undefined : args[at + 1]
 }
 
-describe('routed expert count', () => {
-  it('reads the usual config keys, nested text configs too', () => {
-    expect(routedExpertCount({ num_experts: 64 })).toBe(64)
-    expect(routedExpertCount({ n_routed_experts: 256 })).toBe(256)
-    expect(routedExpertCount({ text_config: { num_local_experts: 8 } })).toBe(8)
-    expect(routedExpertCount({ model_type: 'qwen3', num_experts: 1 })).toBe(0)
-    expect(routedExpertCount(null)).toBe(0)
+describe('architectures that stream from load', () => {
+  it('lists Qwen3-MoE, Qwen3-Next and Mixtral, nested text configs too', () => {
+    expect(streamsFromLoad({ model_type: 'qwen3_moe' })).toBe(true)
+    expect(streamsFromLoad({ model_type: 'mixtral' })).toBe(true)
+    expect(streamsFromLoad({ model_type: 'x', text_config: { model_type: 'qwen3_next' } })).toBe(true)
+    for (const other of ['glm5_next', 'minimax_m3', 'deepseek_v4', 'gpt_oss', 'qwen2_moe', 'qwen3']) {
+      expect(streamsFromLoad({ model_type: other, num_experts: 64 })).toBe(false)
+    }
+    expect(streamsFromLoad(null)).toBe(false)
   })
 })
 
 describe('automatic expert streaming', () => {
-  const base = { requested: false, excluded: false, totalBytes: 100 }
+  const base = { requested: false, optedOut: false, excluded: false, totalBytes: 100 }
 
-  it('turns on for a MoE model above 75% of memory', () => {
+  it('turns on for a listed MoE model above 75% of memory', () => {
     const dir = bundle(MOE, 0)
     expect(shouldAutoStreamExperts({ ...base, modelPath: dir, modelFileBytes: 80 })).toBe(true)
     expect(shouldAutoStreamExperts({ ...base, modelPath: dir, modelFileBytes: 70 })).toBe(false)
   })
 
-  it('stays off for dense models, JANG bundles and excluded paths', () => {
-    expect(shouldAutoStreamExperts({ ...base, modelPath: bundle({ model_type: 'qwen3' }, 0), modelFileBytes: 90 })).toBe(false)
-    expect(shouldAutoStreamExperts({ ...base, modelPath: bundle(MOE, 0, { 'jang_config.json': '{}' }), modelFileBytes: 90 })).toBe(false)
+  it('stays off for other architectures, every JANG stamp, excluded paths and an opt-out', () => {
+    expect(shouldAutoStreamExperts({ ...base, modelPath: bundle({ model_type: 'glm5_next', n_routed_experts: 256 }, 0), modelFileBytes: 90 })).toBe(false)
+    for (const stamp of ['jang_config.json', 'jjqf_config.json', 'jang_cfg.json']) {
+      expect(shouldAutoStreamExperts({ ...base, modelPath: bundle(MOE, 0, { [stamp]: '{}' }), modelFileBytes: 90 })).toBe(false)
+    }
     expect(shouldAutoStreamExperts({ ...base, excluded: true, modelPath: bundle(MOE, 0), modelFileBytes: 90 })).toBe(false)
+    expect(shouldAutoStreamExperts({ ...base, optedOut: true, modelPath: bundle(MOE, 0), modelFileBytes: 90 })).toBe(false)
   })
 })
 
 describe('slot count and prompt chunk', () => {
-  it('passes no slot count for Auto or the old 256 default', () => {
-    expect(explicitSlotBank(0)).toBeNull()
-    expect(explicitSlotBank(256)).toBeNull()
-    expect(explicitSlotBank(undefined)).toBeNull()
-    expect(explicitSlotBank(512)).toBe(512)
+  it('passes no slot count for Auto or the old untouched 256, and keeps a chosen 256', () => {
+    expect(launchSlotBank(0)).toBeNull()
+    expect(launchSlotBank(256)).toBeNull()
+    expect(launchSlotBank(256, true)).toBe(256)
+    expect(launchSlotBank(undefined)).toBeNull()
+    expect(launchSlotBank(512)).toBe(512)
   })
 
   it('raises only the default prompt chunk', () => {
@@ -94,6 +100,10 @@ describe('launch command', () => {
     expect(args).toContain('--flash-moe')
     expect(args).not.toContain('--flash-moe-slot-bank')
     expect(flag(args, '--prefill-step-size')).toBe('4096')
+  })
+
+  it('respects the opt-out', () => {
+    expect(launch(bundle(MOE, 0.8), { flashMoeAuto: false })).not.toContain('--flash-moe')
   })
 
   it('leaves a MoE model that fits as it was', () => {

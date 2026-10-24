@@ -972,7 +972,7 @@
       "smeltExpertsPercent": "Smelt Experts %",
       "smeltExpertsHint": "Loading {percent}% of experts per MoE layer. Lower = less RAM, slightly more routing bias.",
       "flashMoe": "Flash MoE (SSD Streaming)",
-      "flashMoeTooltip": "Streams MoE expert weights from the SSD instead of loading them all, so a MoE model larger than this Mac's memory can run, as long as its other weights fit. Turns on by itself for a text MoE model whose files are bigger than 75% of memory. Slower than keeping every expert in memory. Not available with Smelt or Distributed; JIT is off while streaming.",
+      "flashMoeTooltip": "Streams MoE expert weights from the SSD instead of keeping them all in memory. Qwen3-MoE, Qwen3-Next and Mixtral models stream from the moment they load, so one larger than this Mac's memory can run as long as its other weights fit. Slower than keeping every expert in memory. Not available with Smelt or Distributed; JIT is off while streaming.",
       "flashMoeDisabledDsv4": "Flash MoE is disabled for DSV4 Flash. DSV4 native expert hydration and SWA+CSA/HCA cache restore are not compatible with SSD expert streaming.",
       "flashMoeDisabledSmelt": "Flash MoE is disabled while Smelt is on. Turn it off to enable Flash MoE.",
       "flashMoeDisabledDistributed": "Flash MoE is disabled while Distributed is on. Turn it off to enable Flash MoE.",
@@ -1283,7 +1283,9 @@
       "nativeMtpOffForDrafter": "Native MTP is off while a DFlash2 drafter is selected (the two cannot share a decode step). Clear the Draft model or turn the bundled drafter off to use Adaptive MTP again.",
       "dflash2AdaptiveBlockNote": "DFlash2 picks its verify block each step, up to twice the drafter's trained block (8 or 16 tokens; 5 when wide verifies are costly), whichever produces more tokens per second on this text. Draft Tokens per Step does not apply.",
       "slotBankAuto": "Auto",
-      "flashMoeStreamingHintAuto": "Experts stream from the SSD and are never all loaded; the most recently used stay in memory, in a cache sized from free memory. Prompts are read 4,096 tokens at a time. Models without experts are unaffected. JIT is off while streaming."
+      "flashMoeStreamingHintAuto": "Experts stream from the SSD and are never all loaded; the most recently used stay in memory, in a cache sized from free memory. Prompts are read 4,096 tokens at a time. Models without experts are unaffected. JIT is off while streaming.",
+      "flashMoeAuto": "Turn on by itself when the model doesn't fit",
+      "flashMoeAutoTooltip": "For Qwen3-MoE, Qwen3-Next and Mixtral models whose files are bigger than 75% of this Mac's memory, experts stream from the SSD so the model starts instead of pushing the Mac into swap. Turn this off to always load every expert into memory."
     },
     "create": {
       "title": "Create Session",

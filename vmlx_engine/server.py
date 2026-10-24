@@ -9419,6 +9419,19 @@ def _streamed_expert_loader(raw_model):
             continue
         if isinstance(loader, FlashMoEExpertLoader):
             return loader
+    # Already patched some other way: take the loader from a patched block,
+    # so a second pass never finds "no MoE layers" and drops it.
+    try:
+        from .models.flash_moe_integration import FlashMoEBlock
+        from .utils.smelt_loader import _get_layers_list
+
+        for layer in _get_layers_list(raw_model):
+            for attr in ("block_sparse_moe", "mlp", "mixer"):
+                block = getattr(layer, attr, None)
+                if isinstance(block, FlashMoEBlock):
+                    return block._loader
+    except Exception:
+        pass
     return None
 
 
@@ -9518,7 +9531,12 @@ def _apply_flash_moe_patching():
             freed = free_expert_weights(raw_model)
             from .utils.flash_moe_stream import size_expert_cache
 
-            budget = size_expert_cache(cache, float(cli.get("flash_moe_cache_gb", 0.0) or 0.0))
+            budget = size_expert_cache(
+                cache,
+                float(cli.get("flash_moe_cache_gb", 0.0) or 0.0),
+                freed_bytes=freed,
+                expert_count=ei.num_experts * ei.num_moe_layers,
+            )
             logger.info(
                 "Flash MoE enabled: %d layers patched, %.2f GB freed, "
                 "expert cache up to %.1f GB, slot bank=%s, io_workers=%d",
