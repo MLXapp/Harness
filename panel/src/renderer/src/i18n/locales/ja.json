@@ -157,7 +157,15 @@
       "mergeIntoFile": "これをファイルにマージしてください:",
       "copyFilePath": "ファイルパスをコピー",
       "copyConfig": "設定をコピー",
-      "startServerHint": "モデルサーバーを起動すると、設定ボタンと手動セットアップ手順が有効になります"
+      "startServerHint": "モデルサーバーを起動すると、設定ボタンと手動セットアップ手順が有効になります",
+      "launch": "ターミナルで開く",
+      "launchTitle": "{model} を使って新しいターミナルウインドウで {tool} を起動します。{tool} 自体の設定は変わりません。",
+      "launchHint": "「ターミナルで開く」はそのウインドウだけでこのモデルを使います。「自動設定」はツール自体の設定を変更します(元のファイルは .mlx-harness-original として保存されます)。",
+      "launched": "ターミナルで開きました。",
+      "launchFailed": "ターミナルを開けませんでした。",
+      "installWith": "インストール:",
+      "aiderDesc": "ターミナルでのペアプログラミング",
+      "qwenDesc": "Qwen のターミナル向けコーディングエージェント"
     },
     "lanKey": "ネットワークキー",
     "newLanKey": "新しいキー",

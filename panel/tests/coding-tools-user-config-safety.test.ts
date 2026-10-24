@@ -71,6 +71,17 @@ describe('coding tool config safety', () => {
   const remove = () => electronMock.handlers.get('tools:removeCodingToolConfig')!
   const status = () => electronMock.handlers.get('tools:getCodingToolStatus')!
 
+  it('keeps a copy of the original file, made once and never overwritten', async () => {
+    const path = join(home, '.claude', 'settings.json')
+    mkdirSync(join(home, '.claude'), { recursive: true })
+    const original = JSON.stringify({ theme: 'dark', env: { FOO: '1' } }, null, 2)
+    writeFileSync(path, original)
+    expect((await add()({}, 'claude-code', BASE, 'model-a', 8080))?.success).toBe(true)
+    expect((await add()({}, 'claude-code', BASE, 'model-b', 8080))?.success).toBe(true)
+    expect(readFileSync(`${path}.mlx-harness-original`, 'utf8')).toBe(original)
+    expect(JSON.parse(readFileSync(path, 'utf8')).env.ANTHROPIC_MODEL).toBe('model-b')
+  })
+
   it('REFUSES to overwrite an unparseable config instead of clobbering it', async () => {
     // Legal JSON5, invalid JSON — exactly what an openclaw user may have.
     const path = join(home, '.openclaw', 'openclaw.json')

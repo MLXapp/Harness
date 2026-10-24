@@ -157,7 +157,15 @@
       "mergeIntoFile": "파일에 다음을 병합하세요:",
       "copyFilePath": "파일 경로 복사",
       "copyConfig": "구성 복사",
-      "startServerHint": "모델 서버를 시작하면 구성 버튼과 수동 설정 안내가 활성화됩니다"
+      "startServerHint": "모델 서버를 시작하면 구성 버튼과 수동 설정 안내가 활성화됩니다",
+      "launch": "터미널에서 열기",
+      "launchTitle": "새 터미널 창에서 {model}(으)로 {tool}을(를) 시작합니다. 도구 자체의 설정은 그대로입니다.",
+      "launchHint": "터미널에서 열기는 그 창에서만 이 모델을 사용합니다. 자동 구성은 도구 자체의 설정을 바꿉니다(원본 파일은 .mlx-harness-original로 보관됩니다).",
+      "launched": "터미널에서 열었습니다.",
+      "launchFailed": "터미널을 열 수 없습니다.",
+      "installWith": "설치:",
+      "aiderDesc": "터미널에서 페어 프로그래밍",
+      "qwenDesc": "Qwen의 터미널 코딩 에이전트"
     },
     "lanKey": "네트워크 키",
     "newLanKey": "새 키",

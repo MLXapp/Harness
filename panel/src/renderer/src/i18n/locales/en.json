@@ -157,7 +157,15 @@
       "mergeIntoFile": "Merge this into the file:",
       "copyFilePath": "Copy file path",
       "copyConfig": "Copy config",
-      "startServerHint": "Start a model server to enable configuration buttons and manual setup instructions"
+      "startServerHint": "Start a model server to enable configuration buttons and manual setup instructions",
+      "launch": "Open in Terminal",
+      "launchTitle": "Start {tool} with {model} in a new Terminal window. Its own settings stay as they are.",
+      "launchHint": "Open in Terminal uses this model for that window only. Auto-Configure changes the tool's own settings (the original file is kept as .mlx-harness-original).",
+      "launched": "Opened in Terminal.",
+      "launchFailed": "Couldn't open Terminal.",
+      "installWith": "Install with",
+      "aiderDesc": "Pair programming in your terminal",
+      "qwenDesc": "Qwen's coding agent for the terminal"
     },
     "lanKey": "Network key",
     "newLanKey": "New Key",

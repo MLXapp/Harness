@@ -8,6 +8,7 @@ interface ToolStatus {
   configured: boolean
   configPath: string
   entries: Array<{ label: string; baseUrl: string }>
+  launchable?: boolean
 }
 
 interface ConfigSnippet {
@@ -84,6 +85,22 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
     setLoading(null)
   }
 
+  // The tool with this model in a new Terminal window; its own settings stay as they are.
+  const handleLaunch = async (tool: string) => {
+    if (!baseUrl || !modelName) return
+    setLoading(tool)
+    setMessage(null)
+    try {
+      const result = await window.api.tools?.launchCodingTool?.(tool, baseUrl, modelName)
+      setMessage(result?.success
+        ? { tool, text: t('api.codingTools.launched'), type: 'success' }
+        : { tool, text: result?.error || t('api.codingTools.launchFailed'), type: 'error' })
+    } catch (e) {
+      setMessage({ tool, text: (e as Error).message, type: 'error' })
+    }
+    setLoading(null)
+  }
+
   const handleRemove = async (tool: string, label: string) => {
     setLoading(tool)
     setMessage(null)
@@ -119,6 +136,9 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
     // Hermes writes ~/.hermes/config.yaml (a providers MAP) and appends
     // /chat/completions itself, so the base_url we store ends at /v1.
     { id: 'hermes', name: 'Hermes Agent', descKey: 'api.codingTools.hermesDesc', install: 'npm install -g @nousresearch/hermes-agent', verify: 'hermes --version', link: 'https://hermes-agent.nousresearch.com' },
+    // Run-only: started from Terminal with this model; nothing of theirs is edited.
+    { id: 'aider', name: 'Aider', descKey: 'api.codingTools.aiderDesc', install: 'python3 -m pip install aider-install && aider-install', verify: 'aider --version', link: 'https://aider.chat', runOnly: true },
+    { id: 'qwen-code', name: 'Qwen Code', descKey: 'api.codingTools.qwenDesc', install: 'npm install -g @qwen-code/qwen-code', verify: 'qwen --version', link: 'https://github.com/QwenLM/qwen-code', runOnly: true },
   ]
 
   return (
@@ -127,6 +147,7 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
         <div>
           <h3 className="text-sm font-medium">{t('api.codingTools.title')}</h3>
           <p className="text-[11px] text-muted-foreground">{t('api.codingTools.subtitle')}</p>
+          <p className="text-[11px] text-muted-foreground">{t('api.codingTools.launchHint')}</p>
         </div>
         <button onClick={refresh} className="p-1 text-muted-foreground hover:text-foreground" title={t('api.codingTools.refreshTitle')}>
           <RefreshCw className="h-3.5 w-3.5" />
@@ -162,7 +183,15 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
 
               {/* Status + Actions */}
               <div className="flex items-center gap-2 flex-wrap">
-                {!status?.installed ? (
+                {!status?.installed && tool.runOnly ? (
+                  <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                    {t('api.codingTools.installWith')}
+                    <code className="truncate rounded bg-muted px-1.5 py-0.5 font-mono">{tool.install}</code>
+                    <button onClick={() => handleCopy(`${tool.id}-install`, tool.install)} className="p-0.5 hover:text-foreground" title={t('api.copy')}>
+                      {copiedId === `${tool.id}-install` ? <CheckCheck className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                    </button>
+                  </span>
+                ) : !status?.installed ? (
                   <button
                     onClick={() => handleInstall(tool.id)}
                     disabled={isLoading}
@@ -176,11 +205,23 @@ export function CodingToolIntegration({ baseUrl, modelName, port }: CodingToolIn
                     <span className="text-[11px] text-green-500 flex items-center gap-0.5">
                       <Check className="h-3 w-3" /> {t('api.codingTools.installed')}
                     </span>
-                    {baseUrl && modelName && (
+                    {baseUrl && modelName && status?.launchable && (
+                      <button
+                        onClick={() => handleLaunch(tool.id)}
+                        disabled={isLoading}
+                        data-vmlx-control={`coding-tool-launch-${tool.id}`}
+                        className="px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded flex items-center gap-1 hover:bg-primary/90 disabled:opacity-50"
+                        title={t('api.codingTools.launchTitle', { tool: tool.name, model: modelName })}
+                      >
+                        {isLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Terminal className="h-3 w-3" />}
+                        {t('api.codingTools.launch')}
+                      </button>
+                    )}
+                    {baseUrl && modelName && !tool.runOnly && (
                       <button
                         onClick={() => handleAdd(tool.id)}
                         disabled={isLoading}
-                        className="px-2.5 py-1 text-xs bg-blue-600 text-white rounded flex items-center gap-1 hover:bg-blue-700 disabled:opacity-50"
+                        className="px-2.5 py-1 text-xs border border-border rounded flex items-center gap-1 hover:bg-muted/50 text-muted-foreground hover:text-foreground disabled:opacity-50"
                         title={t('api.codingTools.autoConfigureTitle', { tool: tool.name, model: modelName })}
                       >
                         {isLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}

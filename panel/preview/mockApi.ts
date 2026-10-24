@@ -722,10 +722,13 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
 
     tools: {
       getCodingToolStatus: async () => ({
-        claude: { installed: true, configured: false, configPath: '~/.claude/settings.json', entries: [] },
-        codex: { installed: false, configured: false, configPath: '~/.codex/config.toml', entries: [] },
-        opencode: { installed: false, configured: false, configPath: '~/.config/opencode/opencode.json', entries: [] },
+        'claude-code': { installed: true, configured: false, configPath: '~/.claude/settings.json', entries: [], launchable: true },
+        codex: { installed: true, configured: false, configPath: '~/.codex/config.toml', entries: [], launchable: true },
+        opencode: { installed: false, configured: false, configPath: '~/.config/opencode/opencode.json', entries: [], launchable: true },
+        aider: { installed: false, configured: false, configPath: '', entries: [], launchable: true },
+        'qwen-code': { installed: false, configured: false, configPath: '', entries: [], launchable: true },
       }),
+      launchCodingTool: async () => ({ success: true }),
       installCodingTool: async () => ({ success: true }),
       addCodingToolConfig: async () => ({ success: true }),
       removeCodingToolConfig: async () => ({ success: true }),
