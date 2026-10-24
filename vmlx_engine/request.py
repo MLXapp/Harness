@@ -71,6 +71,8 @@ class SamplingParams:
     dry_allowed_length: Optional[int] = None
     dry_penalty_last_n: Optional[int] = None
     dry_sequence_breakers: Optional[List[str]] = None
+    # Well-formed tool calls (vmlx_engine.api.tool_grammar): {"tools", "thinking_open"}.
+    tool_grammar: Optional[Dict[str, Any]] = None
     seed: Optional[int] = None
     stop: Optional[List[str]] = None
     stop_token_ids: Optional[List[int]] = None

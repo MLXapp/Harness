@@ -61,6 +61,18 @@ _GEN_PROMPT_KEY_FAILURES: set[str] = set()
 
 
 
+def _tool_grammar_spec(kwargs: dict, prompt: Any) -> dict | None:
+    """Tools for the tool-call grammar (vmlx_engine.api.tool_grammar), when the request has any."""
+    tools = kwargs.get("_vmlx_template_tools")
+    if not tools or not isinstance(prompt, str):
+        return None
+    from ..api.tool_grammar import prompt_leaves_thinking_open, tool_grammar_enabled
+
+    if not tool_grammar_enabled():
+        return None
+    return {"tools": tools, "thinking_open": prompt_leaves_thinking_open(prompt)}
+
+
 def _dry_sampling_kwargs(kwargs: dict) -> dict:
     """DRY settings from generation kwargs (only the ones a request set)."""
     out = {}
@@ -2725,6 +2737,7 @@ class BatchedEngine(BaseEngine):
             presence_penalty=kwargs.get("presence_penalty", 0.0),
             logit_bias=kwargs.get("logit_bias"),
             **_dry_sampling_kwargs(kwargs),
+            tool_grammar=_tool_grammar_spec(kwargs, prompt),
             seed=kwargs.get("seed"),
             stop=stop or [],
             logprobs=bool(kwargs.get("logprobs", False)),
@@ -2915,6 +2928,7 @@ class BatchedEngine(BaseEngine):
             presence_penalty=kwargs.get("presence_penalty", 0.0),
             logit_bias=kwargs.get("logit_bias"),
             **_dry_sampling_kwargs(kwargs),
+            tool_grammar=_tool_grammar_spec(kwargs, prompt),
             seed=kwargs.get("seed"),
             stop=stop or [],
             logprobs=bool(kwargs.get("logprobs", False)),
