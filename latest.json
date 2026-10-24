@@ -1,14 +1,14 @@
 {
-  "version": "0.5.0",
-  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.0/MLX-Harness-0.5.0-arm64.dmg",
-  "sha256": "d4b3a0c5372c293871cfe6bf732640afae062f9bad0004a28eff8e3f1e853991",
-  "size": 591358918,
+  "version": "0.5.2",
+  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.2/MLX-Harness-0.5.2-arm64.dmg",
+  "sha256": "baae2d5ffa80645b8f919cfcd5ed4ade3d7e9dce7e88236d24ccc562ee695bcf",
+  "size": 591659089,
   "date": "2026-10-24",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.0/MLX-Harness-0.5.0-arm64.dmg",
-      "sha256": "d4b3a0c5372c293871cfe6bf732640afae062f9bad0004a28eff8e3f1e853991"
+      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.2/MLX-Harness-0.5.2-arm64.dmg",
+      "sha256": "baae2d5ffa80645b8f919cfcd5ed4ade3d7e9dce7e88236d24ccc562ee695bcf"
     }
   },
-  "notes": "Safer local API (only this Mac and web pages you allow), well-formed tool calls for Qwen models, Open in Terminal for coding agents, fit check in model search, and speech in your own voice."
+  "notes": "Long chats keep working: when a chat outgrows the model's context, older messages are summarized reliably (also with thinking models and in Chinese, Japanese and Korean) instead of the message not being sent."
 }
