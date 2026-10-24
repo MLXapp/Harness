@@ -2981,7 +2981,7 @@ def serve_command(args):
     server._log_level = log_level
 
     # Configure CORS
-    allowed_origins = getattr(args, 'allowed_origins', '*')
+    allowed_origins = getattr(args, 'allowed_origins', '')
     server._allowed_origins = allowed_origins
 
     # Configure JIT compilation. --no-jit is the final word: several policy
@@ -3128,19 +3128,39 @@ def serve_command(args):
         server._cli_args['speculative_model'] = getattr(args, 'speculative_model', None)
         server._cli_args['num_draft_tokens'] = getattr(args, 'num_draft_tokens', 3)
 
-    # Configure CORS middleware
+    # Configure CORS middleware. Web pages on this Mac (localhost) and desktop
+    # app webviews may read replies; any other site only when listed in
+    # --allowed-origins ("*" = every site, the old default).
     from fastapi.middleware.cors import CORSMiddleware
-    origins = [o.strip() for o in allowed_origins.split(',') if o.strip()]
+    from .browser_security import LOCAL_ORIGIN_REGEX, BrowserSecurityMiddleware
+    origins = [o.strip() for o in (allowed_origins or '').split(',') if o.strip()]
     # CORS spec: allow_credentials=True is invalid with origins=["*"]
     # Only enable credentials when specific origins are listed
     has_wildcard = '*' in origins
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
+        allow_origin_regex=None if has_wildcard else LOCAL_ORIGIN_REGEX,
         allow_credentials=not has_wildcard,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Outermost: refuse foreign Host names (DNS rebinding), pages from other
+    # sites, and other devices when no API key is set. Not for a Unix socket,
+    # which no browser or other device can reach.
+    if not getattr(args, "uds", None):
+        trusted_hosts = [
+            h.strip()
+            for h in (getattr(args, "trusted_hosts", "") or os.environ.get("VMLX_TRUSTED_HOSTS", "")).split(",")
+            if h.strip()
+        ]
+        app.add_middleware(
+            BrowserSecurityMiddleware,
+            bind_host=args.host,
+            allowed_origins=origins,
+            trusted_hosts=trusted_hosts,
+            api_key_set=bool(server._api_key),
+        )
 
     # Security warning: 0.0.0.0 exposes server to the network
     if args.host == '0.0.0.0' and not server._api_key:
@@ -4621,9 +4641,17 @@ Examples:
     serve_parser.add_argument(
         "--allowed-origins",
         type=str,
-        default="*",
-        help="Comma-separated list of allowed CORS origins for browser-based API consumers. "
-             "Use * to allow all origins. Example: http://localhost:3000,https://myapp.com (default: *)",
+        default="",
+        help="Comma-separated web origins (besides pages on this Mac and app webviews) that may "
+             "call this server from a browser. Use * to allow every site. Example: https://myapp.com "
+             "(default: none)",
+    )
+    serve_parser.add_argument(
+        "--trusted-hosts",
+        type=str,
+        default="",
+        help="Comma-separated extra Host names to answer (default: this Mac's own names; on 0.0.0.0 also "
+             "IP addresses and .local names). '*.example.com' matches subdomains. Env: VMLX_TRUSTED_HOSTS",
     )
     # Bench command
     bench_parser = subparsers.add_parser("bench", help="Run benchmark")

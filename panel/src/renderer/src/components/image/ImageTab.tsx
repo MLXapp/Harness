@@ -270,9 +270,13 @@ export function ImageTab() {
       controller = new AbortController()
       const timeout = setTimeout(() => controller?.abort(), 5000)
       try {
-        const resp = await fetch(`http://127.0.0.1:${serverPort}/health`, { signal: controller.signal })
-        if (!resp.ok) throw new Error(`Image health HTTP ${resp.status}`)
-        const snapshot = imageRuntimeSnapshot(await resp.json())
+        // Through the main process: the engine refuses requests from web
+        // pages, and this window is one (browser_security.py).
+        const health = await Promise.race([
+          window.api.performance.health({ host: '127.0.0.1', port: serverPort }),
+          new Promise<never>((_, reject) => controller!.signal.addEventListener('abort', () => reject(new Error('Image health timed out')), { once: true })),
+        ])
+        const snapshot = imageRuntimeSnapshot(health)
         if (cancelled || serverSessionIdRef.current !== serverSessionId || revision !== healthRevision.current) return
         setServerStatus(wakePending.current && snapshot.status === 'standby' ? 'starting' : snapshot.status)
         setCapabilities(snapshot.capabilities)

@@ -431,7 +431,9 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
     gateway: {
       getStatus: async () => ({ ...gateway }),
       setPort: async (port: number) => { gateway = { ...gateway, port }; return { ...gateway } },
-      setHostAndPort: async (port: number, host: string) => { gateway = { ...gateway, port, host, displayHost: host }; return { ...gateway } },
+      setHostAndPort: async (port: number, host: string) => { gateway = { ...gateway, port, host, displayHost: host, ...(host === '0.0.0.0' ? { lanHost: '192.168.1.24', lanKey: 'mlxh-preview-7Qk2xN4bTq9sVw3LmZr8Hd5c' } : { lanKey: undefined }) }; return { ...gateway } },
+      newLanKey: async () => { gateway = { ...gateway, lanKey: `mlxh-preview-${Math.random().toString(36).slice(2, 14)}` }; return { ...gateway } },
+      setAllowedOrigins: async (value: string) => { gateway = { ...gateway, allowedOrigins: value }; return { ...gateway } },
       setSingleModelMode: async (enabled: boolean) => {
         gateway = { ...gateway, singleModelMode: enabled }
         events.emit('gateway:singleModelModeChanged', { singleModelMode: enabled })

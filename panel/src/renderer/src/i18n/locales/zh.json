@@ -158,7 +158,12 @@
       "copyFilePath": "复制文件路径",
       "copyConfig": "复制配置",
       "startServerHint": "启动模型服务器以启用配置按钮和手动设置说明"
-    }
+    },
+    "lanKey": "网络密钥",
+    "newLanKey": "新密钥",
+    "lanKeyHint": "其他设备需将其作为 API 密钥发送。这台 Mac 本身无需密钥。",
+    "webPages": "网页",
+    "webPagesHint": "这台 Mac 上的页面(localhost)和应用内网页视图始终可以使用 API。其他网站仅限在此列出的(用逗号分隔)。"
   },
   "endpoints": {
     "title": "端点",
@@ -854,7 +859,7 @@
       "logLevelInfo": "INFO (默认)",
       "logLevelWarning": "WARNING",
       "logLevelError": "ERROR (最少)",
-      "corsPlaceholder": "* (允许全部)",
+      "corsPlaceholder": "https://myapp.com",
       "concurrentProcessing": "并发处理",
       "cachingReferenceTitle": "缓存与兼容性参考",
       "prefixCache": "前缀缓存",
@@ -894,7 +899,7 @@
       "timeout": "超时 (秒)",
       "timeoutNoLimit": "无限制",
       "logLevel": "日志级别",
-      "corsOrigins": "CORS 源",
+      "corsOrigins": "其他网页",
       "powerManagementDesc": "控制空闲模型何时自动休眠以释放 GPU 内存。新请求到达时休眠模型会自动唤醒。",
       "autoSleep": "自动休眠",
       "autoSleepDesc": "一段时间不活动后自动将模型置于休眠状态以释放内存。轻度休眠清除缓存但保持模型加载(立即唤醒)。深度休眠完全卸载模型(2-15 秒唤醒)。新请求到达时模型自动唤醒。",
@@ -935,7 +940,7 @@
       "rateLimitTooltip": "每分钟允许的最大 API 请求数。设为 0 可禁用速率限制。将服务器开放给多个用户或外部应用时可防止过载。",
       "timeoutTooltip": "等待单个推理请求完成的最长时间（秒），超时后中止。生成很长或模型较慢时请增大该值。大多数模型默认 300 秒；MiniMax-M3 和 DSV4 除非选择自定义值，否则自动使用 900 秒。",
       "logLevelTooltip": "控制服务器日志的详细程度。DEBUG 显示所有内容（非常冗长）。INFO 为默认值。WARNING 和 ERROR 仅保留重要消息。",
-      "corsOriginsTooltip": "允许跨域 API 请求（来自网页浏览器）的来源。使用 * 允许所有来源，或用逗号分隔列出特定来源（例如 http://localhost:3000,https://myapp.com）。仅在外部 Web 应用调用 API 时才有意义。",
+      "corsOriginsTooltip": "这台 Mac 上的网页(localhost)和应用内网页视图始终可以调用此服务器。其他网站的页面会被拒绝,除非在此列出(用逗号分隔,例如 https://myapp.com)。",
       "concurrentHint": "控制服务器同时处理的请求数量。保持连续批处理开启以启用缓存引擎。",
       "glmSequentialQueueNote": "GLM-5.3 在文本和多模态模式下每次只运行一个请求。其他请求在顺序队列中等待，并非模型同时批处理多个请求。最大序列数、预填充批大小和生成批大小的有效值均为 1。已保存的设置保持不变，预填充分块大小仍可调整。",
       "maxConcurrentSequences": "最大并发序列数",

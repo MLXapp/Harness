@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { Reveal } from "../ui/Reveal";
 import { Copy, Check, Wifi, WifiOff } from "lucide-react";
 import { useSessionsContext } from "../../contexts/SessionsContext";
 import { EndpointList } from "./EndpointList";
@@ -58,6 +59,9 @@ export function ApiDashboard() {
   const [gwLanHost, setGwLanHost] = useState<string | null>(null);
   const [lanEnabled, setLanEnabled] = useState(false);
   const [singleModelMode, setSingleModelMode] = useState(false);
+  const [lanKey, setLanKey] = useState<string | null>(null);
+  const [origins, setOrigins] = useState("");
+  const [originsSaved, setOriginsSaved] = useState("");
   const [portError, setPortError] = useState<string | null>(null);
   const [format, setFormat] = useState<ApiFormat>("openai");
   const portRef = useRef<HTMLInputElement>(null);
@@ -95,6 +99,9 @@ export function ApiDashboard() {
         }
         setGwLanHost(status?.lanHost ?? null);
         setSingleModelMode(!!status?.singleModelMode);
+        setLanKey(status?.lanKey ?? null);
+        setOrigins(status?.allowedOrigins ?? "");
+        setOriginsSaved(status?.allowedOrigins ?? "");
       })
       .catch(() => {});
   }, []);
@@ -132,6 +139,7 @@ export function ApiDashboard() {
       setPortInput(String(activePort));
       setGwHost(status?.host || host);
       setGwLanHost(status?.lanHost ?? null);
+      setLanKey(status?.lanKey ?? null);
     } catch (err: any) {
       setPortError(err?.message || t('api.changePortFailed'));
     }
@@ -149,6 +157,7 @@ export function ApiDashboard() {
       }
       setGwHost(status?.host || host);
       setGwLanHost(status?.lanHost ?? null);
+      setLanKey(status?.lanKey ?? null);
     } catch (err: any) {
       setPortError(err?.message || t('api.changeHostFailed'));
       setLanEnabled(!newLan);
@@ -167,6 +176,17 @@ export function ApiDashboard() {
       setPortError(err?.message || t('api.changeSingleModelFailed'));
       setSingleModelMode(!next);
     }
+  };
+
+  const handleNewLanKey = async () => {
+    const status = await window.api.gateway?.newLanKey?.().catch(() => null);
+    if (status?.lanKey) setLanKey(status.lanKey);
+  };
+
+  const saveOrigins = async () => {
+    if (origins.trim() === originsSaved.trim()) return;
+    const status = await window.api.gateway?.setAllowedOrigins?.(origins).catch(() => null);
+    if (status) { setOrigins(status.allowedOrigins ?? ""); setOriginsSaved(status.allowedOrigins ?? ""); }
   };
 
   const handlePortKeyDown = (e: React.KeyboardEvent) => {
@@ -260,6 +280,20 @@ export function ApiDashboard() {
               </span>
             </div>
 
+            {/* Shared on the network: other devices need this key. */}
+            <Reveal open={lanEnabled && !!lanKey}>
+              <div className="space-y-1 pb-0.5" data-vmlx-section="gateway-lan-key">
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1"><CopyRow label={t('api.lanKey')} value={lanKey ?? ""} masked /></div>
+                  <button type="button" onClick={() => void handleNewLanKey()} data-vmlx-control="gateway-new-lan-key"
+                    className="flex-shrink-0 rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground">
+                    {t('api.newLanKey')}
+                  </button>
+                </div>
+                <p className="pl-[88px] text-[11px] text-muted-foreground">{t('api.lanKeyHint')}</p>
+              </div>
+            </Reveal>
+
             {/* Single loaded model toggle */}
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground w-20 flex-shrink-0">
@@ -291,6 +325,18 @@ export function ApiDashboard() {
 
             {/* Ollama host */}
             <CopyRow label="Ollama" value={`OLLAMA_HOST=${gatewayUrl}`} />
+
+            {/* Web pages from other sites can't use the API unless listed here. */}
+            <div className="flex items-start gap-2 pt-1 text-xs" data-vmlx-section="gateway-origins">
+              <span className="text-muted-foreground w-20 flex-shrink-0 pt-1">{t('api.webPages')}</span>
+              <div className="min-w-0 flex-1 space-y-1">
+                <input value={origins} onChange={e => setOrigins(e.target.value)} onBlur={() => void saveOrigins()}
+                  onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur() }}
+                  placeholder="https://chat.example.com" spellCheck={false} data-vmlx-control="gateway-origins"
+                  className="w-full px-2 py-1 bg-background rounded border border-border font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
+                <p className="text-[11px] text-muted-foreground">{t('api.webPagesHint')}</p>
+              </div>
+            </div>
           </div>
         </div>
 

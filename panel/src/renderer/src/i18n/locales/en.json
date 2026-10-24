@@ -158,7 +158,12 @@
       "copyFilePath": "Copy file path",
       "copyConfig": "Copy config",
       "startServerHint": "Start a model server to enable configuration buttons and manual setup instructions"
-    }
+    },
+    "lanKey": "Network key",
+    "newLanKey": "New Key",
+    "lanKeyHint": "Other devices send this as their API key. This Mac never needs it.",
+    "webPages": "Web pages",
+    "webPagesHint": "Pages on this Mac (localhost) and app webviews can always use the API. Other sites only when listed here, comma-separated."
   },
   "endpoints": {
     "title": "Endpoints",
@@ -854,7 +859,7 @@
       "logLevelInfo": "INFO (default)",
       "logLevelWarning": "WARNING",
       "logLevelError": "ERROR (minimal)",
-      "corsPlaceholder": "* (allow all)",
+      "corsPlaceholder": "https://myapp.com",
       "concurrentProcessing": "Concurrent Processing",
       "cachingReferenceTitle": "Caching & Compatibility Reference",
       "prefixCache": "Prefix Cache",
@@ -894,7 +899,7 @@
       "timeout": "Timeout (seconds)",
       "timeoutNoLimit": "No limit",
       "logLevel": "Log Level",
-      "corsOrigins": "CORS Origins",
+      "corsOrigins": "Other web pages",
       "powerManagementDesc": "Control when idle models automatically sleep to free GPU memory. Sleeping models auto-wake when a new request arrives.",
       "autoSleep": "Auto-Sleep",
       "autoSleepDesc": "Automatically put the model to sleep after a period of inactivity to free memory. Light sleep clears caches but keeps the model loaded (instant wake). Deep sleep unloads the model entirely (2-15s wake). Models auto-wake when a new request arrives.",
@@ -935,7 +940,7 @@
       "rateLimitTooltip": "Maximum number of API requests allowed per minute. Set to 0 to disable rate limiting. Useful when exposing the server to multiple users or external applications to prevent overloading.",
       "timeoutTooltip": "Maximum time in seconds to wait for a single inference request to complete before timing out. Increase this for very long generations or slow models. Default is 300s for most models; MiniMax-M3 and DSV4 auto-use 900s unless you choose a custom value.",
       "logLevelTooltip": "Controls how much detail the server logs. DEBUG shows everything (very verbose). INFO is the default. WARNING and ERROR reduce noise to only important messages.",
-      "corsOriginsTooltip": "Allowed origins for cross-origin API requests (from web browsers). Use * to allow all origins, or a comma-separated list of specific origins (e.g. http://localhost:3000,https://myapp.com). Only matters when external web apps call your API.",
+      "corsOriginsTooltip": "Web pages on this Mac (localhost) and app webviews can always call this server. Pages from other sites are refused unless listed here, comma-separated (e.g. https://myapp.com).",
       "concurrentHint": "Controls how many requests your server handles at once. Keep Continuous Batching ON to enable the caching engine.",
       "glmSequentialQueueNote": "GLM-5.3 runs one active request at a time in text and multimodal modes. Additional requests wait in a sequential queue; this is not multi-request model batching. Maximum sequences, prefill batch size and completion batch size are effectively 1. Your saved values are preserved; prefill chunk size remains adjustable.",
       "maxConcurrentSequences": "Max Concurrent Sequences",

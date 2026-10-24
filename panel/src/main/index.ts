@@ -120,6 +120,9 @@ function gatewayStatusPayload() {
     activeRequests: apiGateway.activeRequestCount,
     displayHost: lanHost || (host === '0.0.0.0' ? 'localhost' : host),
     singleModelMode: apiGateway.singleModelMode,
+    // Shared on the network: other devices need this key (made on first share).
+    lanKey: host === '0.0.0.0' || host === '::' ? apiGateway.lanKey(true) : undefined,
+    allowedOrigins: db.getSetting('gateway_allowed_origins') || '',
   }
 }
 
@@ -414,6 +417,13 @@ function createWindow(): void {
     })
     ipcMain.handle('gateway:restart', async (_e, port: number, host?: string) => {
       await apiGateway.restart(port, host)
+      return gatewayStatusPayload()
+    })
+    ipcMain.handle('gateway:newLanKey', () => { apiGateway.rotateLanKey(); return gatewayStatusPayload() })
+    ipcMain.handle('gateway:setAllowedOrigins', (_e, value: string) => {
+      // Origins only (scheme://host[:port]); anything else is dropped.
+      const list = String(value ?? '').split(/[,\n]/).map(s => s.trim()).filter(s => s === '*' || /^[a-z][a-z0-9+.-]*:\/\/[^/\s]+$/i.test(s))
+      db.setSetting('gateway_allowed_origins', list.join(', '))
       return gatewayStatusPayload()
     })
     ipcMain.handle('gateway:setSingleModelMode', async (_e, enabled: boolean) => {
