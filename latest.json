@@ -1,14 +1,14 @@
 {
-  "version": "0.4.0",
-  "url": "https://github.com/MLXapp/Harness/releases/download/v0.4.0/MLX-Harness-0.4.0-arm64.dmg",
-  "sha256": "8af70a8cbb46e3ba73d5af0f380eb52491c4a34c61fad50a9480e1bff1b5aa3a",
-  "size": 591758751,
+  "version": "0.5.0",
+  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.0/MLX-Harness-0.5.0-arm64.dmg",
+  "sha256": "d4b3a0c5372c293871cfe6bf732640afae062f9bad0004a28eff8e3f1e853991",
+  "size": 591358918,
   "date": "2026-10-24",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/Harness/releases/download/v0.4.0/MLX-Harness-0.4.0-arm64.dmg",
-      "sha256": "8af70a8cbb46e3ba73d5af0f380eb52491c4a34c61fad50a9480e1bff1b5aa3a"
+      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.0/MLX-Harness-0.5.0-arm64.dmg",
+      "sha256": "d4b3a0c5372c293871cfe6bf732640afae062f9bad0004a28eff8e3f1e853991"
     }
   },
-  "notes": "Review every change the agent made and put it back, tell it what to do instead of an approval, ask aside with ⌘;, jump to what needs you with ⌥⌘J, open projects in your editor, and a new Music tab with Mureka, Lyria, ElevenLabs and MiniMax Music 3 on your Mac."
+  "notes": "Safer local API (only this Mac and web pages you allow), well-formed tool calls for Qwen models, Open in Terminal for coding agents, fit check in model search, and speech in your own voice."
 }
