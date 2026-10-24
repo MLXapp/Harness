@@ -1,14 +1,14 @@
 {
-  "version": "0.3.1",
-  "url": "https://github.com/MLXapp/Harness/releases/download/v0.3.1/MLX-Harness-0.3.1-arm64.dmg",
-  "sha256": "ea4f575a5960fb8f068ecba08d1146439a5e5e859b595ef220d549b1e3c048b8",
-  "size": 591366747,
-  "date": "2026-10-23",
+  "version": "0.4.0",
+  "url": "https://github.com/MLXapp/Harness/releases/download/v0.4.0/MLX-Harness-0.4.0-arm64.dmg",
+  "sha256": "8af70a8cbb46e3ba73d5af0f380eb52491c4a34c61fad50a9480e1bff1b5aa3a",
+  "size": 591758751,
+  "date": "2026-10-24",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/Harness/releases/download/v0.3.1/MLX-Harness-0.3.1-arm64.dmg",
-      "sha256": "ea4f575a5960fb8f068ecba08d1146439a5e5e859b595ef220d549b1e3c048b8"
+      "url": "https://github.com/MLXapp/Harness/releases/download/v0.4.0/MLX-Harness-0.4.0-arm64.dmg",
+      "sha256": "8af70a8cbb46e3ba73d5af0f380eb52491c4a34c61fad50a9480e1bff1b5aa3a"
     }
   },
-  "notes": "MLX Harness 0.3.1 ships with MLX Node 0.9.6, which pauses mining while Harness runs a model on your Mac."
+  "notes": "Review every change the agent made and put it back, tell it what to do instead of an approval, ask aside with ⌘;, jump to what needs you with ⌥⌘J, open projects in your editor, and a new Music tab with Mureka, Lyria, ElevenLabs and MiniMax Music 3 on your Mac."
 }
