@@ -16,7 +16,7 @@ import { join } from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import type { ChildProcess } from 'child_process'
-import { estimateCost, mediaModel, MEDIA_PROVIDER_NAMES, type MediaKind, type MediaProviderId } from '../../shared/media/catalog'
+import { estimateCost, mediaModel, MEDIA_PROVIDER_NAMES, wanLocalFrames, wanLocalSize, type MediaKind, type MediaProviderId } from '../../shared/media/catalog'
 import { VOICE_SAMPLE_ID, type MediaJob, type MediaJobOutput, type MediaResult, type MediaSubmitRequest } from '../../shared/media/jobs'
 import { buildCloudRequest, buildQuoteRequest, coerceValues, nextPollDelayMs, outputExtension, parsePoll, parseQuote, parseSubmit, pollUrl, songText } from '../../shared/media/request'
 import { mediaUrl, mimeFor } from './paths'
@@ -95,6 +95,13 @@ export class MediaRunner {
 
     if (model.where === 'local') {
       if (!model.available) return { ok: false, error: `${model.name} is not available in this version of MLX Harness yet` }
+      if (model.runner === 'mlx-video' && model.task === 'text-to-video' && model.repo) {
+        const python = this.deps.python()
+        if (!python) return { ok: false, error: 'The built-in engine is missing, so video cannot run on this Mac' }
+        this.save(job)
+        void this.runLocalVideo(job, model.repo, python)
+        return { ok: true, job: publicJob(job) }
+      }
       const speech = model.task === 'text-to-speech'
       if (model.runner !== 'mlx-audio' || !(speech || model.task === 'song') || !model.repo) return { ok: false, error: 'This model cannot run here yet' }
       if (request.voiceSample) {
@@ -183,6 +190,14 @@ export class MediaRunner {
     this.processes.get(id)?.kill('SIGTERM')
     this.finish(job, { status: 'cancelled' })
     return { ok: true }
+  }
+
+  /** Stop every local run (the app is quitting): a video job can hold ~30 GB. */
+  stopAll(): void {
+    for (const [id, child] of this.processes) {
+      this.cancelled.add(id)
+      try { child.kill('SIGTERM') } catch { /* already gone */ }
+    }
   }
 
   delete(id: string): MediaResult<object> {
@@ -301,17 +316,29 @@ export class MediaRunner {
     this.runLocalJob(job, args, [caption, lyrics], python, 'Music')
   }
 
-  /** `python -m vmlx_engine.audio.job <args> --output <wav>`, reading its JSON progress lines. */
-  private runLocalJob(job: StoredMediaJob, args: string[], inputs: string[], python: LocalPython, what: string): void {
+  private async runLocalVideo(job: StoredMediaJob, repo: string, python: LocalPython): Promise<void> {
     const dir = join(this.deps.mediaRoot(), job.kind)
-    const name = `${job.id.slice(0, 8)}-0.wav`
+    mkdirSync(dir, { recursive: true })
+    const prompt = join(dir, `${job.id.slice(0, 8)}.prompt.txt`)
+    writeFileSync(prompt, job.prompt, 'utf8')
+    const { width, height } = wanLocalSize(job.values.aspect, job.values.resolution)
+    const args = ['wan', '--model', repo, '--prompt-file', prompt, '--width', String(width), '--height', String(height),
+      '--frames', String(wanLocalFrames(job.values.duration)), '--steps', '30', '--seed', String(randomInt(0, 2 ** 31 - 1))]
+    this.runLocalJob(job, args, [prompt], python, 'Video', { module: 'vmlx_engine.video.job', ext: 'mp4', mime: 'video/mp4' })
+  }
+
+  /** `python -m vmlx_engine.audio.job <args> --output <file>` (or the video job), reading its JSON progress lines. */
+  private runLocalJob(job: StoredMediaJob, args: string[], inputs: string[], python: LocalPython, what: string,
+    output: { module: string; ext: string; mime: string } = { module: 'vmlx_engine.audio.job', ext: 'wav', mime: 'audio/wav' }): void {
+    const dir = join(this.deps.mediaRoot(), job.kind)
+    const name = `${job.id.slice(0, 8)}-0.${output.ext}`
     const out = join(dir, name)
     const cleanup = () => { for (const f of inputs) { try { rmSync(f, { force: true }) } catch { /* ignore */ } } }
     job.phase = 'loading'
     this.save(job)
     let child: ChildProcess
     try {
-      child = this.deps.spawn(python.path, ['-B', '-s', '-u', '-m', 'vmlx_engine.audio.job', ...args, '--output', out], { env: python.env, cwd: python.cwd })
+      child = this.deps.spawn(python.path, ['-B', '-s', '-u', '-m', output.module, ...args, '--output', out], { env: python.env, cwd: python.cwd })
     } catch (error) {
       cleanup()
       return this.finish(job, { status: 'failed', error: (error as Error).message })
@@ -320,6 +347,8 @@ export class MediaRunner {
     let lastError = ''
     let buffer = ''
     child.stdout?.on('data', (chunk: Buffer) => {
+      // Cancelled or deleted: this copy of the job must not be saved again.
+      if (this.cancelled.has(job.id)) return
       buffer += chunk.toString('utf8')
       let nl
       while ((nl = buffer.indexOf('\n')) >= 0) {
@@ -329,9 +358,13 @@ export class MediaRunner {
         try {
           const event = JSON.parse(line)
           // First use of a model: it is downloaded before it loads.
-          const phase = event.event === 'downloading' ? 'fetching' : event.event === 'loading' ? 'loading' : event.event === 'generating' ? 'generating' : null
+          const phase = event.event === 'downloading' ? 'fetching' : event.event === 'loading' ? 'loading' : event.event === 'generating' ? 'generating' : event.event === 'finishing' || event.event === 'encoding' ? 'finishing' : null
           if (phase === 'fetching') job.downloadedModel = true
           if (phase && job.phase !== phase) { job.phase = phase; this.save(job) }
+          if (event.event === 'step' && Number.isFinite(event.step) && Number.isFinite(event.of) && event.of > 0) {
+            job.progress = { step: Math.min(event.step, event.of), of: event.of }
+            this.save(job)
+          }
           if (event.event === 'error' && typeof event.message === 'string') lastError = event.message
         } catch { /* not ours */ }
       }
@@ -342,10 +375,12 @@ export class MediaRunner {
     child.on('close', (code) => {
       this.processes.delete(job.id)
       cleanup()
+      // A cancelled or failed run may have left a partial file.
+      if (code !== 0 || this.cancelled.has(job.id)) { try { rmSync(out, { force: true }) } catch { /* ignore */ } }
       if (this.cancelled.has(job.id)) return
       if (code === 0) {
         job.files = [out]
-        this.finish(job, { status: 'done', outputs: [{ kind: 'file', url: mediaUrl(job.kind, name), mime: 'audio/wav', name }] })
+        this.finish(job, { status: 'done', outputs: [{ kind: 'file', url: mediaUrl(job.kind, name), mime: output.mime, name }] })
       } else {
         const tail = stderrTail.trim().split('\n').pop() ?? ''
         this.finish(job, { status: 'failed', error: lastError || tail || `${what} stopped (exit ${code})` })
@@ -364,6 +399,7 @@ export class MediaRunner {
   private finish(job: StoredMediaJob, change: { status: 'done' | 'failed' | 'cancelled'; outputs?: MediaJobOutput[]; error?: string }): void {
     job.status = change.status
     delete job.phase
+    delete job.progress
     if (change.outputs) job.outputs = change.outputs
     if (change.error) job.error = change.error
     job.finishedAt = this.now()

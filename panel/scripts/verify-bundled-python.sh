@@ -553,6 +553,8 @@ REQUIRED = [
     ("mlx_audio.music.generate", "mlx-audio music", "bundled mlx-audio lacks mlx_audio.music — the Music tab's local MiniMax Music 3 will fail"),
     ("mlx_audio.music.models.minimax_music3", "MiniMax Music 3 runtime", "bundled mlx-audio lacks the minimax_music3 model — the Music tab's local model will fail"),
     ("vmlx_engine.audio.job", "vmlx_engine.audio.job", "local Audio/Music job runner missing from bundled vmlx_engine"),
+    ("mlx_video.models.wan_2.generate", "mlx-video Wan 2.2", "bundled mlx-video missing — the Video tab's local Wan 2.2 will fail"),
+    ("vmlx_engine.video.job", "vmlx_engine.video.job", "local Video job runner missing from bundled vmlx_engine"),
     ("jang_tools", "jang-tools", "bundled jang-tools package missing"),
     ("jang_tools.capabilities", "jang_tools.capabilities", "JANG capability stamping/verification helpers missing from bundled jang-tools"),
     ("jang_tools.hy3", "jang_tools.hy3", "Hy3 model-family registration missing from bundled jang-tools"),
