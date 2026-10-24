@@ -1,14 +1,14 @@
 {
-  "version": "0.5.0",
-  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.0/MLX-Harness-0.5.0-arm64.dmg",
-  "sha256": "d4b3a0c5372c293871cfe6bf732640afae062f9bad0004a28eff8e3f1e853991",
-  "size": 591358918,
+  "version": "0.5.1",
+  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.1/MLX-Harness-0.5.1-arm64.dmg",
+  "sha256": "20422066a83534a42b91f99c6ca11c819b6d5201f5d93e167674d1ced5b509d6",
+  "size": 592075198,
   "date": "2026-10-24",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.0/MLX-Harness-0.5.0-arm64.dmg",
-      "sha256": "d4b3a0c5372c293871cfe6bf732640afae062f9bad0004a28eff8e3f1e853991"
+      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.1/MLX-Harness-0.5.1-arm64.dmg",
+      "sha256": "20422066a83534a42b91f99c6ca11c819b6d5201f5d93e167674d1ced5b509d6"
     }
   },
-  "notes": "Safer local API (only this Mac and web pages you allow), well-formed tool calls for Qwen models, Open in Terminal for coding agents, fit check in model search, and speech in your own voice."
+  "notes": "Make video on your own Mac: Wan 2.2 runs privately in the Video tab on Macs with 32 GB or more, with step-by-step progress."
 }
