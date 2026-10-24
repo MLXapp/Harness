@@ -1,14 +1,14 @@
 {
-  "version": "0.5.2",
-  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.2/MLX-Harness-0.5.2-arm64.dmg",
-  "sha256": "baae2d5ffa80645b8f919cfcd5ed4ade3d7e9dce7e88236d24ccc562ee695bcf",
-  "size": 591659089,
+  "version": "0.5.3",
+  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.3/MLX-Harness-0.5.3-arm64.dmg",
+  "sha256": "f360c38b4cabac8bceb3bef1938bf75481262c5eff38ce61e33fc3a5b6efa25c",
+  "size": 592085848,
   "date": "2026-10-24",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.2/MLX-Harness-0.5.2-arm64.dmg",
-      "sha256": "baae2d5ffa80645b8f919cfcd5ed4ade3d7e9dce7e88236d24ccc562ee695bcf"
+      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.3/MLX-Harness-0.5.3-arm64.dmg",
+      "sha256": "f360c38b4cabac8bceb3bef1938bf75481262c5eff38ce61e33fc3a5b6efa25c"
     }
   },
-  "notes": "Long chats keep working: when a chat outgrows the model's context, older messages are summarized reliably (also with thinking models and in Chinese, Japanese and Korean) instead of the message not being sent."
+  "notes": "Big MoE models start on smaller Macs: Qwen3-MoE, Qwen3-Next and Mixtral models larger than memory stream their experts from the SSD, with a cache sized from free memory."
 }
