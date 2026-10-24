@@ -1284,6 +1284,21 @@ def _configure_vision_feature_ssd(args, explicit) -> None:
         logger.warning("Vision feature SSD cache unavailable", exc_info=True)
 
 
+def _raise_prefill_step_for_streaming(args, argv) -> None:
+    """Prompt chunks of 4096 instead of 2048 while experts stream from the SSD.
+
+    Each chunk reads every expert it routes to once, so bigger chunks read the
+    SSD less (Strata measured 700 → 1,100 prompt tok/s on a Mac). Only when
+    the size was not given on the command line.
+    """
+    if not getattr(args, "flash_moe", False):
+        return
+    if any(a == "--prefill-step-size" or a.startswith("--prefill-step-size=") for a in argv):
+        return
+    if getattr(args, "prefill_step_size", 2048) == 2048:
+        args.prefill_step_size = 4096
+
+
 def serve_command(args):
     """Start the OpenAI-compatible server."""
     import logging
@@ -1297,6 +1312,7 @@ def serve_command(args):
 
     logger = logging.getLogger(__name__)
     _is_image = _is_image_serve_request(args)
+    _raise_prefill_step_for_streaming(args, sys.argv[1:])
 
     # Engine-owned lifecycle progress: one generation per serve attempt. The
     # panel reads the mirrored LOADPROGRESS stdout lines during cold start
@@ -3120,7 +3136,8 @@ def serve_command(args):
             cluster_secret=getattr(args, 'cluster_secret', '') or os.environ.get('VMLX_CLUSTER_SECRET', ''),
             worker_nodes=getattr(args, 'worker_nodes', None),
             flash_moe=getattr(args, 'flash_moe', False),
-            flash_moe_slot_bank=getattr(args, 'flash_moe_slot_bank', 64),
+            flash_moe_slot_bank=getattr(args, 'flash_moe_slot_bank', 0),
+            flash_moe_cache_gb=getattr(args, 'flash_moe_cache_gb', 0.0),
             flash_moe_prefetch=getattr(args, 'flash_moe_prefetch', 'none'),
             flash_moe_io_split=getattr(args, 'flash_moe_io_split', 4),
         )
@@ -4221,9 +4238,17 @@ Examples:
     serve_parser.add_argument(
         "--flash-moe-slot-bank",
         type=int,
-        default=256,
-        help="Number of expert weight sets to cache in RAM (default: 256, matching the app). "
-             "Higher = more cache hits but more RAM usage.",
+        default=0,
+        help="Most experts to keep in memory. 0 (default) = no count limit: the "
+             "cache is sized in bytes from free memory (see --flash-moe-cache-gb).",
+    )
+    serve_parser.add_argument(
+        "--flash-moe-cache-gb",
+        type=float,
+        default=0.0,
+        help="Memory for the expert cache in GB. 0 (default) = what macOS can "
+             "spare: leaves max(7 GB, 15%%) free and keeps the process under 60%% "
+             "of memory on 64 GB+ Macs (75%% below).",
     )
     serve_parser.add_argument(
         "--flash-moe-prefetch",
@@ -4849,9 +4874,9 @@ Examples:
     bench_parser.add_argument(
         "--flash-moe-slot-bank",
         type=int,
-        default=256,
-        help="Flash MoE slot bank size (default: 256). Kept equal to serve so a "
-             "benchmark measures the shipped expert-cache size.",
+        default=0,
+        help="Flash MoE slot bank size (default: 0 = sized from free memory, "
+             "like serve).",
     )
 
     # Detokenizer benchmark

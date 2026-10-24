@@ -4,6 +4,7 @@ import { DEFAULT_BLOCK_DISK_CACHE_PERCENT } from '../../../../shared/cacheDefaul
 import { resolveNativeMtpMode } from '../../../../shared/nativeMtpLaunchArgs'
 import { useEffect, useState, useRef } from 'react'
 import { QWEN38_27B_DFLASH2_REPO, isQwen38Dense27b } from '../../../../shared/dflash2Drafter'
+import { explicitSlotBank } from '../../../../shared/flashMoeLaunch'
 import { Modal } from '../ui/Modal'
 import { useTranslation } from '../../i18n'
 import {
@@ -196,7 +197,8 @@ export const DEFAULT_CONFIG: SessionConfig = {
   smelt: false,
   smeltExperts: 50,
   flashMoe: false,
-  flashMoeSlotBank: 256,
+  // 0 = Auto: the engine sizes the expert cache from free memory (0.5.3).
+  flashMoeSlotBank: 0,
   flashMoePrefetch: 'none',
   flashMoeIoSplit: 4,
   defaultTemperature: 0,
@@ -991,12 +993,16 @@ export function SessionConfigForm({ config, onChange, onReset, detectedCacheType
             <SliderField settingKey="flashMoeSlotBank"
               label={t('sessions.config.slotBankSize')}
               tooltip={t('sessions.config.slotBankSizeTooltip')}
-              value={config.flashMoeSlotBank}
+              value={explicitSlotBank(config.flashMoeSlotBank) ?? 0}
               onChange={v => onChange('flashMoeSlotBank', v)}
               min={16}
               max={1024}
               step={16}
-              defaultValue={DEFAULT_CONFIG.flashMoeSlotBank}
+              // Auto (0) is the session default; this is where a hand-set limit starts.
+              defaultValue={128}
+              allowUnlimited
+              unlimitedValue={0}
+              unlimitedLabel={t('sessions.config.slotBankAuto')}
             />
             <SliderField settingKey="flashMoeIoSplit"
               label={t('sessions.config.ioWorkers')}
@@ -1008,7 +1014,9 @@ export function SessionConfigForm({ config, onChange, onReset, detectedCacheType
               step={1}
               defaultValue={4}
             />
-            <PerformanceHint text={t('sessions.config.flashMoeStreamingHint', { slots: config.flashMoeSlotBank })} />
+            <PerformanceHint text={explicitSlotBank(config.flashMoeSlotBank) == null
+              ? t('sessions.config.flashMoeStreamingHintAuto')
+              : t('sessions.config.flashMoeStreamingHint', { slots: explicitSlotBank(config.flashMoeSlotBank) ?? 0 })} />
           </>
         )}
         <CheckField

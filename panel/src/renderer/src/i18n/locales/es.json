@@ -972,12 +972,12 @@
       "smeltExpertsPercent": "% de expertos Smelt",
       "smeltExpertsHint": "Cargando el {percent}% de expertos por capa MoE. Más bajo = menos RAM, un poco más de sesgo de enrutamiento.",
       "flashMoe": "Flash MoE (streaming desde SSD)",
-      "flashMoeTooltip": "Transmite los pesos de expertos MoE desde el SSD bajo demanda en lugar de mantenerlos todos en RAM. Permite ejecutar modelos MoE masivos (35B-397B) en máquinas con RAM limitada, almacenando en una caché de banco de ranuras solo los expertos usados recientemente. Incompatible con Smelt, Distribuido y JIT. ~50% más lento que el modo todo-en-RAM debido a la carga desde disco bajo demanda.",
+      "flashMoeTooltip": "Lee los pesos de los expertos MoE del SSD en vez de cargarlos todos, así un modelo MoE más grande que la memoria de este Mac puede funcionar si el resto de sus pesos cabe. Se activa solo para un modelo MoE de texto cuyos archivos superan el 75 % de la memoria. Es más lento que tener todos los expertos en memoria. No funciona con Smelt ni Distribuido; JIT se desactiva mientras tanto.",
       "flashMoeDisabledDsv4": "Flash MoE está deshabilitado para DSV4 Flash. La hidratación nativa de expertos de DSV4 y la restauración de caché SWA+CSA/HCA no son compatibles con el streaming de expertos desde SSD.",
       "flashMoeDisabledSmelt": "Flash MoE está deshabilitado mientras Smelt está activado. Desactívelo para habilitar Flash MoE.",
       "flashMoeDisabledDistributed": "Flash MoE está deshabilitado mientras el modo Distribuido está activado. Desactívelo para habilitar Flash MoE.",
       "slotBankSize": "Tamaño del banco de ranuras",
-      "slotBankSizeTooltip": "Número de conjuntos de pesos de expertos almacenados en caché en RAM. Más alto = más aciertos de caché pero más RAM. Recomendado: 64 para Nemotron/MoE pequeños, 256+ para Qwen3.5 MoE, 512+ para MiniMax (256 expertos).",
+      "slotBankSizeTooltip": "Cuántos expertos se quedan en memoria. Auto ajusta la caché a la memoria que macOS puede ceder: deja libres al menos 7 GB (o el 15 %) y mantiene el motor de MLX Harness por debajo del 60 % de la memoria en Macs de 64 GB o más. Un número limita la caché a esa cantidad de expertos.",
       "ioWorkers": "Trabajadores de E/S",
       "ioWorkersTooltip": "Número de hilos de E/S de disco paralelos para cargar expertos. Más alto = cargas en frío más rápidas pero más presión de E/S. El valor predeterminado 4 funciona bien para la mayoría de los SSD.",
       "flashMoeStreamingHint": "Transmitiendo expertos desde SSD con caché LRU de {slots} ranuras. Los modelos no MoE pasan automáticamente sin cambios (sin efecto). JIT deshabilitado (incompatible con la carga bajo demanda).",
@@ -1281,7 +1281,9 @@
       "useBundledDflash2": "Usar el drafter DFlash2 incluido ({{name}})",
       "useBundledDflash2Tooltip": "Activado por defecto cuando el paquete del modelo incluye un drafter DFlash2. Un modelo borrador indicado abajo tiene prioridad. Desactivado = se usa el MTP nativo del paquete (Adaptativo/AR).",
       "nativeMtpOffForDrafter": "El MTP nativo está desactivado mientras haya un drafter DFlash2 seleccionado (no pueden compartir el paso de decodificación). Borra el modelo borrador o desactiva el drafter incluido para volver a usar MTP adaptativo.",
-      "dflash2AdaptiveBlockNote": "DFlash2 elige su bloque de verificación en cada paso, hasta el doble del bloque con el que se entrenó el drafter (8 o 16 tokens; 5 cuando las verificaciones anchas son costosas), el que produzca más tokens por segundo con este texto. Tokens borrador por paso no se aplica."
+      "dflash2AdaptiveBlockNote": "DFlash2 elige su bloque de verificación en cada paso, hasta el doble del bloque con el que se entrenó el drafter (8 o 16 tokens; 5 cuando las verificaciones anchas son costosas), el que produzca más tokens por segundo con este texto. Tokens borrador por paso no se aplica.",
+      "slotBankAuto": "Auto",
+      "flashMoeStreamingHintAuto": "Los expertos se leen del SSD y nunca se cargan todos; los usados más recientemente se quedan en una caché ajustada a la memoria libre. Los prompts se leen de 4096 en 4096 tokens. Los modelos sin expertos no cambian. JIT se desactiva mientras tanto."
     },
     "create": {
       "title": "Crear sesión",

@@ -972,12 +972,12 @@
       "smeltExpertsPercent": "Smelt Experts %",
       "smeltExpertsHint": "Loading {percent}% of experts per MoE layer. Lower = less RAM, slightly more routing bias.",
       "flashMoe": "Flash MoE (SSD Streaming)",
-      "flashMoeTooltip": "Streams MoE expert weights from SSD on-demand instead of keeping them all in RAM. Enables massive MoE models (35B-397B) to run on machines with limited RAM by caching only recently-used experts in a slot-bank cache. Incompatible with Smelt, Distributed, and JIT. ~50% slower than full-RAM mode due to on-demand disk loading.",
+      "flashMoeTooltip": "Streams MoE expert weights from the SSD instead of loading them all, so a MoE model larger than this Mac's memory can run, as long as its other weights fit. Turns on by itself for a text MoE model whose files are bigger than 75% of memory. Slower than keeping every expert in memory. Not available with Smelt or Distributed; JIT is off while streaming.",
       "flashMoeDisabledDsv4": "Flash MoE is disabled for DSV4 Flash. DSV4 native expert hydration and SWA+CSA/HCA cache restore are not compatible with SSD expert streaming.",
       "flashMoeDisabledSmelt": "Flash MoE is disabled while Smelt is on. Turn it off to enable Flash MoE.",
       "flashMoeDisabledDistributed": "Flash MoE is disabled while Distributed is on. Turn it off to enable Flash MoE.",
       "slotBankSize": "Slot Bank Size",
-      "slotBankSizeTooltip": "Number of expert weight sets cached in RAM. Higher = more cache hits but more RAM. Recommended: 64 for Nemotron/small MoE, 256+ for Qwen3.5 MoE, 512+ for MiniMax (256 experts).",
+      "slotBankSizeTooltip": "How many experts stay in memory. Auto sizes the cache from the memory macOS can spare: it leaves at least 7 GB (or 15%) free and keeps MLX Harness's engine under 60% of memory on Macs with 64 GB or more. A number caps the cache at that many experts.",
       "ioWorkers": "I/O Workers",
       "ioWorkersTooltip": "Number of parallel disk I/O threads for loading experts. Higher = faster cold loads but more I/O pressure. Default 4 works well for most SSDs.",
       "flashMoeStreamingHint": "Streaming experts from SSD with {slots}-slot LRU cache. Non-MoE models automatically pass through (no effect). JIT disabled (incompatible with on-demand loading).",
@@ -1281,7 +1281,9 @@
       "useBundledDflash2": "Use the bundled DFlash2 drafter ({{name}})",
       "useBundledDflash2Tooltip": "On by default when the model bundle includes a DFlash2 drafter. A Draft model entered below takes precedence. Off = the bundle's native MTP (Adaptive/AR) is used instead.",
       "nativeMtpOffForDrafter": "Native MTP is off while a DFlash2 drafter is selected (the two cannot share a decode step). Clear the Draft model or turn the bundled drafter off to use Adaptive MTP again.",
-      "dflash2AdaptiveBlockNote": "DFlash2 picks its verify block each step, up to twice the drafter's trained block (8 or 16 tokens; 5 when wide verifies are costly), whichever produces more tokens per second on this text. Draft Tokens per Step does not apply."
+      "dflash2AdaptiveBlockNote": "DFlash2 picks its verify block each step, up to twice the drafter's trained block (8 or 16 tokens; 5 when wide verifies are costly), whichever produces more tokens per second on this text. Draft Tokens per Step does not apply.",
+      "slotBankAuto": "Auto",
+      "flashMoeStreamingHintAuto": "Experts stream from the SSD and are never all loaded; the most recently used stay in memory, in a cache sized from free memory. Prompts are read 4,096 tokens at a time. Models without experts are unaffected. JIT is off while streaming."
     },
     "create": {
       "title": "Create Session",

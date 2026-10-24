@@ -107,12 +107,31 @@ class SlotBankCache:
         max_slots: Maximum number of expert weight sets to cache.
     """
 
-    def __init__(self, max_slots: int = 64):
+    def __init__(self, max_slots: int = 64, max_bytes: int = 0):
+        # max_slots <= 0: no count limit; max_bytes <= 0: no byte limit.
         self._max_slots = max_slots
+        self._max_bytes = max_bytes
+        self._bytes = 0
         self._cache: OrderedDict[str, ExpertWeightSet] = OrderedDict()
         self._lock = threading.Lock()
         self._hits = 0
         self._misses = 0
+
+    def set_max_bytes(self, max_bytes: int) -> None:
+        """Size the cache in bytes (evicting the oldest experts if it shrinks)."""
+        with self._lock:
+            self._max_bytes = max_bytes
+            self._evict_locked(0)
+
+    def _over_limit(self, incoming_bytes: int) -> bool:
+        if self._max_slots > 0 and len(self._cache) >= self._max_slots:
+            return True
+        return self._max_bytes > 0 and self._bytes + incoming_bytes > self._max_bytes
+
+    def _evict_locked(self, incoming_bytes: int) -> None:
+        while self._cache and self._over_limit(incoming_bytes):
+            _, old = self._cache.popitem(last=False)  # evict LRU
+            self._bytes -= old.total_bytes
 
     @staticmethod
     def _key(layer_idx: int, expert_idx: int) -> str:
@@ -132,18 +151,22 @@ class SlotBankCache:
     def put(self, expert: ExpertWeightSet) -> None:
         """Insert expert into cache, evicting LRU if full."""
         key = self._key(expert.layer_idx, expert.expert_idx)
+        size = expert.total_bytes
         with self._lock:
             if key in self._cache:
+                self._bytes -= self._cache[key].total_bytes
                 self._cache.move_to_end(key)
                 self._cache[key] = expert
+                self._bytes += size
                 return
-            if len(self._cache) >= self._max_slots:
-                self._cache.popitem(last=False)  # evict LRU
+            self._evict_locked(size)
             self._cache[key] = expert
+            self._bytes += size
 
     def clear(self) -> None:
         with self._lock:
             self._cache.clear()
+            self._bytes = 0
             self._hits = 0
             self._misses = 0
 
@@ -153,6 +176,8 @@ class SlotBankCache:
             return {
                 "slots_used": len(self._cache),
                 "max_slots": self._max_slots,
+                "bytes_used": self._bytes,
+                "max_bytes": self._max_bytes,
                 "hits": self._hits,
                 "misses": self._misses,
                 "hit_rate": self._hits / total if total > 0 else 0.0,
