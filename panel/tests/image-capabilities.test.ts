@@ -25,7 +25,9 @@ describe('image controls follow the loaded model\'s real capabilities (/health.i
   })
   it('the tab reads capabilities when the server runs and forgets them when it stops', () => {
     const tab = R('renderer/src/components/image/ImageTab.tsx')
-    expect(tab).toContain("imageRuntimeSnapshot(await resp.json())")
+    // Through the main process (the engine refuses web pages, and the window is one).
+    expect(tab).toContain("window.api.performance.health({ host: '127.0.0.1', port: serverPort })")
+    expect(tab).toContain("imageRuntimeSnapshot(health)")
     expect(tab).toContain("setCapabilities(snapshot.capabilities)")
     expect(tab).toContain("setCapabilities(null)")
     expect(tab).toContain('capabilities={capabilities}')

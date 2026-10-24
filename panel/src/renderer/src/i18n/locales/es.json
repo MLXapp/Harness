@@ -171,7 +171,8 @@
     "newLanKey": "Nueva clave",
     "lanKeyHint": "Los otros dispositivos la envían como su clave de API. Este Mac nunca la necesita.",
     "webPages": "Páginas web",
-    "webPagesHint": "Las páginas de este Mac (localhost) y las vistas web de apps siempre pueden usar la API. Otros sitios, solo si los indicas aquí, separados por comas."
+    "webPagesHint": "Las páginas de este Mac (localhost) y las vistas web de apps siempre pueden usar la API. Otros sitios, solo si los indicas aquí, separados por comas.",
+    "webPagesPlaceholder": "https://chat.ejemplo.com"
   },
   "endpoints": {
     "title": "Endpoints",
