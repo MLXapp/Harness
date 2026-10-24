@@ -54,6 +54,7 @@ export function registerMediaHandlers(getWindow: () => BrowserWindow | null): vo
     },
   })
   runner.resume()
+  app.on('will-quit', () => runner?.stopAll())
   // Voice samples last one visit to the Audio tab; anything left from before is removed.
   try { rmSync(join(mediaRoot(), 'voices'), { recursive: true, force: true }) } catch { /* ignore */ }
 

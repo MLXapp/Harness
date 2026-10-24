@@ -3119,7 +3119,9 @@
       "loading": "Loading the model",
       "downloading": "Saving to this Mac",
       "fetching": "Downloading the model (first time only)",
-      "fetchingSize": "Downloading the model, {gb} GB (first time only)"
+      "fetchingSize": "Downloading the model, {gb} GB (first time only)",
+      "step": "Step {step} of {of}",
+      "finishing": "Finishing the video"
     },
     "generate": "Generate",
     "estimateTitle": "List price for these settings; the provider's quote is what you pay",

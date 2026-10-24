@@ -3119,7 +3119,9 @@
       "loading": "モデルを読み込み中",
       "downloading": "このMacに保存中",
       "fetching": "モデルをダウンロード中(初回のみ)",
-      "fetchingSize": "モデルをダウンロード中、{gb} GB(初回のみ)"
+      "fetchingSize": "モデルをダウンロード中、{gb} GB(初回のみ)",
+      "step": "ステップ {step}/{of}",
+      "finishing": "動画を仕上げています"
     },
     "generate": "生成",
     "estimateTitle": "この設定での定価です。実際の請求額は提供元の見積もりに従います",

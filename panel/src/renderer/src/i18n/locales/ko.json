@@ -3119,7 +3119,9 @@
       "loading": "모델 불러오는 중",
       "downloading": "이 Mac에 저장 중",
       "fetching": "모델 다운로드 중(처음 한 번만)",
-      "fetchingSize": "모델 다운로드 중, {gb}GB(처음 한 번만)"
+      "fetchingSize": "모델 다운로드 중, {gb}GB(처음 한 번만)",
+      "step": "{of}단계 중 {step}단계",
+      "finishing": "동영상을 마무리하는 중"
     },
     "generate": "생성",
     "estimateTitle": "이 설정의 정가이며, 실제 청구액은 제공업체 기준입니다",

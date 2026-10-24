@@ -3119,7 +3119,9 @@
       "loading": "正在加载模型",
       "downloading": "正在保存到这台 Mac",
       "fetching": "正在下载模型(仅首次)",
-      "fetchingSize": "正在下载模型,{gb} GB(仅首次)"
+      "fetchingSize": "正在下载模型,{gb} GB(仅首次)",
+      "step": "第 {step} 步，共 {of} 步",
+      "finishing": "正在完成视频"
     },
     "generate": "生成",
     "estimateTitle": "按当前设置的标价估算；实际以服务商报价为准",

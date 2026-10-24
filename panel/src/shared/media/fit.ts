@@ -59,9 +59,12 @@ export function pickerSections(kind: MediaKind, mac: MacInfo | null, connected: 
 export function recommendedModel(kind: MediaKind, mac: MacInfo | null, connected: ReadonlySet<MediaProviderId>): MediaModel | undefined {
   const rows = modelsFor(kind).map(model => ({ model, fit: mediaFit(model, mac, connected) }))
   const goodLocal = rows.find(r => r.fit.state === 'good')
-  if (goodLocal) return goodLocal.model
   const ready = rows.filter(r => r.fit.state === 'cloud' && r.fit.connected)
   const value = (list: typeof rows) => list.find(r => r.model.badge === 'Best value') ?? list[0]
+  // Local video takes minutes a clip: a connected cloud model comes first,
+  // and this Mac's model when nothing is connected.
+  if (kind === 'video' && ready.length > 0) return value(ready)!.model
+  if (goodLocal) return goodLocal.model
   if (ready.length > 0) return value(ready)!.model
   const tightLocal = rows.find(r => r.fit.state === 'tight')
   if (tightLocal && (kind === 'audio' || kind === 'image')) return tightLocal.model

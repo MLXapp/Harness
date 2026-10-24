@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { estimateCost, mediaModel, MEDIA_MODELS, modelsFor, type CloudMediaModel } from '../src/shared/media/catalog'
+import { estimateCost, mediaModel, MEDIA_MODELS, modelsFor, wanLocalFrames, wanLocalSize, type CloudMediaModel } from '../src/shared/media/catalog'
 import { canRun, localPossible, mediaFit, recommendedModel } from '../src/shared/media/fit'
 import { buildCloudRequest, coerceParam, nextPollDelayMs, outputExtension, parsePoll, parseSubmit, pollUrl } from '../src/shared/media/request'
 
@@ -29,9 +29,22 @@ describe('media catalog', () => {
     }
   })
 
-  it('keeps Wan 3.0 cloud-only (no open weights) and offers no local video runner yet', () => {
+  it('keeps Wan 3.0 cloud-only (no open weights); Wan 2.2 TI2V 5B is the one local video model', () => {
     expect(modelsFor('video').filter(m => m.name === 'Wan 3.0').every(m => m.where === 'cloud')).toBe(true)
-    expect(modelsFor('video').filter(m => m.where === 'local').every(m => m.where === 'local' && !m.available)).toBe(true)
+    const local = modelsFor('video').filter(m => m.where === 'local' && m.available)
+    expect(local.map(m => m.id)).toEqual(['local:wan-2.2-ti2v-5b'])
+  })
+
+  it('sizes local Wan clips in multiples of 32 within 1280 × 704 pixels, 4n + 1 frames', () => {
+    for (const aspect of ['16:9', '9:16', '1:1']) {
+      for (const res of ['480p', '720p']) {
+        const { width, height } = wanLocalSize(aspect, res)
+        expect(width % 32 + height % 32).toBe(0)
+        expect(width * height).toBeLessThanOrEqual(1280 * 704)
+      }
+    }
+    expect([2, 3, 5].map(wanLocalFrames)).toEqual([49, 73, 121])
+    expect([49, 73, 121].every(f => (f - 1) % 4 === 0)).toBe(true)
   })
 
   it('estimates from list prices', () => {
@@ -66,6 +79,8 @@ describe('fit on this Mac', () => {
   it('recommends a local model that runs well, else a connected cloud model, preferring best value', () => {
     expect(recommendedModel('audio', { memoryGB: 8 }, none)?.id).toBe('local:kokoro-82m')
     expect(recommendedModel('video', { memoryGB: 128 }, at)?.id).toBe('at:wan-3.0')
+    // Local video takes minutes: this Mac's model only when no cloud account is connected.
+    expect(recommendedModel('video', { memoryGB: 128 }, none)?.id).toBe('local:wan-2.2-ti2v-5b')
     expect(recommendedModel('video', { memoryGB: 16 }, ws)?.id).toBe('ws:wan-3.0')
     expect(recommendedModel('music', { memoryGB: 16 }, at)?.id).toBe('at:minimax-music-3')
     expect(recommendedModel('music', { memoryGB: 16 }, ws)?.id).toBe('ws:ace-step-1.5')

@@ -3119,7 +3119,9 @@
       "loading": "Cargando el modelo",
       "downloading": "Guardando en este Mac",
       "fetching": "Descargando el modelo (solo la primera vez)",
-      "fetchingSize": "Descargando el modelo, {gb} GB (solo la primera vez)"
+      "fetchingSize": "Descargando el modelo, {gb} GB (solo la primera vez)",
+      "step": "Paso {step} de {of}",
+      "finishing": "Terminando el vídeo"
     },
     "generate": "Generar",
     "estimateTitle": "Precio de lista con estos ajustes; pagas lo que indique el proveedor",

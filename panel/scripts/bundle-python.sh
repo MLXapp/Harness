@@ -414,6 +414,30 @@ echo "==> Installing mlx-audio (STT/TTS)..."
 "$PYTHON" -m pip install \
   librosa sounddevice miniaudio pyloudnorm numba
 
+# Local video (Video tab): Prince Canuma's mlx-video (MIT), pinned to a commit
+# (it is not on PyPI). Only its Wan 2.2 path is used, and everything that path
+# imports is already in this bundle (mlx, mlx-vlm, numpy, transformers, Pillow,
+# opencv, tqdm, rich). Its declared extras (imageio, imageio-ffmpeg with an
+# ffmpeg binary, librosa, ftfy) are not needed: vmlx_engine.video.job writes
+# the mp4 with OpenCV and ftfy is optional. They are removed from its metadata
+# so `pip check` stays clean.
+MLX_VIDEO_COMMIT="87db56a51758fefb748a359b90a5283bb8ba4837"
+echo "==> Installing mlx-video @ ${MLX_VIDEO_COMMIT:0:7} (local video)..."
+MLX_VIDEO_SRC="$(mktemp -d)/mlx-video"
+git clone --quiet https://github.com/Blaizzy/mlx-video.git "$MLX_VIDEO_SRC"
+git -C "$MLX_VIDEO_SRC" checkout --quiet "$MLX_VIDEO_COMMIT"
+"$PYTHON" - "$MLX_VIDEO_SRC/pyproject.toml" <<'PYEOF'
+import re, sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+new, n = re.subn(r"(?ms)^dependencies = \[.*?^\]", "dependencies = []", text, count=1)
+if n != 1:
+    sys.exit("mlx-video: dependencies list not found in pyproject.toml")
+open(path, "w", encoding="utf-8").write(new)
+PYEOF
+"$PYTHON" -m pip install --no-deps "$MLX_VIDEO_SRC"
+rm -rf "$(dirname "$MLX_VIDEO_SRC")"
+
 # Install vmlx-engine from PyPI (the local repo's pyproject.toml has a
 # `setuptools.package-dir = engine` declaration that breaks `pip install
 # .` here because the panel dir lives at panel/, not engine/. PyPI 1.4.3

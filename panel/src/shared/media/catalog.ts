@@ -134,6 +134,19 @@ const seconds = (field: string, options: number[], def: number): MediaParam =>
 const soundOn = (field: string, def = true): MediaParam => ({ key: 'audio', field, type: 'toggle', default: def, label: 'audio' })
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i)
 
+/**
+ * Wan 2.2 TI2V-5B on this Mac: width × height for an aspect and resolution
+ * (multiples of 32, at most 1280 × 704 pixels of area), and frames for a
+ * length at 24 fps (4n + 1).
+ */
+export function wanLocalSize(aspect: unknown, resolution: unknown): { width: number; height: number } {
+  const hd = resolution === '720p'
+  if (aspect === '9:16') return hd ? { width: 704, height: 1280 } : { width: 480, height: 832 }
+  if (aspect === '1:1') return hd ? { width: 928, height: 928 } : { width: 640, height: 640 }
+  return hd ? { width: 1280, height: 704 } : { width: 832, height: 480 }
+}
+export const wanLocalFrames = (seconds: unknown): number => 24 * (Number(seconds) === 5 ? 5 : Number(seconds) === 3 ? 3 : 2) + 1
+
 // ── Video ───────────────────────────────────────────────────────────────────
 
 const VIDEO: MediaModel[] = [
@@ -217,12 +230,13 @@ const VIDEO: MediaModel[] = [
   {
     id: 'local:wan-2.2-ti2v-5b', kind: 'video', task: 'text-to-video', where: 'local', runner: 'mlx-video',
     repo: 'Anes1032/Wan2.2-TI2V-5B-mlx-q8', name: 'Wan 2.2 TI2V 5B', maker: 'Alibaba',
-    blurb: 'The newest open Wan. Slow on a Mac.',
+    blurb: 'Open video, private on this Mac. Takes minutes per clip.', badge: 'New',
     downloadGB: 19.6, minMemoryGB: 32, recMemoryGB: 64,
-    speed: 'About 15 min for 41 frames at 720p on a 64 GB Mac (model card)',
-    available: false, cloudTwin: 'ws:wan-3.0',
+    speed: 'About 15 min for 41 frames at 720p, 20 steps, on a 64 GB Mac (model card)',
+    available: true, cloudTwin: 'ws:wan-3.0',
     license: { name: 'Apache-2.0', commercial: true },
-    promptField: 'prompt', params: [],
+    promptField: 'prompt',
+    params: [seconds('duration', [2, 3, 5], 2), aspect('aspect', ['16:9', '9:16', '1:1']), resolution('resolution', ['480p', '720p'], '480p')],
   },
   {
     id: 'local:ltx-2.5-q8', kind: 'video', task: 'text-to-video', where: 'local', runner: 'ltx-2-mlx',

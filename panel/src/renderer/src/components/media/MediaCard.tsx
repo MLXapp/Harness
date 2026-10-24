@@ -34,7 +34,7 @@ export function MediaCard({ job, onReuse, onDeleted }: { job: MediaJob; onReuse:
       className="group mlx-group overflow-hidden mlx-view-in">
       {tall && (
         <div className="relative aspect-video bg-[rgb(var(--bg-3-rgb))]">
-          {running && <Pending phase={job.phase} seconds={elapsed} sizeGB={model?.where === 'local' ? model.downloadGB : undefined} />}
+          {running && <Pending phase={job.phase} progress={job.progress} seconds={elapsed} sizeGB={model?.where === 'local' ? model.downloadGB : undefined} />}
           {file && file.mime.startsWith('image/') && <img src={file.url} alt={job.prompt} className="h-full w-full object-cover" />}
           {file && file.mime.startsWith('video/') && <video src={file.url} controls playsInline preload="metadata" className="h-full w-full bg-black object-contain" />}
           {job.status === 'failed' && <Failed error={job.error} />}
@@ -44,7 +44,7 @@ export function MediaCard({ job, onReuse, onDeleted }: { job: MediaJob; onReuse:
         </div>
       )}
       <div className="space-y-2 p-3.5">
-        {!tall && running && <div className="relative h-14 overflow-hidden rounded-[10px] bg-[rgb(var(--bg-3-rgb))]"><Pending phase={job.phase} seconds={elapsed} sizeGB={model?.where === 'local' ? model.downloadGB : undefined} compact /></div>}
+        {!tall && running && <div className="relative h-14 overflow-hidden rounded-[10px] bg-[rgb(var(--bg-3-rgb))]"><Pending phase={job.phase} progress={job.progress} seconds={elapsed} sizeGB={model?.where === 'local' ? model.downloadGB : undefined} compact /></div>}
         {!tall && file && file.mime.startsWith('audio/') && <Waveform id={job.id} url={file.url} />}
         {!tall && job.status === 'failed' && <div className="relative min-h-[56px] rounded-[10px] bg-destructive/[0.06]"><Failed error={job.error} /></div>}
         {text && <p className="whitespace-pre-wrap text-[13.5px]">{text.text}</p>}
@@ -78,17 +78,32 @@ function IconButton({ title, onClick, children }: { title: string; onClick: () =
   )
 }
 
-function Pending({ phase, seconds, sizeGB, compact = false }: { phase?: MediaJob['phase']; seconds: number; sizeGB?: number; compact?: boolean }) {
+function Pending({ phase, progress, seconds, sizeGB, compact = false }: { phase?: MediaJob['phase']; progress?: MediaJob['progress']; seconds: number; sizeGB?: number; compact?: boolean }) {
   const { t } = useTranslation()
   const m = Math.floor(seconds / 60)
   const s = String(seconds % 60).padStart(2, '0')
+  // A long local run says which step it is on, with a bar that glides between
+  // steps, fills and fades out while the video is finished (no jump cut).
+  const stepping = phase === 'generating' && progress
+  const finishing = phase === 'finishing' && !!progress
   return (
     <div className="mlx-shimmer absolute inset-0 flex items-center justify-center">
       <div className={`flex items-center gap-2 text-muted-foreground ${compact ? 'text-[12.5px]' : 'text-[13px]'}`}>
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-        <span>{phase === 'fetching' && sizeGB ? t('media.phase.fetchingSize', { gb: sizeGB }) : t(`media.phase.${phase ?? 'generating'}`)}</span>
+        <span className={stepping ? 'mlx-num' : ''}>
+          {stepping ? t('media.phase.step', { step: progress.step, of: progress.of })
+            : phase === 'fetching' && sizeGB ? t('media.phase.fetchingSize', { gb: sizeGB }) : t(`media.phase.${phase ?? 'generating'}`)}
+        </span>
         <span className="mlx-num">{m}:{s}</span>
       </div>
+      {progress && (
+        <div className="mlx-fade-in absolute inset-x-0 bottom-0" data-vmlx-section="media-step-progress">
+          <div className={`h-[3px] bg-foreground/[0.06] transition-opacity duration-500 ${finishing ? 'opacity-0 delay-500' : 'opacity-100'}`}>
+            <div className="h-full origin-left bg-primary transition-transform duration-700 ease-out"
+              style={{ transform: `scaleX(${finishing ? 1 : Math.max(0.02, progress.step / progress.of)})` }} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
