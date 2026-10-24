@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir, totalmem } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -100,6 +100,15 @@ describe('launch command', () => {
     expect(args).toContain('--flash-moe')
     expect(args).not.toContain('--flash-moe-slot-bank')
     expect(flag(args, '--prefill-step-size')).toBe('4096')
+  })
+
+  it('measures Hugging Face cache snapshots, whose files are links', () => {
+    const real = bundle(MOE, 0.8)
+    const snap = mkdtempSync(join(tmpdir(), 'mlx-fmoe-snap-'))
+    dirs.push(snap)
+    writeFileSync(join(snap, 'config.json'), JSON.stringify(MOE))
+    symlinkSync(join(real, 'model.safetensors'), join(snap, 'model.safetensors'))
+    expect(launch(snap)).toContain('--flash-moe')
   })
 
   it('respects the opt-out', () => {

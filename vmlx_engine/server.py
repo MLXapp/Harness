@@ -9422,7 +9422,7 @@ def _streamed_expert_loader(raw_model):
     # Already patched some other way: take the loader from a patched block,
     # so a second pass never finds "no MoE layers" and drops it.
     try:
-        from .models.flash_moe_integration import FlashMoEBlock
+        from .models.flash_moe_integration import FlashMoEBlock, FlashMoESwitchGLUShim
         from .utils.smelt_loader import _get_layers_list
 
         for layer in _get_layers_list(raw_model):
@@ -9430,6 +9430,10 @@ def _streamed_expert_loader(raw_model):
                 block = getattr(layer, attr, None)
                 if isinstance(block, FlashMoEBlock):
                     return block._loader
+            # Gemma 4: experts.switch_glu is replaced by a shim.
+            shim = getattr(getattr(layer, "experts", None), "switch_glu", None)
+            if isinstance(shim, FlashMoESwitchGLUShim):
+                return shim._loader
     except Exception:
         pass
     return None

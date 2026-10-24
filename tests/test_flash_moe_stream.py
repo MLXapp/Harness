@@ -236,3 +236,14 @@ def test_the_app_lists_the_same_architectures():
     ts = (Path(__file__).resolve().parents[1] / "panel/src/shared/flashMoeLaunch.ts").read_text()
     listed = re.search(r"STREAM_FROM_LOAD_MODEL_TYPES = \[([^\]]*)\]", ts).group(1)
     assert set(re.findall(r"'([^']+)'", listed)) == set(STREAM_FROM_LOAD_MODEL_TYPES)
+
+
+def test_both_engine_lanes_get_the_raised_prompt_chunk():
+    import inspect
+
+    from vmlx_engine import cli
+
+    src = inspect.getsource(cli.serve_command)
+    call = src.index("_raise_prefill_step_for_streaming(args")
+    assert call < src.index("elif args.continuous_batching:")
+    assert call > src.index("_apply_dsv4_runtime_policy(args, logger)")

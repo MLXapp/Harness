@@ -14,6 +14,12 @@ export function estimateModelFileBytes(modelPath: string): number {
         totalBytes += estimateModelFileBytes(fullPath)
       } else if (entry.isFile()) {
         totalBytes += statSync(fullPath).size
+      } else if (entry.isSymbolicLink()) {
+        // Hugging Face cache snapshots link each file into blobs/.
+        try {
+          const target = statSync(fullPath)
+          if (target.isFile()) totalBytes += target.size
+        } catch { /* dangling link */ }
       }
     }
     return totalBytes
