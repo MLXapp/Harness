@@ -11,13 +11,13 @@
  */
 
 import { randomInt, randomUUID } from 'crypto'
-import { createWriteStream, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { createWriteStream, existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import type { ChildProcess } from 'child_process'
 import { estimateCost, mediaModel, MEDIA_PROVIDER_NAMES, type MediaKind, type MediaProviderId } from '../../shared/media/catalog'
-import type { MediaJob, MediaJobOutput, MediaResult, MediaSubmitRequest } from '../../shared/media/jobs'
+import { VOICE_SAMPLE_ID, type MediaJob, type MediaJobOutput, type MediaResult, type MediaSubmitRequest } from '../../shared/media/jobs'
 import { buildCloudRequest, buildQuoteRequest, coerceValues, nextPollDelayMs, outputExtension, parsePoll, parseQuote, parseSubmit, pollUrl, songText } from '../../shared/media/request'
 import { mediaUrl, mimeFor } from './paths'
 import { publicJob, type MediaJobStore, type StoredMediaJob } from './store'
@@ -97,6 +97,12 @@ export class MediaRunner {
       if (!model.available) return { ok: false, error: `${model.name} is not available in this version of MLX Harness yet` }
       const speech = model.task === 'text-to-speech'
       if (model.runner !== 'mlx-audio' || !(speech || model.task === 'song') || !model.repo) return { ok: false, error: 'This model cannot run here yet' }
+      if (request.voiceSample) {
+        const id = String(request.voiceSample)
+        if (!speech || !model.voiceCloning) return { ok: false, error: `${model.name} cannot speak in a voice sample` }
+        if (!VOICE_SAMPLE_ID.test(id) || !existsSync(this.voicePath(id))) return { ok: false, error: 'The voice sample is missing. Add it again.' }
+        job.voiceSample = id
+      }
       let song
       if (!speech) {
         try { song = songText(model, { prompt, lyrics: request.lyrics, values }) } catch (error) { return { ok: false, error: (error as Error).message } }
@@ -262,6 +268,11 @@ export class MediaRunner {
 
   // ── local speech and music ───────────────────────────────────────────────
 
+  /** A saved voice sample (media:saveVoiceSample writes it). */
+  voicePath(id: string): string {
+    return join(this.deps.mediaRoot(), 'voices', `${id}.wav`)
+  }
+
   private async runLocalSpeech(job: StoredMediaJob, repo: string, python: LocalPython): Promise<void> {
     const dir = join(this.deps.mediaRoot(), job.kind)
     mkdirSync(dir, { recursive: true })
@@ -270,6 +281,8 @@ export class MediaRunner {
     const args = ['tts', '--model', repo, '--input', input]
     if (typeof job.values.voice === 'string') args.push('--voice', job.values.voice)
     if (typeof job.values.speed === 'number') args.push('--speed', String(job.values.speed))
+    // The sample stays (it can be used again); only the text file is removed after.
+    if (job.voiceSample) args.push('--ref-audio', this.voicePath(job.voiceSample))
     this.runLocalJob(job, args, [input], python, 'Speech')
   }
 

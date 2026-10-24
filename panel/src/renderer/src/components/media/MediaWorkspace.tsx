@@ -12,6 +12,7 @@ import { Reveal } from '../ui/Reveal'
 import { MediaCard } from './MediaCard'
 import { ModelPicker } from './ModelPicker'
 import { ParamChips } from './ParamChips'
+import { VoiceSamplePanel, type VoiceSampleValue } from './VoiceSample'
 import { readStored, useMac, useMediaAccounts, useMediaJobs, writeStored } from './hooks'
 import { usd } from './format'
 
@@ -43,6 +44,9 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
   const [lyrics, setLyrics] = useState('')
   const [lyricsOpen, setLyricsOpen] = useState(false)
   const [values, setValues] = useState<Values>({})
+  const [voice, setVoice] = useState<VoiceSampleValue | null>(null)
+  const [voiceOpen, setVoiceOpen] = useState(false)
+  const [voiceConsent, setVoiceConsent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const promptRef = useRef<HTMLTextAreaElement>(null)
@@ -116,8 +120,14 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
   }, [jobs, kind])
   const localSeconds = model?.where === 'local' && rates[model.id] && Number(values.duration) > 0 ? rates[model.id] * Number(values.duration) : undefined
 
+  // Speech in a sample's voice: only with a model that can, and only once the
+  // right to use that voice is confirmed.
+  const clones = model?.where === 'local' && !!model.voiceCloning
+  const useVoice = clones && !!voice
+  const needsConsent = useVoice && !voiceConsent
+
   const needsConnect = model?.where === 'cloud' && fit?.state === 'cloud' && !fit.connected
-  const ready = !!model && !!fit && canRun(fit) && prompt.trim().length > 0 && !needsLyrics && !busy
+  const ready = !!model && !!fit && canRun(fit) && prompt.trim().length > 0 && !needsLyrics && !needsConsent && !busy
   const listEstimate = model ? estimateCost(model, values, prompt) : undefined
   // The provider's own quote for exactly these settings (no charge), a moment
   // after the settings stop changing; the list price shows until it arrives.
@@ -140,7 +150,10 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
     setBusy(true)
     setError(null)
     try {
-      const result = await window.api.media.submit({ modelId: model.id, prompt, lyrics: takesLyrics ? lyrics : undefined, values })
+      const result = await window.api.media.submit({
+        modelId: model.id, prompt, lyrics: takesLyrics ? lyrics : undefined, values,
+        ...(useVoice && voiceConsent ? { voiceSample: voice!.id } : {}),
+      })
       if (!result.ok) setError(result.error)
     } catch (e) {
       setError(String(e))
@@ -204,6 +217,11 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
               </div>
             </Reveal>
           )}
+          {kind === 'audio' && (
+            <Reveal open={clones && voiceOpen}>
+              <VoiceSamplePanel sample={voice} onChange={setVoice} consent={voiceConsent} onConsent={setVoiceConsent} />
+            </Reveal>
+          )}
           <div className="flex flex-wrap items-center gap-1 px-2 pb-2 pt-1">
             <ModelPicker kind={kind} model={model} mac={mac} connected={connected} onPick={choose} />
             {/* Vocals or instrumental first: it decides whether there are lyrics. */}
@@ -215,6 +233,17 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
                   <button type="button" onClick={() => lyricsOpen ? setLyricsOpen(false) : openLyrics()} className={`mlx-chip ${lyricsOpen ? 'is-on' : ''}`}
                     aria-expanded={lyricsOpen} data-vmlx-control="media-lyrics-toggle">
                     <Plus className={`h-3.5 w-3.5 transition-transform duration-200 ${lyricsOpen ? 'rotate-45' : ''}`} />{t('media.music.lyrics')}
+                  </button>
+                </span>
+              </span>
+            )}
+            {kind === 'audio' && (
+              <span className={`mlx-hcollapse ${clones ? '' : 'is-closed'}`} {...(clones ? {} : { inert: '' })}>
+                <span className="min-w-0 overflow-hidden">
+                  <button type="button" onClick={() => setVoiceOpen(o => !o)} className={`mlx-chip ${voiceOpen || voice ? 'is-on' : ''}`}
+                    aria-expanded={voiceOpen} data-vmlx-control="media-voice-toggle">
+                    <Plus className={`h-3.5 w-3.5 transition-transform duration-200 ${voiceOpen ? 'rotate-45' : ''}`} />
+                    {voice ? t('media.voice.chipOn', { n: Math.round(voice.seconds) }) : t('media.voice.chip')}
                   </button>
                 </span>
               </span>
@@ -252,6 +281,12 @@ export function MediaWorkspace({ kind }: { kind: MediaKind }) {
               <span aria-hidden>·</span>
               <button type="button" className="mlx-link" onClick={() => setValues(v => ({ ...v, instrumental: true }))}>{t('media.music.makeInstrumental')}</button>
             </>}
+          </p>
+        </Reveal>
+        <Reveal open={needsConsent && !voiceOpen && prompt.trim().length > 0}>
+          <p className="flex flex-wrap items-center justify-center gap-x-1 px-4 pt-2 text-[12.5px] text-muted-foreground" data-vmlx-section="media-needs-consent">
+            <span>{t('media.voice.needsConsent')}</span>
+            <button type="button" className="mlx-link" onClick={() => setVoiceOpen(true)}>{t('media.voice.review')}</button>
           </p>
         </Reveal>
         <Reveal open={!!error}>

@@ -525,6 +525,8 @@ declare global {
         delete: (id: string) => Promise<import('./shared/media/jobs').MediaResult<object>>;
         reveal: (id: string) => Promise<{ ok: boolean }>;
         save: (id: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
+        saveVoiceSample: (wav: Uint8Array) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+        deleteVoiceSample: (id: string) => Promise<{ ok: boolean }>;
         onJob: (callback: (job: import('./shared/media/jobs').MediaJob) => void) => () => void;
       };
       dictation?: {

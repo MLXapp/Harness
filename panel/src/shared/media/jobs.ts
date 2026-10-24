@@ -20,6 +20,8 @@ export interface MediaJob {
   provider?: MediaProviderId
   prompt: string
   lyrics?: string
+  /** Id of the voice sample the speech was made in (media/voices/<id>.wav). */
+  voiceSample?: string
   values: Record<string, string | number | boolean>
   status: MediaJobStatus
   phase?: MediaJobPhase
@@ -38,7 +40,12 @@ export interface MediaSubmitRequest {
   modelId: string
   prompt: string
   lyrics?: string
+  /** A saved voice sample (media:saveVoiceSample), for models with voiceCloning. */
+  voiceSample?: string
   values: Record<string, unknown>
 }
 
 export type MediaResult<T> = ({ ok: true } & T) | { ok: false; error: string }
+
+/** Ids media:saveVoiceSample hands out (a UUID). */
+export const VOICE_SAMPLE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/

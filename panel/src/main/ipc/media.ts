@@ -2,19 +2,21 @@
  * IPC for the Image (cloud), Video, Audio and Music tabs:
  *   media:list(kind) · media:submit(request) · media:cancel(id) · media:delete(id)
  *   media:save(id) (Save As…) · media:reveal(id) (Show in Finder)
+ *   media:saveVoiceSample(wav bytes) → id · media:deleteVoiceSample(id)
  *   event media:job (one job changed)
  * Files are served to the page by the mlx-media:// protocol (media/protocol.ts).
  */
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { spawn } from 'child_process'
-import { copyFileSync } from 'fs'
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { randomUUID } from 'crypto'
 import { basename, join } from 'path'
 import { db } from '../database'
 import { getBundledPythonPath, getDevelopmentProjectVenv, getDevelopmentSourceRoot } from '../engine-manager'
 import { normalizeHfTokenSetting } from '../../shared/hfSettings'
 import type { MediaKind, MediaProviderId } from '../../shared/media/catalog'
-import type { MediaSubmitRequest } from '../../shared/media/jobs'
+import { VOICE_SAMPLE_ID, type MediaSubmitRequest } from '../../shared/media/jobs'
 import { MediaRunner } from '../media/runner'
 
 const KINDS: readonly MediaKind[] = ['image', 'video', 'audio', 'music']
@@ -62,6 +64,23 @@ export function registerMediaHandlers(getWindow: () => BrowserWindow | null): vo
     const path = runner!.filePath(String(id))
     if (path) shell.showItemInFolder(path)
     return { ok: !!path }
+  })
+  // A voice sample for speech in that voice: a WAV the page made from a file
+  // or a recording (mono PCM, ≤ 20 s). Kept under media/voices until removed.
+  ipcMain.handle('media:saveVoiceSample', (_, bytes: Uint8Array) => {
+    const data = bytes instanceof Uint8Array ? Buffer.from(bytes) : null
+    if (!data || data.length < 44 || data.length > 5 * 1024 * 1024) return { ok: false, error: 'Use a WAV sample of up to 20 seconds' }
+    if (data.toString('latin1', 0, 4) !== 'RIFF' || data.toString('latin1', 8, 12) !== 'WAVE') return { ok: false, error: 'Use a WAV sample of up to 20 seconds' }
+    const id = randomUUID()
+    const dir = join(mediaRoot(), 'voices')
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    writeFileSync(join(dir, `${id}.wav`), data, { mode: 0o600 })
+    return { ok: true, id }
+  })
+  ipcMain.handle('media:deleteVoiceSample', (_, id: string) => {
+    if (!VOICE_SAMPLE_ID.test(String(id))) return { ok: false }
+    try { rmSync(join(mediaRoot(), 'voices', `${id}.wav`), { force: true }) } catch { /* ignore */ }
+    return { ok: true }
   })
   ipcMain.handle('media:save', async (_, id: string) => {
     const path = runner!.filePath(String(id))

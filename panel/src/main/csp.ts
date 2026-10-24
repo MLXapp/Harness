@@ -15,7 +15,7 @@ export function buildContentSecurityPolicy(options: { devRenderer?: boolean } = 
     " img-src 'self' data: blob: mlx-media: http://127.0.0.1:* http://localhost:* https://huggingface.co https://*.huggingface.co https://raw.githubusercontent.com https://hf-mirror.com https://*.hf-mirror.com https://modelscope.cn https://*.modelscope.cn;" +
     // mlx-media: lets the Audio and Music tabs read a result they made to draw
     // its waveform (the scheme serves only MLX Harness's own media folder).
-    " connect-src 'self' mlx-media: http://127.0.0.1:* http://localhost:* https://huggingface.co https://*.huggingface.co https://hf-mirror.com https://*.hf-mirror.com https://modelscope.cn https://*.modelscope.cn;" +
+    " connect-src 'self' blob: mlx-media: http://127.0.0.1:* http://localhost:* https://huggingface.co https://*.huggingface.co https://hf-mirror.com https://*.hf-mirror.com https://modelscope.cn https://*.modelscope.cn;" +
     // Chat audio/video attachments are persisted and rendered as local data
     // URLs. Keep remote media blocked while allowing those local payloads,
     // object URLs created by the renderer, and generated media from MLX

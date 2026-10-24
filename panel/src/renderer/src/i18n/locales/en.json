@@ -3180,7 +3180,23 @@
     "madeWith": "Made with {name}",
     "play": "Play",
     "pause": "Pause",
-    "position": "Playback position"
+    "position": "Playback position",
+    "voice": {
+      "chip": "Voice sample",
+      "chipOn": "Voice · {n} s",
+      "record": "Record",
+      "recording": "Stop · {n} s",
+      "chooseFile": "Choose File…",
+      "hint": "About 10 seconds of one person speaking clearly, no music. Up to {max} s is used.",
+      "preparing": "Preparing the sample…",
+      "remove": "Remove sample",
+      "consent": "This is my voice, or I have the speaker's permission to use it.",
+      "needsConsent": "Confirm you may use this voice first.",
+      "review": "Review sample",
+      "tooShort": "The sample needs at least {n} seconds of speech.",
+      "unreadable": "That file can't be read as audio.",
+      "noMic": "MLX Harness can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone."
+    }
   },
   "code": {
     "title": "Code with an agent on this Mac",

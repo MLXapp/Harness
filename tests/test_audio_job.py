@@ -26,8 +26,12 @@ class _FakeTTS:
     def load(self):
         pass
 
-    def generate(self, text, voice="af_heart", speed=1.0, lang_code="a"):
+    calls = []
+
+    def generate(self, text, voice="af_heart", speed=1.0, lang_code="a", **kwargs):
         from vmlx_engine.audio.tts import AudioOutput
+
+        _FakeTTS.calls.append(kwargs)
 
         return AudioOutput(audio=np.zeros(2400, dtype=np.float32), sample_rate=24000, duration=0.1)
 
@@ -142,3 +146,23 @@ def test_first_run_says_it_is_downloading(tmp_path, monkeypatch, capsys):
     assert code == 0
     assert fetched == ["mlx-community/MiniMax-Music3-4bit"]
     assert [e["event"] for e in _events(capsys)] == ["downloading", "loading", "generating", "done"]
+
+
+def test_tts_speaks_in_a_voice_sample(tmp_path, monkeypatch, capsys):
+    fake = types.ModuleType("vmlx_engine.audio.tts")
+    from vmlx_engine.audio import tts as real
+
+    fake.TTSEngine = _FakeTTS
+    fake.AudioOutput = real.AudioOutput
+    monkeypatch.setitem(sys.modules, "vmlx_engine.audio.tts", fake)
+    text = tmp_path / "in.txt"
+    text.write_text("Hello", encoding="utf-8")
+    sample = tmp_path / "voice.wav"
+    sample.write_bytes(b"RIFFvoice")
+    _FakeTTS.calls.clear()
+    args = ["tts", "--model", "mlx-community/chatterbox-turbo-fp16", "--input", str(text), "--output", str(tmp_path / "o.wav")]
+    assert job.main(args + ["--ref-audio", str(sample)]) == 0
+    assert _FakeTTS.calls[-1] == {"ref_audio": str(sample)}
+    assert job.main(args) == 0
+    assert _FakeTTS.calls[-1] == {}
+    assert job.main(args + ["--ref-audio", str(tmp_path / "gone.wav")]) == 1

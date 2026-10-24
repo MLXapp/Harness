@@ -117,6 +117,8 @@ export interface LocalMediaModel extends MediaModelBase {
   available: boolean
   /** Same model in the cloud, offered when this Mac cannot run it. */
   cloudTwin?: string
+  /** Speaks in the voice of a short sample (text-to-speech). */
+  voiceCloning?: boolean
 }
 
 export type MediaModel = CloudMediaModel | LocalMediaModel
@@ -289,8 +291,8 @@ const AUDIO: MediaModel[] = [
   {
     id: 'local:chatterbox-turbo', kind: 'audio', task: 'text-to-speech', where: 'local', runner: 'mlx-audio',
     repo: 'mlx-community/chatterbox-turbo-fp16', name: 'Chatterbox Turbo', maker: 'Resemble AI',
-    blurb: 'Expressive speech in many languages.',
-    minMemoryGB: 8, recMemoryGB: 16, available: true, cloudTwin: 'at:elevenlabs-v3',
+    blurb: 'Expressive speech, or any voice from a 10-second sample.',
+    minMemoryGB: 8, recMemoryGB: 16, available: true, cloudTwin: 'at:elevenlabs-v3', voiceCloning: true,
     license: { name: 'MIT', commercial: true },
     promptField: 'text', params: [speed],
   },

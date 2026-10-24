@@ -525,6 +525,8 @@ const api = {
     delete: (id: string): Promise<import('../shared/media/jobs').MediaResult<object>> => ipcRenderer.invoke('media:delete', id),
     reveal: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('media:reveal', id),
     save: (id: string): Promise<{ ok: boolean; path?: string; error?: string }> => ipcRenderer.invoke('media:save', id),
+    saveVoiceSample: (wav: Uint8Array): Promise<{ ok: true; id: string } | { ok: false; error: string }> => ipcRenderer.invoke('media:saveVoiceSample', wav),
+    deleteVoiceSample: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('media:deleteVoiceSample', id),
     onJob: (callback: (job: import('../shared/media/jobs').MediaJob) => void) => {
       const handler = (_: unknown, job: import('../shared/media/jobs').MediaJob) => callback(job)
       ipcRenderer.on('media:job', handler)
