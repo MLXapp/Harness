@@ -9408,6 +9408,25 @@ def _get_raw_model_from_engine():
     return model
 
 
+def _streamed_expert_loader(raw_model):
+    """The loader attached when the model streamed its experts from load."""
+    from .utils.flash_moe_loader import FlashMoEExpertLoader
+
+    for candidate in (raw_model, getattr(raw_model, "model", None), getattr(raw_model, "language_model", None)):
+        try:
+            loader = vars(candidate).get("_vmlx_flash_moe_loader")
+        except TypeError:
+            continue
+        if isinstance(loader, FlashMoEExpertLoader):
+            return loader
+    return None
+
+
+def flash_moe_streams_from_load() -> bool:
+    """Whether the text loader should build the model lazily and stream experts."""
+    return bool(_flash_moe_enabled) and not _smelt_enabled and not _distributed_enabled
+
+
 def _apply_flash_moe_patching():
     """Apply Flash MoE SSD streaming to the loaded model.
 
@@ -9435,6 +9454,13 @@ def _apply_flash_moe_patching():
     raw_model = _get_raw_model_from_engine()
     if raw_model is None:
         logger.warning("Flash MoE: could not find raw model in engine")
+        return
+
+    # The text loader already streamed the experts from load (0.5.3): the
+    # model was built lazily and its experts were never read.
+    streamed = _streamed_expert_loader(raw_model)
+    if streamed is not None:
+        _flash_moe_loader = streamed
         return
 
     try:
@@ -9478,10 +9504,10 @@ def _apply_flash_moe_patching():
             return
 
         cli = _cli_args or {}
-        slot_bank = cli.get("flash_moe_slot_bank", 64)
+        slot_bank = int(cli.get("flash_moe_slot_bank", 0) or 0)
         io_split = cli.get("flash_moe_io_split", 4)
 
-        cache = SlotBankCache(max_slots=slot_bank)
+        cache = SlotBankCache(max_slots=max(0, slot_bank))
         _flash_moe_loader = FlashMoEExpertLoader(
             expert_index=ei,
             cache=cache,
@@ -9490,10 +9516,13 @@ def _apply_flash_moe_patching():
         patched = apply_flash_moe(raw_model, _flash_moe_loader)
         if patched > 0:
             freed = free_expert_weights(raw_model)
+            from .utils.flash_moe_stream import size_expert_cache
+
+            budget = size_expert_cache(cache, float(cli.get("flash_moe_cache_gb", 0.0) or 0.0))
             logger.info(
                 "Flash MoE enabled: %d layers patched, %.2f GB freed, "
-                "slot bank=%d, io_workers=%d",
-                patched, freed / 1e9, slot_bank, io_split,
+                "expert cache up to %.1f GB, slot bank=%s, io_workers=%d",
+                patched, freed / 1e9, budget / 1e9, slot_bank or "auto", io_split,
             )
         else:
             logger.warning("Flash MoE: no MoE layers found to patch")
@@ -9536,7 +9565,8 @@ def load_model(
     cluster_secret: str = "",
     worker_nodes: str | None = None,
     flash_moe: bool = False,
-    flash_moe_slot_bank: int = 64,
+    flash_moe_slot_bank: int = 0,
+    flash_moe_cache_gb: float = 0.0,
     flash_moe_prefetch: str = "none",
     flash_moe_io_split: int = 4,
     defer_start: bool = False,
@@ -9597,6 +9627,7 @@ def load_model(
         "smelt_experts": smelt_experts,
         "flash_moe": flash_moe,
         "flash_moe_slot_bank": flash_moe_slot_bank,
+        "flash_moe_cache_gb": flash_moe_cache_gb,
         "flash_moe_prefetch": flash_moe_prefetch,
         "flash_moe_io_split": flash_moe_io_split,
         "distributed": distributed,
@@ -14892,7 +14923,8 @@ async def _admin_wake_impl():
                     smelt=_cli_args.get("smelt", False),
                     smelt_experts=_cli_args.get("smelt_experts", 50),
                     flash_moe=_cli_args.get("flash_moe", False),
-                    flash_moe_slot_bank=_cli_args.get("flash_moe_slot_bank", 64),
+                    flash_moe_slot_bank=_cli_args.get("flash_moe_slot_bank", 0),
+                    flash_moe_cache_gb=_cli_args.get("flash_moe_cache_gb", 0.0),
                     flash_moe_prefetch=_cli_args.get("flash_moe_prefetch", "none"),
                     flash_moe_io_split=_cli_args.get("flash_moe_io_split", 4),
                     distributed=_cli_args.get("distributed", False),

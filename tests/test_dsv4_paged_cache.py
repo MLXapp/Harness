@@ -683,7 +683,14 @@ def test_dsv4_launch_filters_stale_saved_and_additional_args():
         assert "const effectiveSmelt = !!(config as any).smelt && !dsv4Active" in source
         assert "const isVLM = dsv4Active || effectiveSmelt" in source
         assert "const effectiveDistributed = requestedDistributed && !dsv4Active" in source
-        assert "const effectiveFlashMoe = requestedFlashMoe && !effectiveDistributed && !dsv4Active" in source
+        # The launcher also turns streaming on by itself (0.5.3); DSV4 stays out either way.
+        assert (
+            "const effectiveFlashMoe = requestedFlashMoe && !effectiveDistributed && !dsv4Active" in source
+            or (
+                "const effectiveFlashMoe = (requestedFlashMoe || autoFlashMoe) && !effectiveDistributed && !dsv4Active" in source
+                and "excluded: isImage || isVLM || effectiveSmelt || requestedDistributed || dsv4Active" in source
+            )
+        )
         assert "compatibleExternalSpeculative" in source
         assert "if (compatibleExternalSpeculative)" in source
         assert "DSV4_ADDITIONAL_ARG_BLOCKLIST" in source

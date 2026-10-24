@@ -14,6 +14,7 @@ import {
 import { useTranslation } from '../../i18n'
 import { hasLiveLocalSession } from '../../../../shared/sessionConfigLifecycle'
 import { buildCacheLaunchArgs } from '../../../../shared/cacheLaunchArgs'
+import { explicitSlotBank, raisePrefillStepForStreaming } from '../../../../shared/flashMoeLaunch'
 import {
   DISABLE_JANG_AFFINE_JIT_DEFAULT_ENV,
   isLagunaMixedSwaTurboQuantEffective,
@@ -489,7 +490,9 @@ export function buildCommandPreview(
   // Flash MoE (SSD expert streaming)
   if (effectiveFlashMoe) {
     parts.push('--flash-moe')
-    const slotBank = finitePositiveInteger((config as any).flashMoeSlotBank)
+    raisePrefillStepForStreaming(parts)
+    // No slot count = the engine sizes the expert cache from free memory.
+    const slotBank = explicitSlotBank((config as any).flashMoeSlotBank)
     if (slotBank != null) {
       parts.push('--flash-moe-slot-bank', slotBank.toString())
     }

@@ -63,3 +63,36 @@ class FlashMoEConfig:
             "cache_io_split": self.cache_io_split,
             "expert_index_path": self.expert_index_path,
         }
+
+
+# ── How much memory the expert cache may use ────────────────────────────────
+
+GIB = 1024 ** 3
+
+
+def flash_moe_cache_bytes(
+    total_bytes: int,
+    available_bytes: int,
+    resident_bytes: int,
+    requested_gb: float = 0.0,
+) -> int:
+    """Bytes the expert cache may hold, when the user did not set a size.
+
+    The cache's size matters more than anything else when experts stream from
+    the SSD (Strata measured 5.5 → 7.5 tok/s going from a 7.5 GB to a 12 GB
+    cache on a 32 GB Mac), so it takes what macOS can spare, with the limits
+    that kept their Macs out of swap and kernel panics:
+
+    - leave macOS at least 7 GB, or 15% of the memory when that is more;
+    - keep the whole process (model weights that stay resident + cache) under
+      60% of the memory on a Mac with 64 GB or more, 75% below that.
+
+    Never less than 512 MB, so one token's experts can always be read.
+    The approach follows Strata's Metal engine (MIT); this is our own code.
+    """
+    if requested_gb and requested_gb > 0:
+        return int(requested_gb * GIB)
+    keep_free = max(7 * GIB, int(total_bytes * 0.15))
+    footprint_cap = int(total_bytes * (0.60 if total_bytes >= 64 * GIB else 0.75))
+    budget = min(available_bytes - keep_free, footprint_cap - resident_bytes)
+    return max(int(budget), 512 * 1024 ** 2)

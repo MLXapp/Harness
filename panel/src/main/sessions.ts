@@ -14,6 +14,7 @@ import { t as tMain } from './i18n'
 import { stopProcessGracefully } from './gracefulProcessStop'
 import { EventEmitter } from 'events'
 import { existsSync, readdirSync, readFileSync } from 'fs'
+import { explicitSlotBank, raisePrefillStepForStreaming, shouldAutoStreamExperts } from './flashMoeAuto'
 import { createServer } from 'net'
 import { homedir, totalmem, freemem } from 'os'
 import { join, basename, dirname } from 'path'
@@ -3347,6 +3348,12 @@ export class SessionManager extends EventEmitter {
     this.emit('session:starting', { sessionId, modelPath: session.modelPath })
 
     const args = this.buildArgs(config)
+    if (args.includes('--flash-moe') && !(config as any).flashMoe) {
+      this.emit('session:log', {
+        sessionId,
+        data: 'Flash MoE on: this MoE model is larger than 75% of memory, so its experts stream from the SSD instead of all loading.\n',
+      })
+    }
     const pagedCapacityLine = pagedCacheCapacityLogLine(args)
     if (pagedCapacityLine) {
       this.pushLog(sessionId, pagedCapacityLine)
@@ -5430,7 +5437,20 @@ export class SessionManager extends EventEmitter {
         config.kvCacheQuantization !== 'auto',
     })
     const effectiveDistributed = requestedDistributed && !dsv4Active
-    const effectiveFlashMoe = requestedFlashMoe && !effectiveDistributed && !dsv4Active
+    // A MoE text model bigger than ~75% of memory streams its experts even when
+    // the switch is off: since 0.5.3 the engine never reads them at load, so
+    // the model starts instead of pushing the Mac into swap.
+    const autoFlashMoe = shouldAutoStreamExperts({
+      modelPath: config.modelPath,
+      modelFileBytes: requestedFlashMoe || isImage ? 0 : estimateModelFileBytes(config.modelPath),
+      totalBytes: totalmem(),
+      requested: requestedFlashMoe,
+      excluded: isImage || isVLM || effectiveSmelt || requestedDistributed || dsv4Active,
+    })
+    if (autoFlashMoe) {
+      console.log('[SESSION] Flash MoE on automatically: this MoE model is larger than 75% of memory, so its experts stream from the SSD')
+    }
+    const effectiveFlashMoe = (requestedFlashMoe || autoFlashMoe) && !effectiveDistributed && !dsv4Active
     const effectiveEnableJit = computeEffectiveJit({
       enableJitRequested: resolveRequestedJit(config.enableJit),
       isMultimodal: isVLM,
@@ -5482,7 +5502,12 @@ export class SessionManager extends EventEmitter {
     // (no stale equality-with-default guard that drifts when DEFAULT_CONFIG changes).
     if (effectiveFlashMoe) {
       args.push('--flash-moe')
-      const slotBank = finitePositiveInteger((config as any).flashMoeSlotBank)
+      // Streaming reads each needed expert once per prompt chunk, so bigger
+      // chunks read the SSD less (Strata: 4096 took prompts from 700 to
+      // 1,100 tok/s). Only the default 2048 is raised; a chosen size stays.
+      raisePrefillStepForStreaming(args)
+      // No slot count = the engine sizes the expert cache from free memory.
+      const slotBank = explicitSlotBank((config as any).flashMoeSlotBank)
       if (slotBank != null) {
         args.push('--flash-moe-slot-bank', slotBank.toString())
       }

@@ -1542,11 +1542,18 @@ def load_model_with_fallback(model_name: str, tokenizer_config: dict = None, ski
 
     # Check if model needs tokenizer fallback (e.g., Nemotron).
     # Pass resolved local path so _get_model_type_from_config can read config.json.
+    # Flash MoE: build the model without reading it, so the experts are swapped
+    # for SSD streaming before a byte of them is loaded (0.5.3). Lets a MoE
+    # model larger than memory start, as long as its other weights fit.
+    _stream_experts = _flash_moe_streams_from_load()
+
     if _needs_tokenizer_fallback(local_model_path):
         logger.info(
             f"Model {model_name} requires tokenizer fallback, loading directly..."
         )
-        model, tokenizer = _load_with_tokenizer_fallback(local_model_path, lazy=False)
+        model, tokenizer = _load_with_tokenizer_fallback(local_model_path, lazy=_stream_experts)
+        if _stream_experts:
+            _stream_experts_or_eval(model, local_model_path)
         if not skip_turboquant:
             _apply_turboquant_to_model(model, local_model_path)
         _inject_chat_template_if_missing(tokenizer, local_model_path)
@@ -1557,8 +1564,10 @@ def load_model_with_fallback(model_name: str, tokenizer_config: dict = None, ski
             local_model_path,
             tokenizer_config=tokenizer_config,
             model_config=_glm5_next_model_config_override,
-            lazy=False,
+            lazy=_stream_experts,
         )
+        if _stream_experts:
+            _stream_experts_or_eval(model, local_model_path)
         if not skip_turboquant:
             _apply_turboquant_to_model(model, local_model_path)
         _inject_chat_template_if_missing(tokenizer, local_model_path)
@@ -1568,14 +1577,48 @@ def load_model_with_fallback(model_name: str, tokenizer_config: dict = None, ski
         if "TokenizersBackend" in str(e) or "Tokenizer class" in str(e):
             logger.warning(f"Standard tokenizer loading failed, using fallback: {e}")
             model, tokenizer = _load_with_tokenizer_fallback(
-                local_model_path, lazy=False
+                local_model_path, lazy=_stream_experts
             )
+            if _stream_experts:
+                _stream_experts_or_eval(model, local_model_path)
             if not skip_turboquant:
                 _apply_turboquant_to_model(model, local_model_path)
             _inject_chat_template_if_missing(tokenizer, local_model_path)
             return _finalize_loaded_model(model, tokenizer)
         else:
             raise
+
+
+def _flash_moe_streams_from_load() -> bool:
+    try:
+        from .. import server as _server_module
+
+        return bool(_server_module.flash_moe_streams_from_load())
+    except Exception:
+        return False
+
+
+def _stream_experts_or_eval(model, model_path: str) -> None:
+    """Stream a lazily built model's experts, or read it whole if it has none."""
+    import mlx.core as mx
+
+    streamed = None
+    try:
+        from .. import server as _server_module
+        from .flash_moe_stream import stream_experts_on_load
+
+        cli = getattr(_server_module, "_cli_args", None) or {}
+        streamed = stream_experts_on_load(
+            model,
+            model_path,
+            slot_bank=int(cli.get("flash_moe_slot_bank", 0) or 0),
+            cache_gb=float(cli.get("flash_moe_cache_gb", 0.0) or 0.0),
+            io_workers=int(cli.get("flash_moe_io_split", 4) or 4),
+        )
+    except Exception as e:  # never leave the model unread
+        logger.warning("Flash MoE: could not stream experts from load (%s); reading every weight", e)
+    if streamed is None:
+        mx.eval(model.parameters())
 
 
 def _load_with_tokenizer_fallback(model_name: str, lazy: bool = False):

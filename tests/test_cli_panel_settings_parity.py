@@ -116,12 +116,14 @@ def test_flash_moe_slot_bank_matches_the_app_and_itself():
     hardcoded 64 while DEFAULT_CONFIG was 256, so clicking reset on a fresh
     session silently quartered it.
     """
-    assert _serve_arg_default("--flash-moe-slot-bank") == 256
+    # 0.5.3: both default to 0 = no slot limit, the cache is sized in bytes
+    # from free memory.
+    assert _serve_arg_default("--flash-moe-slot-bank") == 0
     form = (
         ROOT / "panel/src/renderer/src/components/sessions/SessionConfigForm.tsx"
     ).read_text(encoding="utf-8")
     m = re.search(r"flashMoeSlotBank:\s*(\d+)", form)
-    assert m and int(m.group(1)) == 256
+    assert m and int(m.group(1)) == 0
     assert "defaultValue={64}" not in form, (
         "the slot-bank slider reset marker is hardcoded again; it must track "
         "DEFAULT_CONFIG or reset will disagree with the session default"
