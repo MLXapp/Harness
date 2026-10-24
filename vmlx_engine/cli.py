@@ -3145,6 +3145,8 @@ def serve_command(args):
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    if getattr(args, "no_tool_grammar", False):
+        os.environ["VMLX_TOOL_GRAMMAR"] = "0"
     # Outermost: refuse foreign Host names (DNS rebinding), pages from other
     # sites, and other devices when no API key is set. Not for a Unix socket,
     # which no browser or other device can reach.
@@ -4652,6 +4654,12 @@ Examples:
         default="",
         help="Comma-separated extra Host names to answer (default: this Mac's own names; on 0.0.0.0 also "
              "IP addresses and .local names). '*.example.com' matches subdomains. Env: VMLX_TRUSTED_HOSTS",
+    )
+    serve_parser.add_argument(
+        "--no-tool-grammar",
+        action="store_true",
+        help="Don't hold JSON tool calls (<tool_call>, Qwen/Hermes) to the request's tool schemas. "
+             "Env: VMLX_TOOL_GRAMMAR=0",
     )
     # Bench command
     bench_parser = subparsers.add_parser("bench", help="Run benchmark")

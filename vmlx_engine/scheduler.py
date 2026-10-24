@@ -4015,6 +4015,25 @@ class Scheduler:
         )
         if dry is not None:
             processors.append(dry.bind(request))
+        # Well-formed tool calls: once the model opens <tool_call>, hold it to
+        # the request's tools until </tool_call> (vmlx_engine.api.tool_grammar).
+        spec = getattr(params, "tool_grammar", None)
+        if spec:
+            try:
+                from .api.tool_grammar import build_tool_call_logits_processor
+
+                grammar = build_tool_call_logits_processor(
+                    spec.get("tools"),
+                    getattr(self, "_actual_tokenizer", None) or getattr(self, "tokenizer", None),
+                    thinking_open=bool(spec.get("thinking_open")),
+                )
+            except Exception as exc:  # never block a request over this
+                logger.debug("tool grammar skipped: %s", exc)
+                grammar = None
+            if grammar is not None:
+                processors.append(
+                    self._wrap_generated_only_logits_processor(grammar, max(len(tokens_to_process) - 1, 0))
+                )
         return processors or None
 
     def _request_seeded_sampler(self, request: Request):
