@@ -13,7 +13,7 @@ import io
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Union
+from typing import Iterator, Optional, Union
 
 import numpy as np
 
@@ -129,6 +129,7 @@ class TTSEngine:
         voice: str = "af_heart",
         speed: float = 1.0,
         lang_code: str = "a",
+        ref_audio: Optional[str] = None,
     ) -> AudioOutput:
         """
         Generate speech from text.
@@ -151,11 +152,15 @@ class TTSEngine:
             audio_chunks = []
             sample_rate = 24000  # Default for most models
 
+            # A voice sample (a WAV file) for models that clone voices, such as
+            # Chatterbox; passed only when given, since not every model takes it.
+            extra = {"ref_audio": ref_audio} if ref_audio else {}
             for result in self.model.generate(
                 text=text,
                 voice=voice,
                 speed=speed,
                 lang_code=lang_code,
+                **extra,
             ):
                 audio_data = result.audio
                 if hasattr(result, "sample_rate"):

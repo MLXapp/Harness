@@ -3180,7 +3180,23 @@
     "madeWith": "由 {name} 制作",
     "play": "播放",
     "pause": "暂停",
-    "position": "播放位置"
+    "position": "播放位置",
+    "voice": {
+      "chip": "声音样本",
+      "chipOn": "样本声音 · {n} 秒",
+      "record": "录音",
+      "recording": "停止 · {n} 秒",
+      "chooseFile": "选取文件…",
+      "hint": "约 10 秒、一个人清楚说话的录音，不要有音乐。最多使用 {max} 秒。",
+      "preparing": "正在准备样本…",
+      "remove": "移除样本",
+      "consent": "这是我自己的声音，或我已获得说话人本人的使用许可。",
+      "needsConsent": "请先确认你可以使用这个声音。",
+      "review": "查看样本",
+      "tooShort": "样本至少需要 {n} 秒的说话声。",
+      "unreadable": "无法将该文件读取为音频。",
+      "noMic": "MLX Harness 无法使用麦克风。请在“系统设置”→“隐私与安全性”→“麦克风”中允许。"
+    }
   },
   "code": {
     "title": "在这台 Mac 上与智能体一起写代码",

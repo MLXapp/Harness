@@ -642,6 +642,7 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
           id: newId('media'), kind: model.kind, modelId: model.id, modelName: model.name, where: model.where,
           ...(model.where === 'cloud' ? { provider: model.provider } : {}),
           prompt: String(request.prompt), ...(request.lyrics ? { lyrics: request.lyrics } : {}),
+          ...(request.voiceSample ? { voiceSample: request.voiceSample } : {}),
           values: { ...request.values }, status: 'running', phase: 'queued', outputs: [],
           estimateUsd: estimateCost(model, request.values ?? {}, request.prompt), createdAt: now, updatedAt: now,
         }
@@ -668,6 +669,8 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       delete: async (id: string) => { fx.mediaJobs = fx.mediaJobs.filter(j => j.id !== id); return { ok: true as const } },
       reveal: async () => ({ ok: true }),
       save: async () => ({ ok: false, error: 'Saving is off in the preview' }),
+      saveVoiceSample: async (wav: Uint8Array) => (wav.length > 44 ? { ok: true as const, id: '00000000-0000-4000-8000-000000000001' } : { ok: false as const, error: 'Use a WAV sample of up to 20 seconds' }),
+      deleteVoiceSample: async () => ({ ok: true }),
       onJob: (cb: (job: any) => void) => events.on('media:job', cb),
     },
 

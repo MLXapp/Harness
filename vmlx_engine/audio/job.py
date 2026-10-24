@@ -69,7 +69,12 @@ def _tts(args: argparse.Namespace) -> int:
     engine = TTSEngine(args.model)
     engine.load()
     _emit("generating", characters=len(text))
-    audio = engine.generate(text, voice=args.voice, speed=args.speed, lang_code=args.lang)
+    ref_audio = getattr(args, "ref_audio", None) or None
+    if ref_audio and not Path(ref_audio).is_file():
+        _emit("error", message="The voice sample is missing")
+        return 1
+    audio = engine.generate(text, voice=args.voice, speed=args.speed, lang_code=args.lang,
+                            **({"ref_audio": ref_audio} if ref_audio else {}))
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(engine.to_bytes(audio, format="wav"))
@@ -148,6 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
     tts.add_argument("--lang", default="a", help="Kokoro language code (a = American English)")
     tts.add_argument("--input", required=True, help="UTF-8 text file")
     tts.add_argument("--output", required=True, help="WAV file to write")
+    tts.add_argument("--ref-audio", default="", help="WAV voice sample to speak in (voice-cloning models)")
     stt = sub.add_parser("stt", help="Speech to text")
     stt.add_argument("--model", required=True)
     stt.add_argument("--language", default="")

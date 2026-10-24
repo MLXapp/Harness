@@ -14,7 +14,7 @@ describe('main-process content security policy', () => {
     const policy = buildContentSecurityPolicy({ devRenderer: true })
 
     expect(policy).toContain("script-src 'self' 'unsafe-inline';")
-    expect(policy).toContain("connect-src 'self' mlx-media: http://127.0.0.1:* http://localhost:*")
+    expect(policy).toContain("connect-src 'self' blob: mlx-media: http://127.0.0.1:* http://localhost:*")
     expect(policy).toContain("https://hf-mirror.com https://*.hf-mirror.com")
     expect(policy).toContain("https://modelscope.cn https://*.modelscope.cn")
   })
