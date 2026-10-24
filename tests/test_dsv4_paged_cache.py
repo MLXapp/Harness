@@ -688,7 +688,10 @@ def test_dsv4_launch_filters_stale_saved_and_additional_args():
             "const effectiveFlashMoe = requestedFlashMoe && !effectiveDistributed && !dsv4Active" in source
             or (
                 "const effectiveFlashMoe = (requestedFlashMoe || autoFlashMoe) && !effectiveDistributed && !dsv4Active" in source
-                and "excluded: isImage || isVLM || effectiveSmelt || requestedDistributed || dsv4Active" in source
+                and (
+                    "excluded: isImage || isVLM || effectiveSmelt || requestedDistributed || dsv4Active" in source
+                    or "!(isVLM || effectiveSmelt || requestedDistributed || dsv4Active)" in source
+                )
             )
         )
         assert "compatibleExternalSpeculative" in source

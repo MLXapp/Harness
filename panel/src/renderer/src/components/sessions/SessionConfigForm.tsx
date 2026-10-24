@@ -4,7 +4,7 @@ import { DEFAULT_BLOCK_DISK_CACHE_PERCENT } from '../../../../shared/cacheDefaul
 import { resolveNativeMtpMode } from '../../../../shared/nativeMtpLaunchArgs'
 import { useEffect, useState, useRef } from 'react'
 import { QWEN38_27B_DFLASH2_REPO, isQwen38Dense27b } from '../../../../shared/dflash2Drafter'
-import { explicitSlotBank } from '../../../../shared/flashMoeLaunch'
+import { launchSlotBank } from '../../../../shared/flashMoeLaunch'
 import { Modal } from '../ui/Modal'
 import { useTranslation } from '../../i18n'
 import {
@@ -94,7 +94,9 @@ export interface SessionConfig {
   smelt: boolean
   smeltExperts: number
   flashMoe: boolean
+  flashMoeAuto: boolean
   flashMoeSlotBank: number
+  flashMoeSlotBankSet: boolean
   flashMoePrefetch: 'none' | 'temporal'
   flashMoeIoSplit: number
   defaultTemperature: number
@@ -197,8 +199,10 @@ export const DEFAULT_CONFIG: SessionConfig = {
   smelt: false,
   smeltExperts: 50,
   flashMoe: false,
+  flashMoeAuto: true,
   // 0 = Auto: the engine sizes the expert cache from free memory (0.5.3).
   flashMoeSlotBank: 0,
+  flashMoeSlotBankSet: false,
   flashMoePrefetch: 'none',
   flashMoeIoSplit: 4,
   defaultTemperature: 0,
@@ -988,13 +992,21 @@ export function SessionConfigForm({ config, onChange, onReset, detectedCacheType
         {(smeltActive || distributedActive) && !flashMoeActive && (
           <IncompatWarning text={smeltActive ? t('sessions.config.flashMoeDisabledSmelt') : t('sessions.config.flashMoeDisabledDistributed')} />
         )}
+        {!flashMoeActive && !dsv4Active && !smeltActive && !distributedActive && (
+          <CheckField
+            label={t('sessions.config.flashMoeAuto')}
+            tooltip={t('sessions.config.flashMoeAutoTooltip')}
+            checked={config.flashMoeAuto !== false}
+            onChange={v => onChange('flashMoeAuto', v)}
+          />
+        )}
         {flashMoeActive && (
           <>
             <SliderField settingKey="flashMoeSlotBank"
               label={t('sessions.config.slotBankSize')}
               tooltip={t('sessions.config.slotBankSizeTooltip')}
-              value={explicitSlotBank(config.flashMoeSlotBank) ?? 0}
-              onChange={v => onChange('flashMoeSlotBank', v)}
+              value={launchSlotBank(config.flashMoeSlotBank, config.flashMoeSlotBankSet) ?? 0}
+              onChange={v => { onChange('flashMoeSlotBank', v); onChange('flashMoeSlotBankSet', true) }}
               min={16}
               max={1024}
               step={16}
@@ -1014,9 +1026,9 @@ export function SessionConfigForm({ config, onChange, onReset, detectedCacheType
               step={1}
               defaultValue={4}
             />
-            <PerformanceHint text={explicitSlotBank(config.flashMoeSlotBank) == null
+            <PerformanceHint text={launchSlotBank(config.flashMoeSlotBank, config.flashMoeSlotBankSet) == null
               ? t('sessions.config.flashMoeStreamingHintAuto')
-              : t('sessions.config.flashMoeStreamingHint', { slots: explicitSlotBank(config.flashMoeSlotBank) ?? 0 })} />
+              : t('sessions.config.flashMoeStreamingHint', { slots: launchSlotBank(config.flashMoeSlotBank, config.flashMoeSlotBankSet) ?? 0 })} />
           </>
         )}
         <CheckField

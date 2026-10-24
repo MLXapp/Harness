@@ -972,7 +972,7 @@
       "smeltExpertsPercent": "% de expertos Smelt",
       "smeltExpertsHint": "Cargando el {percent}% de expertos por capa MoE. Más bajo = menos RAM, un poco más de sesgo de enrutamiento.",
       "flashMoe": "Flash MoE (streaming desde SSD)",
-      "flashMoeTooltip": "Lee los pesos de los expertos MoE del SSD en vez de cargarlos todos, así un modelo MoE más grande que la memoria de este Mac puede funcionar si el resto de sus pesos cabe. Se activa solo para un modelo MoE de texto cuyos archivos superan el 75 % de la memoria. Es más lento que tener todos los expertos en memoria. No funciona con Smelt ni Distribuido; JIT se desactiva mientras tanto.",
+      "flashMoeTooltip": "Lee los pesos de los expertos MoE del SSD en vez de tenerlos todos en memoria. Los modelos Qwen3-MoE, Qwen3-Next y Mixtral los leen desde que se cargan, así uno más grande que la memoria de este Mac puede funcionar si el resto de sus pesos cabe. Es más lento que tener todos los expertos en memoria. No funciona con Smelt ni Distribuido; JIT se desactiva mientras tanto.",
       "flashMoeDisabledDsv4": "Flash MoE está deshabilitado para DSV4 Flash. La hidratación nativa de expertos de DSV4 y la restauración de caché SWA+CSA/HCA no son compatibles con el streaming de expertos desde SSD.",
       "flashMoeDisabledSmelt": "Flash MoE está deshabilitado mientras Smelt está activado. Desactívelo para habilitar Flash MoE.",
       "flashMoeDisabledDistributed": "Flash MoE está deshabilitado mientras el modo Distribuido está activado. Desactívelo para habilitar Flash MoE.",
@@ -1283,7 +1283,9 @@
       "nativeMtpOffForDrafter": "El MTP nativo está desactivado mientras haya un drafter DFlash2 seleccionado (no pueden compartir el paso de decodificación). Borra el modelo borrador o desactiva el drafter incluido para volver a usar MTP adaptativo.",
       "dflash2AdaptiveBlockNote": "DFlash2 elige su bloque de verificación en cada paso, hasta el doble del bloque con el que se entrenó el drafter (8 o 16 tokens; 5 cuando las verificaciones anchas son costosas), el que produzca más tokens por segundo con este texto. Tokens borrador por paso no se aplica.",
       "slotBankAuto": "Auto",
-      "flashMoeStreamingHintAuto": "Los expertos se leen del SSD y nunca se cargan todos; los usados más recientemente se quedan en una caché ajustada a la memoria libre. Los prompts se leen de 4096 en 4096 tokens. Los modelos sin expertos no cambian. JIT se desactiva mientras tanto."
+      "flashMoeStreamingHintAuto": "Los expertos se leen del SSD y nunca se cargan todos; los usados más recientemente se quedan en una caché ajustada a la memoria libre. Los prompts se leen de 4096 en 4096 tokens. Los modelos sin expertos no cambian. JIT se desactiva mientras tanto.",
+      "flashMoeAuto": "Activar solo cuando el modelo no quepa",
+      "flashMoeAutoTooltip": "En modelos Qwen3-MoE, Qwen3-Next y Mixtral cuyos archivos superan el 75 % de la memoria de este Mac, los expertos se leen del SSD para que el modelo arranque en vez de llevar el Mac a usar swap. Desactívalo para cargar siempre todos los expertos en memoria."
     },
     "create": {
       "title": "Crear sesión",

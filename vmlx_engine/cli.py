@@ -1312,7 +1312,6 @@ def serve_command(args):
 
     logger = logging.getLogger(__name__)
     _is_image = _is_image_serve_request(args)
-    _raise_prefill_step_for_streaming(args, sys.argv[1:])
 
     # Engine-owned lifecycle progress: one generation per serve attempt. The
     # panel reads the mirrored LOADPROGRESS stdout lines during cold start
@@ -2843,6 +2842,9 @@ def serve_command(args):
                 "--block-disk-cache-max-gb caps L2 disk."
             )
 
+        # After the family policies (DSV4 turns Flash MoE off, and its prefill
+        # step is a memory bound that must stay as set).
+        _raise_prefill_step_for_streaming(args, sys.argv[1:])
         scheduler_config = SchedulerConfig(
             max_num_seqs=args.max_num_seqs,
             prefill_batch_size=args.prefill_batch_size,
@@ -3303,14 +3305,16 @@ def bench_command(args):
                 resolved = resolve_to_local_path(args.model)
                 ei = ExpertIndex.build(resolved)
                 if ei.num_moe_layers > 0:
-                    cache = SlotBankCache(max_slots=getattr(args, 'flash_moe_slot_bank', 64))
+                    cache = SlotBankCache(max_slots=max(0, int(getattr(args, 'flash_moe_slot_bank', 0) or 0)))
                     loader = FlashMoEExpertLoader(ei, cache, io_workers=4)
                     # Unwrap MLLMModelWrapper if present (bench doesn't use it but be defensive)
                     raw = getattr(model, '_model', None) or getattr(model, 'model', None) or model
                     patched = apply_flash_moe(raw, loader)
                     if patched > 0:
                         freed = free_expert_weights(raw)
-                        print(f"Flash MoE: {patched} layers patched, {freed/1e9:.1f}GB freed")
+                        from .utils.flash_moe_stream import size_expert_cache
+                        budget = size_expert_cache(cache, 0.0, freed_bytes=freed, expert_count=ei.num_experts * ei.num_moe_layers)
+                        print(f"Flash MoE: {patched} layers patched, {freed/1e9:.1f}GB freed, expert cache up to {budget/1e9:.1f}GB")
             except Exception as e:
                 print(f"Flash MoE setup failed: {e}")
 

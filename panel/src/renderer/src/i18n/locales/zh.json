@@ -972,7 +972,7 @@
       "smeltExpertsPercent": "Smelt 专家 %",
       "smeltExpertsHint": "每个 MoE 层加载 {percent}% 的专家。越低 RAM 越少，但路由偏置略增。",
       "flashMoe": "Flash MoE (SSD 流式加载)",
-      "flashMoeTooltip": "从 SSD 按需读取 MoE 专家权重，而不是全部加载，因此只要其余权重放得下，比这台 Mac 内存更大的 MoE 模型也能运行。文件超过内存 75% 的文本 MoE 模型会自动开启。比把所有专家放在内存里慢。不能与 Smelt 或分布式同时使用；流式加载期间 JIT 关闭。",
+      "flashMoeTooltip": "从 SSD 读取 MoE 专家权重，而不是全部放在内存里。Qwen3-MoE、Qwen3-Next 和 Mixtral 模型从加载起就流式读取，因此只要其余权重放得下，比这台 Mac 内存更大的模型也能运行。比把所有专家放在内存里慢。不能与 Smelt 或分布式同时使用；流式加载期间 JIT 关闭。",
       "flashMoeDisabledDsv4": "DSV4 Flash 已禁用 Flash MoE。DSV4 原生专家水合和 SWA+CSA/HCA 缓存恢复与 SSD 专家流式加载不兼容。",
       "flashMoeDisabledSmelt": "Smelt 开启时 Flash MoE 被禁用。将其关闭以启用 Flash MoE。",
       "flashMoeDisabledDistributed": "分布式开启时 Flash MoE 被禁用。将其关闭以启用 Flash MoE。",
@@ -1283,7 +1283,9 @@
       "nativeMtpOffForDrafter": "选择 DFlash2 草稿模型时原生 MTP 关闭（两者不能共享同一解码步骤）。清空草稿模型或关闭内置草稿模型即可恢复自适应 MTP。",
       "dflash2AdaptiveBlockNote": "DFlash2 每步自动选择验证块宽度，最多为草稿模型训练块的两倍（8 或 16 个 token；宽验证代价高时为 5），取当前文本上每秒 token 数更高的一种。“每步草稿 token 数”不适用。",
       "slotBankAuto": "自动",
-      "flashMoeStreamingHintAuto": "专家从 SSD 读取，不会全部加载；最近用过的保留在按空闲内存确定大小的缓存中。提示词每次读取 4,096 个 token。没有专家的模型不受影响。流式加载期间 JIT 关闭。"
+      "flashMoeStreamingHintAuto": "专家从 SSD 读取，不会全部加载；最近用过的保留在按空闲内存确定大小的缓存中。提示词每次读取 4,096 个 token。没有专家的模型不受影响。流式加载期间 JIT 关闭。",
+      "flashMoeAuto": "模型放不下时自动开启",
+      "flashMoeAutoTooltip": "对于文件超过这台 Mac 内存 75% 的 Qwen3-MoE、Qwen3-Next 和 Mixtral 模型，专家从 SSD 读取，模型可以启动，而不会让 Mac 陷入交换。关闭后始终把所有专家加载到内存。"
     },
     "create": {
       "title": "创建会话",

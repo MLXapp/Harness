@@ -75,6 +75,7 @@ def flash_moe_cache_bytes(
     available_bytes: int,
     resident_bytes: int,
     requested_gb: float = 0.0,
+    floor_bytes: int = 0,
 ) -> int:
     """Bytes the expert cache may hold, when the user did not set a size.
 
@@ -84,15 +85,31 @@ def flash_moe_cache_bytes(
     that kept their Macs out of swap and kernel panics:
 
     - leave macOS at least 7 GB, or 15% of the memory when that is more;
-    - keep the whole process (model weights that stay resident + cache) under
-      60% of the memory on a Mac with 64 GB or more, 75% below that.
+    - keep the whole process under 60% of the memory on a Mac with 64 GB or
+      more, 75% below that;
+    - inside that, leave 10% of the memory for the KV and prefix caches,
+      which fill after this is measured.
 
-    Never less than 512 MB, so one token's experts can always be read.
-    The approach follows Strata's Metal engine (MIT); this is our own code.
+    ``floor_bytes`` (e.g. what the old fixed 256-expert cache held) is kept
+    when it still fits under the process cap, so a low reading of available
+    memory never shrinks the cache below what it used to be. Never less than
+    512 MB. The approach follows Strata's Metal engine (MIT); our own code.
     """
     if requested_gb and requested_gb > 0:
         return int(requested_gb * GIB)
     keep_free = max(7 * GIB, int(total_bytes * 0.15))
+    kv_reserve = int(total_bytes * KV_RESERVE_SHARE)
     footprint_cap = int(total_bytes * (0.60 if total_bytes >= 64 * GIB else 0.75))
-    budget = min(available_bytes - keep_free, footprint_cap - resident_bytes)
+    room_under_cap = footprint_cap - resident_bytes - kv_reserve
+    budget = min(available_bytes - keep_free - kv_reserve, room_under_cap)
+    budget = max(budget, min(int(floor_bytes), room_under_cap))
     return max(int(budget), 512 * 1024 ** 2)
+
+
+KV_RESERVE_SHARE = 0.10
+
+#: Model types whose experts may stream from the moment the model loads
+#: (and that the app turns Flash MoE on for by itself): softmax top-k routing
+#: that FlashMoEBlock reproduces exactly, checked against the resident model.
+#: Others keep the old path (patched after a full load), if they stream at all.
+STREAM_FROM_LOAD_MODEL_TYPES = frozenset({"qwen3_moe", "qwen3_next", "mixtral"})

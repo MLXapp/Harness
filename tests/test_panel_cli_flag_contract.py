@@ -291,7 +291,7 @@ def test_command_preview_uses_runtime_numeric_sanitizers_for_advanced_modes() ->
     assert "Math.round(Number(configuredDepth" not in preview_native
     for expression in (
         "finitePositiveInteger((config as any).smeltExperts)",
-        "explicitSlotBank((config as any).flashMoeSlotBank)",
+        "launchSlotBank((config as any).flashMoeSlotBank, (config as any).flashMoeSlotBankSet)",
         "finitePositiveInteger((config as any).flashMoeIoSplit)",
         "finitePositiveInteger(config.numDraftTokens)",
     ):

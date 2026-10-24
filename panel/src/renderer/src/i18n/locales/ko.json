@@ -972,7 +972,7 @@
       "smeltExpertsPercent": "Smelt 전문가 %",
       "smeltExpertsHint": "MoE 레이어당 전문가의 {percent}%를 로드합니다. 낮을수록 RAM은 줄지만 라우팅 편향이 약간 커집니다.",
       "flashMoe": "Flash MoE (SSD 스트리밍)",
-      "flashMoeTooltip": "MoE 전문가 가중치를 모두 불러오지 않고 SSD에서 필요할 때 읽습니다. 나머지 가중치만 들어가면 이 Mac의 메모리보다 큰 MoE 모델도 실행할 수 있습니다. 파일이 메모리의 75%보다 큰 텍스트 MoE 모델이면 자동으로 켜집니다. 모든 전문가를 메모리에 두는 것보다 느립니다. Smelt나 분산과는 함께 쓸 수 없고, 스트리밍 중에는 JIT가 꺼집니다.",
+      "flashMoeTooltip": "MoE 전문가 가중치를 모두 메모리에 두지 않고 SSD에서 읽습니다. Qwen3-MoE, Qwen3-Next, Mixtral 모델은 불러오는 순간부터 스트리밍하므로, 나머지 가중치만 들어가면 이 Mac의 메모리보다 큰 모델도 실행할 수 있습니다. 모든 전문가를 메모리에 두는 것보다 느립니다. Smelt나 분산과는 함께 쓸 수 없고, 스트리밍 중에는 JIT가 꺼집니다.",
       "flashMoeDisabledDsv4": "DSV4 Flash에서는 Flash MoE가 비활성화됩니다. DSV4 네이티브 전문가 하이드레이션과 SWA+CSA/HCA 캐시 복원은 SSD 전문가 스트리밍과 호환되지 않습니다.",
       "flashMoeDisabledSmelt": "Smelt가 켜져 있는 동안 Flash MoE는 비활성화됩니다. Flash MoE를 사용하려면 끄세요.",
       "flashMoeDisabledDistributed": "분산 모드가 켜져 있는 동안 Flash MoE는 비활성화됩니다. Flash MoE를 사용하려면 끄세요.",
@@ -1283,7 +1283,9 @@
       "nativeMtpOffForDrafter": "DFlash2 드래프터가 선택된 동안 네이티브 MTP는 꺼집니다(같은 디코딩 단계를 공유할 수 없음). Adaptive MTP로 돌아가려면 드래프트 모델을 비우거나 번들 드래프터를 끄세요.",
       "dflash2AdaptiveBlockNote": "DFlash2는 단계마다 검증 블록 폭을 고릅니다. 드래프터 학습 폭의 최대 2배(8 또는 16토큰, 넓은 검증이 비쌀 때는 5) 중 현재 텍스트에서 초당 토큰이 더 많은 쪽을 사용합니다. 단계당 드래프트 토큰 수는 적용되지 않습니다.",
       "slotBankAuto": "자동",
-      "flashMoeStreamingHintAuto": "전문가는 SSD에서 읽어 오며 한꺼번에 모두 불러오지 않습니다. 최근에 쓴 전문가는 남은 메모리에 맞춘 캐시에 남습니다. 프롬프트는 4,096토큰씩 읽습니다. 전문가가 없는 모델에는 영향이 없습니다. 스트리밍 중에는 JIT가 꺼집니다."
+      "flashMoeStreamingHintAuto": "전문가는 SSD에서 읽어 오며 한꺼번에 모두 불러오지 않습니다. 최근에 쓴 전문가는 남은 메모리에 맞춘 캐시에 남습니다. 프롬프트는 4,096토큰씩 읽습니다. 전문가가 없는 모델에는 영향이 없습니다. 스트리밍 중에는 JIT가 꺼집니다.",
+      "flashMoeAuto": "모델이 메모리에 맞지 않으면 자동으로 켜기",
+      "flashMoeAutoTooltip": "파일이 이 Mac 메모리의 75%보다 큰 Qwen3-MoE, Qwen3-Next, Mixtral 모델은 전문가를 SSD에서 읽어 옵니다. 그래서 Mac이 스왑에 몰리지 않고 모델이 시작됩니다. 끄면 항상 모든 전문가를 메모리에 불러옵니다."
     },
     "create": {
       "title": "세션 생성",
