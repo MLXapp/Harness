@@ -2818,6 +2818,10 @@ def serve_command(args):
         _apply_paged_block_disk_default(args, logger)
         _configure_vision_feature_ssd(args, _block_disk_explicit)
 
+    # After the family policies (DSV4 turns Flash MoE off, and its prefill
+    # step is a memory bound that must stay as set); both engine lanes read it.
+    _raise_prefill_step_for_streaming(args, sys.argv[1:])
+
     # Diffusion does not instantiate the LLM scheduler or its KV/SSD cache.
     scheduler_config = None
     if _is_image:
@@ -2842,9 +2846,6 @@ def serve_command(args):
                 "--block-disk-cache-max-gb caps L2 disk."
             )
 
-        # After the family policies (DSV4 turns Flash MoE off, and its prefill
-        # step is a memory bound that must stay as set).
-        _raise_prefill_step_for_streaming(args, sys.argv[1:])
         scheduler_config = SchedulerConfig(
             max_num_seqs=args.max_num_seqs,
             prefill_batch_size=args.prefill_batch_size,
