@@ -82,7 +82,12 @@ import {
   applyCompaction,
   buildSummarizationMessages,
   checkpointMessage,
+  cleanSummaryText,
   compactionRetainTokens,
+  compactionThresholdTokens,
+  firstCompactableIndex,
+  parseOverflowTokens,
+  trimmedCheckpointSummary,
   estimateMessageTokens,
   estimateRequestTokens,
   historySourceId,
@@ -1605,6 +1610,7 @@ export function registerChatHandlers(
       let thinkingBudgetSupported: boolean | undefined;
       let supportsThinkingBudget: boolean | undefined;
       let supportsInstructMode: boolean | undefined;
+      let honorsEnableThinking: boolean | undefined;
       let supportsAdaptiveThinking: boolean | undefined;
       let supportsThinking: boolean | undefined;
       let supportedReasoningEfforts: ReasoningEffort[] | undefined;
@@ -1696,6 +1702,7 @@ export function registerChatHandlers(
             );
             supportsThinkingBudget = detected.supportsThinkingBudget;
             supportsInstructMode = detected.supportsInstructMode;
+            honorsEnableThinking = (detected as { honorsEnableThinking?: boolean }).honorsEnableThinking;
             supportsAdaptiveThinking = detected.supportsAdaptiveThinking;
             supportsThinking = detected.supportsThinking;
             supportedReasoningEfforts = detected.supportedReasoningEfforts;
@@ -3113,13 +3120,41 @@ export function registerChatHandlers(
         // (model, sampler, reasoning fields, tool schemas in the same order)
         // over the given messages, with only the output cap changed and no
         // forced tool_choice. It records no generation pass.
+        // Thinking off for the summary only where the template honours it
+        // (not gpt-oss: its reasoning line sits in the system prompt, so
+        // changing it would also lose the cached prefix).
+        const summaryThinkingOff = () =>
+          !isRemote && supportsInstructMode !== false && honorsEnableThinking !== false &&
+          chatDetectedFamily !== "gpt-oss";
+        // The summary's output cap: doubled where the model may think first.
+        const summaryOutputTokens = (cap: number) => (summaryThinkingOff() ? cap : cap * 2);
         const buildRequestBody = (
-          auxiliary?: { messages: any[]; maxTokens: number },
+          auxiliary?: { messages: any[]; maxTokens: number; answerOnly?: boolean },
         ): Record<string, any> => {
           const bodyMessages = auxiliary?.messages ?? requestMessages;
           const finalizeAuxiliaryBody = (obj: Record<string, any>) => {
-            if (useResponsesApi) obj.max_output_tokens = auxiliary!.maxTokens;
-            else obj.max_tokens = auxiliary!.maxTokens;
+            let maxTokens = auxiliary!.maxTokens;
+            if (auxiliary!.answerOnly) {
+              // The compaction summary must not spend its token cap thinking:
+              // a reasoning model otherwise hits the cap mid-thought, the
+              // summary is rejected as truncated, and the chat never compacts.
+              // Where the template switches thinking off cleanly, it is (only
+              // the generation prompt's tail changes, so the cached prefix is
+              // still reused); elsewhere the summary gets room to think.
+              if (summaryThinkingOff()) {
+                obj.enable_thinking = false;
+                obj.thinking_mode = "instruct";
+                const kwargs = { ...(obj.chat_template_kwargs || {}), enable_thinking: false };
+                delete kwargs.thinking_mode;
+                obj.chat_template_kwargs = kwargs;
+                delete obj.reasoning_effort;
+                delete obj.max_thinking_tokens;
+              } else {
+                maxTokens = summaryOutputTokens(maxTokens);
+              }
+            }
+            if (useResponsesApi) obj.max_output_tokens = maxTokens;
+            else obj.max_tokens = maxTokens;
             delete obj.tool_choice;
             return obj;
           };
@@ -3482,9 +3517,9 @@ export function registerChatHandlers(
         const runSummaryRequest = async (
           summaryMessages: any[],
           maxTokens: number,
-          opts: { noTools?: boolean } = {},
+          opts: { noTools?: boolean; answerOnly?: boolean } = {},
         ): Promise<SummaryStreamResult> => {
-          const summaryObj = buildRequestBody({ messages: summaryMessages, maxTokens });
+          const summaryObj = buildRequestBody({ messages: summaryMessages, maxTokens, answerOnly: opts.answerOnly });
           // A side question must answer in words: the tools stay described
           // (same prompt as the chat) but the model may not call them.
           if (opts.noTools && (summaryObj.tools?.length ?? 0) > 0) summaryObj.tool_choice = "none";
@@ -3520,23 +3555,44 @@ export function registerChatHandlers(
         };
         const compactRequestHistory = async (
           reason: "threshold" | "overflow" | "manual",
-        ): Promise<{ compacted: boolean; beforeTokens: number; afterTokens: number }> => {
+          opts: { aggressive?: boolean } = {},
+        ): Promise<{ compacted: boolean; beforeTokens: number; afterTokens: number; capped?: boolean; trimmed?: boolean }> => {
           const tools = toolsForEstimate();
-          const beforeTokens = tokenCalibrator.estimate(
-            estimateRequestTokens(requestMessages, tools),
-          );
+          const heuristicTotal = estimateRequestTokens(requestMessages, tools);
+          const beforeTokens = tokenCalibrator.estimate(heuristicTotal);
+          // Budgets are in real tokens; ranges are picked on the heuristic, so
+          // convert with this chat's measured scale (a CJK or code-heavy chat
+          // tokenizes denser than the heuristic assumes).
+          const scale = tokenCalibrator.scale(heuristicTotal);
           // Automatic compaction keeps 16% of the window verbatim. After an
           // overflow (the known window was wrong) and for /compact on a short
-          // chat, at most the newest quarter of the history is kept.
-          const retainTokens =
-            reason !== "threshold"
-              ? Math.min(
-                  compactionRetainTokens(contextWindow.tokens),
-                  Math.floor(estimateRequestTokens(requestMessages) * 0.25),
-                )
+          // chat, at most the newest quarter of the history is kept; a second
+          // overflow keeps 8%.
+          const historyReal = Math.ceil(estimateRequestTokens(requestMessages) * scale);
+          const retainReal = opts.aggressive
+            ? Math.floor(contextWindow.tokens * 0.08)
+            : reason !== "threshold"
+              ? Math.min(compactionRetainTokens(contextWindow.tokens), Math.floor(historyReal * 0.25))
               : compactionRetainTokens(contextWindow.tokens);
-          const range = selectCompactionRange(requestMessages, retainTokens);
+          // The span is replayed to be summarized, so it must fit in one request
+          // next to the system prompt, the tool schemas and the summary itself.
+          const leadingReal = tokenCalibrator.estimate(
+            estimateRequestTokens(requestMessages.slice(0, firstCompactableIndex(requestMessages)), tools),
+          );
+          // (Only when that leaves a useful span: with a very large system
+          // prompt or tool list there is no smaller span worth summarizing.)
+          const spanBudgetReal =
+            contextWindow.tokens - leadingReal - summaryOutputTokens(summaryMaxTokens(contextWindow.tokens)) - 1024;
+          const retainHeuristic = Math.floor(retainReal / scale);
+          const spanCap = spanBudgetReal >= contextWindow.tokens * 0.25 ? Math.floor(spanBudgetReal / scale) : Infinity;
+          const range = selectCompactionRange(requestMessages, retainHeuristic, estimateMessageTokens, spanCap);
           if (!range) return { compacted: false, beforeTokens, afterTokens: beforeTokens };
+          // Whether the span cap (not the retained tail) ended this range: then
+          // more is left to summarize in a following round.
+          const uncapped = Number.isFinite(spanCap)
+            ? selectCompactionRange(requestMessages, retainHeuristic, estimateMessageTokens)
+            : range;
+          const capped = !!uncapped && uncapped.end > range.end;
           const replacedTokens = requestMessages
             .slice(range.start, range.end + 1)
             .reduce((total, message) => total + estimateMessageTokens(message), 0);
@@ -3544,13 +3600,36 @@ export function registerChatHandlers(
             `[CHAT] Compacting (${reason}): ~${beforeTokens} of ${contextWindow.tokens} tokens (${contextWindow.source}), summarizing items ${range.start}-${range.end}`,
           );
           if (reason !== "manual") emitCompactionEvent({ phase: "start", reason });
-          const summary = acceptSummary(
-            await runSummaryRequest(
-              buildSummarizationMessages(requestMessages, range),
-              summaryMaxTokens(contextWindow.tokens),
-            ),
-            replacedTokens,
-          );
+          let summary: string;
+          let trimmed = false;
+          try {
+            summary = acceptSummary(
+              await runSummaryRequest(
+                buildSummarizationMessages(requestMessages, range),
+                summaryMaxTokens(contextWindow.tokens),
+                { answerOnly: true },
+              ),
+              replacedTokens,
+            );
+          } catch (err) {
+            // The chat no longer fits and the model could not summarize it (the
+            // summary itself did not fit, was cut off, or came back empty): drop
+            // the older span, keeping an earlier checkpoint's facts, so the
+            // message is still sent. Other failures (server error, timeout)
+            // leave the history alone.
+            const message = (err as Error)?.message || "";
+            const unsummarizable =
+              /truncated|produced no text/i.test(message) ||
+              isPromptOverflowError(undefined, message);
+            if (reason !== "overflow" || !unsummarizable || abortController.signal.aborted) throw err;
+            console.warn("[CHAT] Summary failed after an overflow; trimming the oldest messages instead", err);
+            const first = requestMessages[range.start];
+            const previous = isCheckpointMessage(first)
+              ? cleanSummaryText(String((first as any).content))
+              : undefined;
+            summary = trimmedCheckpointSummary(range.end - range.start + 1, previous);
+            trimmed = true;
+          }
           if (range.end >= currentTurnToolStart) {
             compactedCurrentTurnItems.push(
               ...requestMessages.slice(Math.max(range.start, currentTurnToolStart), range.end + 1),
@@ -3580,9 +3659,30 @@ export function registerChatHandlers(
             `[CHAT_DIAG] compaction=${JSON.stringify({ chatId: chatId.slice(0, 8), reason, contextWindow: contextWindow.tokens, beforeTokens, afterTokens, persisted: !!boundaryId })}`,
           );
           if (reason !== "manual") {
-            emitCompactionEvent({ phase: "done", reason, beforeTokens, afterTokens });
+            emitCompactionEvent({ phase: "done", reason, beforeTokens, afterTokens, ...(trimmed ? { trimmed: true } : {}) });
           }
-          return { compacted: true, beforeTokens, afterTokens };
+          return { compacted: true, beforeTokens, afterTokens, capped, ...(trimmed ? { trimmed: true } : {}) };
+        };
+        // Compact round after round until the request fits (a span that is too
+        // big to summarize at once is done in parts), at most four rounds.
+        const compactUntilFits = async (
+          reason: "threshold" | "overflow",
+          opts: { aggressive?: boolean } = {},
+        ): Promise<boolean> => {
+          const target =
+            reason === "threshold"
+              ? compactionThresholdTokens(contextWindow.tokens)
+              : Math.floor(contextWindow.tokens * 0.7);
+          let any = false;
+          for (let round = 0; round < 4; round += 1) {
+            const outcome = await compactRequestHistory(reason, opts);
+            if (!outcome.compacted) break;
+            any = true;
+            // Another round only when this one had to stop early to fit the
+            // summary request; the retained recent tail is never eaten into.
+            if (!outcome.capped || outcome.afterTokens < target || outcome.afterTokens >= outcome.beforeTokens) break;
+          }
+          return any;
         };
         const maybeAutoCompact = async () => {
           // A remote endpoint that reports no window compacts only after an
@@ -3594,7 +3694,7 @@ export function registerChatHandlers(
           );
           if (!shouldCompact(estimate, contextWindow.tokens)) return;
           try {
-            await compactRequestHistory("threshold");
+            await compactUntilFits("threshold");
           } catch (err) {
             if (abortController.signal.aborted) throw err;
             autoCompactionFailures += 1;
@@ -3602,9 +3702,23 @@ export function registerChatHandlers(
             emitCompactionEvent({ phase: "failed", reason: "threshold", error: (err as Error)?.message });
           }
         };
-        const compactAfterOverflow = async (): Promise<boolean> => {
+        let overflowCompactions = 0;
+        const compactAfterOverflow = async (detail: string, attempt: number): Promise<boolean> => {
+          // At most three per turn (a long tool loop could otherwise repeat it).
+          if (overflowCompactions >= 3) return false;
+          overflowCompactions += 1;
+          // The rejection usually states the real counts: learn this chat's
+          // token density from them, and the engine's true limit.
+          const counts = parseOverflowTokens(detail);
+          if (counts.promptTokens && lastSentHeuristicTokens > 0) {
+            tokenCalibrator.observe(lastSentHeuristicTokens, counts.promptTokens);
+          }
+          if (counts.maxTokens && (!contextWindow.known || counts.maxTokens < contextWindow.tokens)) {
+            contextWindow.tokens = counts.maxTokens;
+            contextWindow.known = true;
+          }
           try {
-            return (await compactRequestHistory("overflow")).compacted;
+            return await compactUntilFits("overflow", { aggressive: attempt > 0 });
           } catch (err) {
             if (abortController.signal.aborted) throw err;
             console.warn("[CHAT] Compaction after a prompt-too-long rejection failed", err);
@@ -3709,11 +3823,12 @@ export function registerChatHandlers(
             } catch {
               /* use raw text */
             }
-            // "Prompt too long": compact once and retry instead of failing.
+            // "Prompt too long": compact and retry instead of failing (twice,
+            // the second time keeping less of the recent history).
             if (
-              overflowRetry === 0 &&
+              overflowRetry < 2 &&
               isPromptOverflowError(response.status, errorDetail) &&
-              (await compactAfterOverflow())
+              (await compactAfterOverflow(errorDetail, overflowRetry))
             ) {
               continue;
             }
@@ -4978,10 +5093,14 @@ export function registerChatHandlers(
           let followUpErrorText = "";
           if (!res.ok) {
             followUpErrorText = await res.text();
-            // "Prompt too long" after the tool results: compact once, retry.
-            if (
+            // "Prompt too long" after the tool results: compact and retry (twice).
+            for (
+              let attempt = 0;
+              attempt < 2 &&
+              !res.ok &&
               isPromptOverflowError(res.status, followUpErrorText) &&
-              (await compactAfterOverflow())
+              (await compactAfterOverflow(followUpErrorText, attempt));
+              attempt += 1
             ) {
               res = await postFollowUp();
               followUpErrorText = res.ok ? "" : await res.text();
