@@ -1744,7 +1744,21 @@
       "timeToday": "hoy",
       "timeMonthsAgo": "hace {n}m",
       "timeYearsAgo": "hace {n}a",
-      "fetchFailed": "Error al obtener datos"
+      "fetchFailed": "Error al obtener datos",
+      "fit": {
+        "good": "Funciona bien",
+        "tight": "Justo",
+        "no": "Necesita {gb} GB",
+        "noTitle": "Demasiado grande para los {gb} GB de memoria de este Mac"
+      },
+      "notMlx": {
+        "gguf": "{id} es una versión GGUF, que MLX Harness no puede ejecutar.",
+        "pytorch": "{id} tiene pesos de PyTorch, que MLX Harness no puede ejecutar.",
+        "safetensors": "{id} es el modelo original, no una versión MLX.",
+        "builds": "Versiones MLX de {base}:",
+        "noBuilds": "Aún no hay versión MLX de {base}.",
+        "convert": "Aún no hay versión MLX. Puedes crear una con el Convertidor de modelos en Modelos → Biblioteca y herramientas."
+      }
     },
     "directories": {
       "title": "Directorios de escaneo de modelos",

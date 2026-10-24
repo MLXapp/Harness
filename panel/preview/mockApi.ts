@@ -105,11 +105,11 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
     events.emit('session:updated', { sessionId: id, session: s })
   }
   const hfResults = [
-    { id: 'mlx-community/Qwen3.5-9B-4bit', author: 'mlx-community', downloads: 48210, likes: 312, lastModified: '2026-10-14T09:12:00.000Z', createdAt: '2026-09-30T09:12:00.000Z', tags: ['mlx', 'text-generation', '4-bit'], pipelineTag: 'text-generation', size: '5.2 GB' },
-    { id: 'mlx-community/Qwen3.5-27B-4bit', author: 'mlx-community', downloads: 21877, likes: 205, lastModified: '2026-10-13T16:40:00.000Z', createdAt: '2026-09-30T10:01:00.000Z', tags: ['mlx', 'text-generation', '4-bit'], pipelineTag: 'text-generation', size: '15.3 GB' },
-    { id: 'mlx-community/gemma-3-12b-it-qat-4bit', author: 'mlx-community', downloads: 90233, likes: 641, lastModified: '2026-10-02T11:20:00.000Z', createdAt: '2026-04-18T11:20:00.000Z', tags: ['mlx', 'image-text-to-text', '4-bit'], pipelineTag: 'image-text-to-text', size: '8.1 GB' },
-    { id: 'mlx-community/whisper-large-v3-turbo', author: 'mlx-community', downloads: 130500, likes: 980, lastModified: '2026-08-21T08:00:00.000Z', createdAt: '2025-10-01T08:00:00.000Z', tags: ['mlx', 'automatic-speech-recognition'], pipelineTag: 'automatic-speech-recognition', size: '1.6 GB' },
-    { id: 'JANGQ-AI/GLM-4.6-Air-JANG_3M', author: 'JANGQ-AI', downloads: 6120, likes: 88, lastModified: '2026-10-11T18:05:00.000Z', createdAt: '2026-10-08T18:05:00.000Z', tags: ['mlx', 'jang', 'text-generation'], pipelineTag: 'text-generation', size: '47.9 GB' },
+    { id: 'mlx-community/Qwen3.5-9B-4bit', author: 'mlx-community', downloads: 48210, likes: 312, lastModified: '2026-10-14T09:12:00.000Z', createdAt: '2026-09-30T09:12:00.000Z', tags: ['mlx', 'text-generation', '4-bit'], pipelineTag: 'text-generation', size: '5.2 GB', sizeBytes: 5583457484 },
+    { id: 'mlx-community/Qwen3.5-27B-4bit', author: 'mlx-community', downloads: 21877, likes: 205, lastModified: '2026-10-13T16:40:00.000Z', createdAt: '2026-09-30T10:01:00.000Z', tags: ['mlx', 'text-generation', '4-bit'], pipelineTag: 'text-generation', size: '15.3 GB', sizeBytes: 16428249907 },
+    { id: 'mlx-community/gemma-3-12b-it-qat-4bit', author: 'mlx-community', downloads: 90233, likes: 641, lastModified: '2026-10-02T11:20:00.000Z', createdAt: '2026-04-18T11:20:00.000Z', tags: ['mlx', 'image-text-to-text', '4-bit'], pipelineTag: 'image-text-to-text', size: '8.1 GB', sizeBytes: 8697308774 },
+    { id: 'mlx-community/whisper-large-v3-turbo', author: 'mlx-community', downloads: 130500, likes: 980, lastModified: '2026-08-21T08:00:00.000Z', createdAt: '2025-10-01T08:00:00.000Z', tags: ['mlx', 'automatic-speech-recognition'], pipelineTag: 'automatic-speech-recognition', size: '1.6 GB', sizeBytes: 1717986918 },
+    { id: 'JANGQ-AI/GLM-4.6-Air-JANG_3M', author: 'JANGQ-AI', downloads: 6120, likes: 88, lastModified: '2026-10-11T18:05:00.000Z', createdAt: '2026-10-08T18:05:00.000Z', tags: ['mlx', 'jang', 'text-generation'], pipelineTag: 'text-generation', size: '47.9 GB', sizeBytes: 51432123596 },
   ]
   const updateState: UpdateState = { phase: 'idle', currentVersion: APP_VERSION }
 
@@ -154,6 +154,10 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
         const q = query.trim().toLowerCase()
         return hfResults.filter(r => (!q || r.id.toLowerCase().includes(q)) && (modelType !== 'image' || r.pipelineTag === 'text-to-image'))
       },
+      // A GGUF repo id typed into search shows its MLX builds.
+      mlxBuildsFor: async (repoId: string) => /gguf$/i.test(repoId)
+        ? { id: repoId, format: 'gguf' as const, base: repoId.replace(/-gguf$/i, ''), builds: hfResults.slice(0, 2) }
+        : null,
       fetchReadme: async (repoId: string) => `# ${repoId.split('/').pop()}\n\nSample model card shown by the MLX Harness preview.\n\n\`\`\`bash\nmlx_lm.generate --model ${repoId} --prompt "Hello"\n\`\`\``,
       getRecommendedModels: async () => hfResults,
       getRecentModels: async (author: string) => hfResults.filter(r => !author || r.author === author || author.includes(r.author)),

@@ -2219,6 +2219,8 @@ export function registerModelHandlers(): void {
       tags: m.tags || [],
       pipelineTag: m.pipeline_tag,
       size: extractModelSize(m),
+      // For the "fits this Mac" badge (shared/searchFit.ts).
+      sizeBytes: extractModelBytes(m),
     };
   }
 
@@ -2228,6 +2230,11 @@ export function registerModelHandlers(): void {
    * We compute actual byte size from dtype × bytes-per-element.
    */
   function extractModelSize(m: any): string | undefined {
+    const bytes = extractModelBytes(m);
+    return bytes ? formatSize(bytes) : undefined;
+  }
+
+  function extractModelBytes(m: any): number | undefined {
     try {
       const params = m.safetensors?.parameters;
       if (params && typeof params === "object") {
@@ -2255,14 +2262,55 @@ export function registerModelHandlers(): void {
           const bpe = bytesPerDtype[dtype] ?? 2; // Default to 2 bytes if unknown dtype
           totalBytes += count * bpe;
         }
-        if (totalBytes > 0) return formatSize(totalBytes);
+        if (totalBytes > 0) return totalBytes;
       }
       // Last resort: safetensors.total is param count, assume 2 bytes per param
       const total = m.safetensors?.total;
-      if (typeof total === "number" && total > 0) return formatSize(total * 2);
+      if (typeof total === "number" && total > 0) return total * 2;
     } catch (_) {}
     return undefined;
   }
+
+  /**
+   * A repo that isn't an MLX build (a GGUF, PyTorch or original safetensors
+   * repo): which MLX builds of the same model exist. Hugging Face tags
+   * quantized builds with `base_model:quantized:<base>`, and GGUF repos name
+   * their base the same way. Only builds whose name starts with the base
+   * model's name are offered (no fine-tunes of it). Never substitutes: the
+   * user picks. Null for MLX repos and repos that don't exist.
+   */
+  ipcMain.handle("models:mlxBuildsFor", async (_, repoId: string) => {
+    const id = typeof repoId === "string" ? repoId.trim() : "";
+    if (!/^[\w.-]+\/[\w.-]+$/.test(id)) return null;
+    const headers = buildHfAuthHeaders(getConfiguredHfToken());
+    try {
+      const { response } = await fetchHfPath(`/api/models/${id}`, { headers, signal: AbortSignal.timeout(10000) });
+      if (!response.ok) return null;
+      const info: any = await response.json();
+      const tags: string[] = Array.isArray(info?.tags) ? info.tags : [];
+      if (tags.includes("mlx") || info?.library_name === "mlx") return null;
+      const format: "gguf" | "pytorch" | "safetensors" = tags.includes("gguf")
+        ? "gguf"
+        : tags.includes("safetensors") || info?.safetensors
+          ? "safetensors"
+          : "pytorch";
+      const baseTag = tags.find(t => t.startsWith("base_model:quantized:")) ?? tags.find(t => /^base_model:[^:]+\/[^:]+$/.test(t));
+      const base = format === "gguf" && baseTag ? baseTag.replace(/^base_model:(quantized:)?/, "") : id;
+      const params = new URLSearchParams({ sort: "downloads", direction: "-1", limit: "30", "expand[]": "safetensors" });
+      params.append("filter", "mlx");
+      params.append("filter", `base_model:quantized:${base}`);
+      const found = await fetchHfPath(`/api/models?${params}`, { headers, signal: AbortSignal.timeout(10000) });
+      const list: any[] = found.response.ok ? await found.response.json() : [];
+      const baseName = base.split("/")[1].toLowerCase();
+      const builds = (Array.isArray(list) ? list : [])
+        .map(mapHFModel)
+        .filter(m => m.id.split("/")[1]?.toLowerCase().startsWith(baseName))
+        .slice(0, 8);
+      return { id, format, base, builds };
+    } catch {
+      return null;
+    }
+  });
 
   ipcMain.handle(
     "models:searchHF",
