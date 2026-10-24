@@ -1744,7 +1744,21 @@
       "timeToday": "today",
       "timeMonthsAgo": "{n}mo ago",
       "timeYearsAgo": "{n}y ago",
-      "fetchFailed": "Fetch failed"
+      "fetchFailed": "Fetch failed",
+      "fit": {
+        "good": "Runs well",
+        "tight": "Tight",
+        "no": "Needs {gb} GB",
+        "noTitle": "Too big for this Mac's {gb} GB of memory"
+      },
+      "notMlx": {
+        "gguf": "{id} is a GGUF build, which MLX Harness can't run.",
+        "pytorch": "{id} has PyTorch weights, which MLX Harness can't run.",
+        "safetensors": "{id} is the original model, not an MLX build.",
+        "builds": "MLX builds of {base}:",
+        "noBuilds": "No MLX build of {base} yet.",
+        "convert": "No MLX build yet. You can make one with the Model Converter in Models → Library & tools."
+      }
     },
     "directories": {
       "title": "Model Scan Directories",

@@ -1744,7 +1744,21 @@
       "timeToday": "今天",
       "timeMonthsAgo": "{n}个月前",
       "timeYearsAgo": "{n}年前",
-      "fetchFailed": "获取失败"
+      "fetchFailed": "获取失败",
+      "fit": {
+        "good": "运行流畅",
+        "tight": "勉强",
+        "no": "需要 {gb} GB",
+        "noTitle": "超出这台 Mac 的 {gb} GB 内存"
+      },
+      "notMlx": {
+        "gguf": "{id} 是 GGUF 版本,MLX Harness 无法运行。",
+        "pytorch": "{id} 是 PyTorch 权重,MLX Harness 无法运行。",
+        "safetensors": "{id} 是原始模型,不是 MLX 版本。",
+        "builds": "{base} 的 MLX 版本:",
+        "noBuilds": "{base} 暂无 MLX 版本。",
+        "convert": "暂无 MLX 版本。可在“模型 → 模型库与工具”中用模型转换器生成。"
+      }
     },
     "directories": {
       "title": "模型扫描目录",

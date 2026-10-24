@@ -112,8 +112,13 @@ declare global {
             tags: string[];
             pipelineTag?: string;
             size?: string;
+            sizeBytes?: number;
           }>
         >;
+        mlxBuildsFor?: (repoId: string) => Promise<{
+          id: string; format: 'gguf' | 'pytorch' | 'safetensors'; base: string;
+          builds: Array<{ id: string; author: string; downloads: number; likes: number; lastModified: string; tags: string[]; pipelineTag?: string; size?: string; sizeBytes?: number }>;
+        } | null>;
         fetchReadme: (repoId: string) => Promise<string | null>;
         getRecentModels: (author: string, sort: 'createdAt' | 'lastModified') => Promise<Array<{
           id: string; author: string; downloads: number; likes: number;

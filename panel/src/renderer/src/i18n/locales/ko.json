@@ -1744,7 +1744,21 @@
       "timeToday": "오늘",
       "timeMonthsAgo": "{n}개월 전",
       "timeYearsAgo": "{n}년 전",
-      "fetchFailed": "가져오기 실패"
+      "fetchFailed": "가져오기 실패",
+      "fit": {
+        "good": "잘 실행됨",
+        "tight": "빠듯함",
+        "no": "{gb}GB 필요",
+        "noTitle": "이 Mac의 메모리 {gb}GB에는 너무 큽니다"
+      },
+      "notMlx": {
+        "gguf": "{id}은(는) GGUF 빌드라 MLX Harness에서 실행할 수 없습니다.",
+        "pytorch": "{id}은(는) PyTorch 가중치라 MLX Harness에서 실행할 수 없습니다.",
+        "safetensors": "{id}은(는) 원본 모델이며 MLX 빌드가 아닙니다.",
+        "builds": "{base}의 MLX 빌드:",
+        "noBuilds": "아직 {base}의 MLX 빌드가 없습니다.",
+        "convert": "아직 MLX 빌드가 없습니다. 모델 → 라이브러리 및 도구의 모델 변환기로 만들 수 있습니다."
+      }
     },
     "directories": {
       "title": "모델 스캔 디렉토리",

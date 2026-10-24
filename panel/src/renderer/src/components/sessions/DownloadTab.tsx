@@ -4,6 +4,8 @@ import { normalizeHfEndpointSetting } from '../../../../shared/hfSettings'
 import { HF_MODEL_FEED_AUTHORS, type HfModelFeedSort } from '../../../../shared/hfModelFeed'
 import { useTranslation } from '../../i18n'
 import type { DownloadModelType } from '../../../../shared/modelDiscoveryNavigation'
+import { memoryToRunWell, searchFit } from '../../../../shared/searchFit'
+import { useMac } from '../media/hooks'
 
 interface HFModel {
   id: string
@@ -15,8 +17,14 @@ interface HFModel {
   tags: string[]
   pipelineTag?: string
   size?: string
+  sizeBytes?: number
   note?: string
 }
+
+/** A repo the user named that isn't an MLX build, and MLX builds of the same model. */
+interface MlxAlternatives { id: string; format: 'gguf' | 'pytorch' | 'safetensors'; base: string; builds: HFModel[] }
+
+const REPO_ID = /^[\w.-]+\/[\w.-]+$/
 
 interface DownloadTabProps {
   onDownloadComplete: () => void
@@ -51,6 +59,8 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
   const [sortBy, setSortBy] = useState<string>('downloads')
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
   const [searchResults, setSearchResults] = useState<HFModel[]>([])
+  const [alternatives, setAlternatives] = useState<MlxAlternatives | null>(null)
+  const mac = useMac()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -234,6 +244,7 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
   // Debounced search
   const doSearch = useCallback(async (query: string, sort: string, dir: 'desc' | 'asc', type: 'text' | 'image' = 'text') => {
     const revision = ++searchRevision.current
+    setAlternatives(null)
     if (!query.trim()) {
       setSearchResults([])
       setError(null)
@@ -241,6 +252,12 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
     }
     setLoading(true)
     setError(null)
+    // A repo id that isn't MLX (a GGUF or the original weights): look for MLX builds of it.
+    if (type === 'text' && REPO_ID.test(query.trim())) {
+      window.api.models.mlxBuildsFor?.(query.trim())
+        .then(alt => { if (revision === searchRevision.current) setAlternatives(alt ?? null) })
+        .catch(() => undefined)
+    }
     try {
       const results = await window.api.models.searchHF(query.trim(), sort, dir, type === 'image' ? 'image' : undefined)
       if (revision !== searchRevision.current) return
@@ -258,6 +275,7 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
   const handleSearch = useCallback((query: string) => {
     searchRevision.current++
     setSearchResults([])
+    setAlternatives(null)
     setLoading(false)
     setSearchQuery(query)
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
@@ -379,6 +397,21 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
 
   const activeCollection = collectionModels[collectionKey] || []
   const displayModels = searchQuery.trim() ? searchResults : activeCollection
+  const selectModel = (model: HFModel) => {
+    const request = ++readmeRequestRef.current
+    setSelectedModel(model)
+    setSelectedReadme(null)
+    setLoadingReadme(true)
+    window.api.models.fetchReadme(model.id).then(text => {
+      if (request !== readmeRequestRef.current) return
+      setSelectedReadme(text || t('sessions.download.noReadme'))
+      setLoadingReadme(false)
+    }).catch(() => {
+      if (request !== readmeRequestRef.current) return
+      setSelectedReadme(t('sessions.download.readmeLoadFailed'))
+      setLoadingReadme(false)
+    })
+  }
   const isCollectionLoading = !searchQuery.trim() && !!loadingCollectionTabs[collectionKey]
 
   return (
@@ -601,6 +634,31 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
             </div>
           )}
           <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+            {searchQuery.trim() && alternatives && (
+              <div className="mb-2 rounded border border-border bg-[rgb(var(--bg-2-rgb))] p-3 text-xs" data-vmlx-section="mlx-alternatives">
+                <p className="text-foreground">
+                  {t(`sessions.download.notMlx.${alternatives.format}`, { id: alternatives.id })}
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  {alternatives.builds.length > 0
+                    ? t('sessions.download.notMlx.builds', { base: alternatives.base })
+                    : alternatives.format === 'gguf'
+                      ? t('sessions.download.notMlx.noBuilds', { base: alternatives.base })
+                      : t('sessions.download.notMlx.convert')}
+                </p>
+                {alternatives.builds.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {alternatives.builds.map(model => (
+                      <div key={model.id} onClick={() => selectModel(model)}
+                        className={`cursor-pointer ${selectedModel?.id === model.id ? 'ring-1 ring-primary rounded' : ''}`}>
+                        <ModelCard model={model} memoryGB={mac?.memoryGB} isDownloading={downloadingRepos.has(model.id)}
+                          isDownloaded={localModelIds.has(model.id)} onDownload={() => handleDownload(model.id)} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {isCollectionLoading ? (
               <p className="text-sm text-muted-foreground py-4 text-center">{t('sessions.download.loadingModels')}</p>
             ) : !searchQuery.trim() && collectionErrors[collectionKey] ? (
@@ -621,29 +679,16 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
                   {t('common.retry')}
                 </button>
               </div>
-            ) : displayModels.length === 0 ? (
+            ) : displayModels.length === 0 ? (alternatives && searchQuery.trim() ? null :
               <p className="text-sm text-muted-foreground py-4 text-center">
                 {modelType === 'image' ? t('sessions.download.noImageModels') : searchQuery.trim() ? t('sessions.download.noMlxModels') : t('sessions.download.noFeedModels')}
               </p>
             ) : (
               displayModels.map(model => (
-                <div key={model.id} onClick={() => {
-                  const request = ++readmeRequestRef.current
-                  setSelectedModel(model)
-                  setSelectedReadme(null)
-                  setLoadingReadme(true)
-                  window.api.models.fetchReadme(model.id).then(text => {
-                    if (request !== readmeRequestRef.current) return
-                    setSelectedReadme(text || t('sessions.download.noReadme'))
-                    setLoadingReadme(false)
-                  }).catch(() => {
-                    if (request !== readmeRequestRef.current) return
-                    setSelectedReadme(t('sessions.download.readmeLoadFailed'))
-                    setLoadingReadme(false)
-                  })
-                }} className={`cursor-pointer ${selectedModel?.id === model.id ? 'ring-1 ring-primary rounded' : ''}`}>
+                <div key={model.id} onClick={() => selectModel(model)} className={`cursor-pointer ${selectedModel?.id === model.id ? 'ring-1 ring-primary rounded' : ''}`}>
                   <ModelCard
                     model={model}
+                    memoryGB={mac?.memoryGB}
                     dateField={!searchQuery.trim() && modelType === 'text' ? feedSort : undefined}
                     isDownloading={downloadingRepos.has(model.id)}
                     isDownloaded={localModelIds.has(model.id)}
@@ -735,8 +780,9 @@ function ReadmeContent({ markdown }: { markdown: string }) {
   )
 }
 
-function ModelCard({ model, isDownloading, isDownloaded, onDownload, dateField }: {
+function ModelCard({ model, isDownloading, isDownloaded, onDownload, dateField, memoryGB }: {
   model: HFModel
+  memoryGB?: number
   dateField?: HfModelFeedSort
   isDownloading: boolean
   isDownloaded: boolean
@@ -754,8 +800,9 @@ function ModelCard({ model, isDownloading, isDownloaded, onDownload, dateField }
               {shortName}
             </div>
             <div className="text-xs text-muted-foreground">{model.author}</div>
-            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-muted-foreground [&>span]:whitespace-nowrap">
               {model.size && <span title={t('sessions.download.modelSizeTitle')} className="font-semibold text-foreground">{model.size}</span>}
+              <FitBadge sizeBytes={model.sizeBytes} memoryGB={memoryGB} />
               <span title={t('sessions.download.sortDownloads')}>{t('sessions.download.downloadsLabel', { n: formatNumber(model.downloads) })}</span>
               <span title={t('sessions.download.sortLikes')}>{t('sessions.download.likesLabel', { n: model.likes })}</span>
               {timeAgo(dateField === 'createdAt' ? model.createdAt : model.lastModified, t) && <span title={dateField === 'createdAt' ? model.createdAt : model.lastModified}>
@@ -805,5 +852,19 @@ function ModelCard({ model, isDownloading, isDownloaded, onDownload, dateField }
         </div>
       </div>
     </div>
+  )
+}
+
+/** Will it run on this Mac? From the repo's size alone, before any download. */
+function FitBadge({ sizeBytes, memoryGB }: { sizeBytes?: number; memoryGB?: number }) {
+  const { t } = useTranslation()
+  const fit = searchFit(sizeBytes, memoryGB)
+  if (!fit || !sizeBytes) return null
+  const cls = fit === 'good' ? 'bg-success/15 text-success' : fit === 'tight' ? 'bg-warning/15 text-warning' : 'bg-destructive/10 text-destructive'
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${cls}`} data-vmlx-fit={fit}
+      title={fit === 'no' ? t('sessions.download.fit.noTitle', { gb: memoryGB ?? 0 }) : undefined}>
+      {fit === 'no' ? t('sessions.download.fit.no', { gb: memoryToRunWell(sizeBytes) }) : t(`sessions.download.fit.${fit}`)}
+    </span>
   )
 }

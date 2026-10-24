@@ -1744,7 +1744,21 @@
       "timeToday": "今日",
       "timeMonthsAgo": "{n}ヶ月前",
       "timeYearsAgo": "{n}年前",
-      "fetchFailed": "取得に失敗しました"
+      "fetchFailed": "取得に失敗しました",
+      "fit": {
+        "good": "快適に動作",
+        "tight": "ぎりぎり",
+        "no": "{gb} GB 必要",
+        "noTitle": "この Mac のメモリ {gb} GB には大きすぎます"
+      },
+      "notMlx": {
+        "gguf": "{id} は GGUF 形式で、MLX Harness では実行できません。",
+        "pytorch": "{id} は PyTorch の重みで、MLX Harness では実行できません。",
+        "safetensors": "{id} は元のモデルで、MLX 版ではありません。",
+        "builds": "{base} の MLX 版:",
+        "noBuilds": "{base} の MLX 版はまだありません。",
+        "convert": "MLX 版はまだありません。モデル → ライブラリとツールのモデルコンバーターで作成できます。"
+      }
     },
     "directories": {
       "title": "モデルスキャンディレクトリ",
