@@ -1,12 +1,24 @@
 // MLX Harness — Coding Tool Integration IPC
 // Non-destructive config management for Claude Code, Codex CLI, OpenCode,
 // OpenClaw, and Hermes Agent
-import { ipcMain } from 'electron'
-import { execFileSync } from 'child_process'
+import { app, ipcMain } from 'electron'
+import { execFile, execFileSync } from 'child_process'
 import { homedir } from 'os'
 import { join } from 'path'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dump as dumpYAML, load as loadYAML } from 'js-yaml'
+import { LAUNCH_TOOLS, launchPlan, type LaunchToolId } from '../agentLaunch'
+
+/**
+ * Before MLX Harness first edits a user's config file, a copy of it as it was
+ * is kept next to it (never overwritten), so the original can always be put
+ * back by hand. The rolling .bak only holds the previous version.
+ */
+function keepOriginal(path: string): void {
+  const original = `${path}.mlx-harness-original`
+  if (!existsSync(path) || existsSync(original)) return
+  try { copyFileSync(path, original); chmodSync(original, 0o600) } catch {}
+}
 
 // Tag to identify our entries in other tools' configs. New entries are written
 // as '_mlxharness' (provider keys 'mlxharness', API-key placeholder
@@ -147,6 +159,7 @@ function safeReadTOML(path: string): string | null {
 }
 
 function safeWriteTOML(path: string, content: string): void {
+  keepOriginal(path)
   if (existsSync(path)) {
     try { copyFileSync(path, path + '.bak') } catch {}
   }
@@ -158,6 +171,7 @@ function safeWriteTOML(path: string, content: string): void {
 
 function safeWriteJSON(path: string, data: any): void {
   // Backup before writing
+  keepOriginal(path)
   if (existsSync(path)) {
     try { copyFileSync(path, path + '.bak') } catch {}
   }
@@ -660,6 +674,7 @@ function readHermesConfig(path: string, forDisplay: boolean): any {
 }
 
 function writeHermesConfig(path: string, doc: any): void {
+  keepOriginal(path)
   if (existsSync(path)) {
     try { copyFileSync(path, path + '.bak') } catch {}
   }
@@ -767,9 +782,49 @@ export function registerCodingToolHandlers(): void {
         configured: entries.length > 0,
         configPath: tool.configPath,
         entries,
+        launchable: (LAUNCH_TOOLS as readonly string[]).includes(id),
       }
     }
+    // Run-only tools: no config of theirs is edited, they're started from Terminal.
+    for (const [id, bin] of [['aider', 'aider'], ['qwen-code', 'qwen']] as const) {
+      result[id] = { installed: commandExists(bin), configured: false, configPath: '', entries: [], launchable: true }
+    }
     return result
+  })
+
+  // Open in Terminal: the tool with this model, for that window only.
+  ipcMain.handle('tools:launchCodingTool', async (_, toolId: string, baseUrl: string, modelName: string) => {
+    if (!(LAUNCH_TOOLS as readonly string[]).includes(toolId)) return { success: false, error: 'Unknown tool' }
+    if (process.platform !== 'darwin') return { success: false, error: 'Opening Terminal works on macOS only.' }
+    if (typeof modelName !== 'string' || !modelName.trim()) return { success: false, error: 'Start a model first.' }
+    let port = 8080
+    try { port = Number(new URL(String(baseUrl)).port) || 80 } catch { return { success: false, error: 'Invalid address' } }
+    // Always this Mac's loopback: the agent runs here, even when the gateway is shared.
+    const base = `http://127.0.0.1:${port}`
+    const tool = toolId as LaunchToolId
+    const root = join(app.getPath('userData'), 'connect', tool)
+    try {
+      const limits = await getCodingToolModelLimits(base, modelName)
+      const plan = launchPlan(tool, {
+        base, model: modelName, key: await localApiKey(), contextWindow: limits.context, root, cwd: homedir(),
+      })
+      mkdirSync(root, { recursive: true, mode: 0o700 })
+      try { chmodSync(root, 0o700) } catch {}
+      for (const [path, content] of Object.entries(plan.files)) {
+        mkdirSync(path.substring(0, path.lastIndexOf('/')), { recursive: true, mode: 0o700 })
+        writeFileSync(path, content, { encoding: 'utf-8', mode: 0o600 })
+        try { chmodSync(path, 0o600) } catch {}
+      }
+      if (tool === 'claude-code') mkdirSync(join(root, 'config'), { recursive: true, mode: 0o700 })
+      const script = join(root, 'launch.command')
+      writeFileSync(script, plan.script, { encoding: 'utf-8', mode: 0o700 })
+      try { chmodSync(script, 0o700) } catch {}
+      await new Promise<void>((resolve, reject) =>
+        execFile('/usr/bin/open', ['-a', 'Terminal', script], { timeout: 10000 }, err => (err ? reject(err) : resolve())))
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: (e as Error).message }
+    }
   })
 
   ipcMain.handle('tools:installCodingTool', async (_, toolId: string) => {
@@ -904,4 +959,21 @@ export function registerCodingToolHandlers(): void {
       },
     }
   })
+}
+
+/**
+ * A key the local API accepts: the first local model's own key, if any model
+ * has one (the gateway then asks for one), else a placeholder it ignores.
+ */
+async function localApiKey(): Promise<string> {
+  try {
+    // Loaded here, not at import: the database needs the running app.
+    const { db } = await import('../database')
+    for (const session of db.getSessions()) {
+      if (session.type === 'remote') continue
+      const cfg = session.config ? JSON.parse(session.config) : {}
+      if (typeof cfg.apiKey === 'string' && cfg.apiKey) return cfg.apiKey
+    }
+  } catch {}
+  return API_KEY_PLACEHOLDER
 }

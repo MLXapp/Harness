@@ -599,6 +599,7 @@ const api = {
     addCodingToolConfig: (toolId: string, baseUrl: string, modelName: string, port: number | null) => ipcRenderer.invoke('tools:addCodingToolConfig', toolId, baseUrl, modelName, port),
     removeCodingToolConfig: (toolId: string, label: string) => ipcRenderer.invoke('tools:removeCodingToolConfig', toolId, label),
     getConfigSnippets: (baseUrl: string, modelName: string) => ipcRenderer.invoke('tools:getConfigSnippets', baseUrl, modelName),
+    launchCodingTool: (toolId: string, baseUrl: string, modelName: string) => ipcRenderer.invoke('tools:launchCodingTool', toolId, baseUrl, modelName),
   },
 
   // Session management

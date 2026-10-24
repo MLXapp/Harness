@@ -157,7 +157,15 @@
       "mergeIntoFile": "Fusiona esto con el archivo:",
       "copyFilePath": "Copiar ruta del archivo",
       "copyConfig": "Copiar configuración",
-      "startServerHint": "Inicia un servidor de modelo para habilitar los botones de configuración y las instrucciones de configuración manual"
+      "startServerHint": "Inicia un servidor de modelo para habilitar los botones de configuración y las instrucciones de configuración manual",
+      "launch": "Abrir en Terminal",
+      "launchTitle": "Inicia {tool} con {model} en una nueva ventana de Terminal. Sus propios ajustes no cambian.",
+      "launchHint": "Abrir en Terminal usa este modelo solo en esa ventana. Configurar automáticamente cambia los ajustes de la herramienta (el archivo original se guarda como .mlx-harness-original).",
+      "launched": "Abierto en Terminal.",
+      "launchFailed": "No se pudo abrir Terminal.",
+      "installWith": "Instalar con",
+      "aiderDesc": "Programación en pareja en tu terminal",
+      "qwenDesc": "El agente de programación de Qwen para la terminal"
     },
     "lanKey": "Clave de red",
     "newLanKey": "Nueva clave",

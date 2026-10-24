@@ -783,9 +783,11 @@ declare global {
               configured: boolean;
               configPath: string;
               entries: Array<{ label: string; baseUrl: string }>;
+              launchable?: boolean;
             }
           >
         >;
+        launchCodingTool?: (toolId: string, baseUrl: string, modelName: string) => Promise<{ success: boolean; error?: string }>;
         installCodingTool: (
           toolId: string,
         ) => Promise<{ success: boolean; error?: string }>;

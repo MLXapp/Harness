@@ -157,7 +157,15 @@
       "mergeIntoFile": "将以下内容合并到文件：",
       "copyFilePath": "复制文件路径",
       "copyConfig": "复制配置",
-      "startServerHint": "启动模型服务器以启用配置按钮和手动设置说明"
+      "startServerHint": "启动模型服务器以启用配置按钮和手动设置说明",
+      "launch": "在终端中打开",
+      "launchTitle": "在新的终端窗口中用 {model} 启动 {tool}。它自己的设置保持不变。",
+      "launchHint": "“在终端中打开”只在该窗口中使用此模型。“自动配置”会更改工具自己的设置(原文件会保存为 .mlx-harness-original)。",
+      "launched": "已在终端中打开。",
+      "launchFailed": "无法打开终端。",
+      "installWith": "安装命令",
+      "aiderDesc": "终端里的结对编程",
+      "qwenDesc": "Qwen 的终端编程智能体"
     },
     "lanKey": "网络密钥",
     "newLanKey": "新密钥",
