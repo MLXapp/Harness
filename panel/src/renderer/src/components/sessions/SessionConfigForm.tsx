@@ -215,7 +215,7 @@ export const DEFAULT_CONFIG: SessionConfig = {
   additionalArgs: '',
   enableJit: true,
   logLevel: 'INFO',
-  corsOrigins: '*',
+  corsOrigins: '',
   maxContextLength: 0,
   imageMode: undefined,
   imageQuantize: undefined,
@@ -859,7 +859,7 @@ export function SessionConfigForm({ config, onChange, onReset, detectedCacheType
           </select>
         </Field>
         <Field label={t('sessions.config.corsOrigins')} tooltip={t('sessions.config.corsOriginsTooltip')}>
-          <input type="text" value={config.corsOrigins || '*'} onChange={e => onChange('corsOrigins', e.target.value)} placeholder={t('sessions.config.corsPlaceholder')} className="cfg-input" />
+          <input type="text" value={config.corsOrigins === '*' ? '' : (config.corsOrigins || '')} onChange={e => onChange('corsOrigins', e.target.value)} placeholder={t('sessions.config.corsPlaceholder')} className="cfg-input" spellCheck={false} />
         </Field>
       </Section>
 

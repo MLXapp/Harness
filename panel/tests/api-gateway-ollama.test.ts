@@ -580,7 +580,8 @@ describe("Gateway passthrough contracts for non-Ollama APIs", () => {
     );
     expect(source).toContain("path: clientReq.url");
     expect(source).toContain("method: clientReq.method");
-    expect(source).toContain("...clientReq.headers");
+    // Client headers pass through, minus Origin/Referer (the gateway already decided about the page).
+    expect(source).toContain("...withoutBrowserHeaders(clientReq.headers)");
     expect(source).toContain("if (body.length > 0 && !this.writeProxyBody(proxyReq, body))");
   });
 

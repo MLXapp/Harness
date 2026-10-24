@@ -6880,7 +6880,7 @@ _rate_limiter = RateLimiter(requests_per_minute=60, enabled=False)
 
 # Settings configured via CLI (set in cli.py serve_command)
 _log_level: str = "INFO"
-_allowed_origins: str = "*"
+_allowed_origins: str = ""
 _enable_jit: bool = False
 _jang_metadata: dict | None = None  # Cached at model load time for /health
 _model_type: str = "text"  # "text" or "image" — auto-detected from model directory

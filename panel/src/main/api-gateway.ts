@@ -9,6 +9,8 @@
 //   Ollama /api/* endpoints translated to OpenAI format before forwarding.
 
 import { GATEWAY_SINGLE_MODEL_MODE_KEY, isGatewaySettingEnabled } from '../shared/gatewaySettingsKeys'
+import { checkGatewayRequest, parseList, type GatewayPolicy } from "./gatewaySecurity";
+import { randomBytes } from "crypto";
 import {
   ClientRequest,
   createServer,
@@ -195,6 +197,45 @@ export class ApiGateway extends EventEmitter {
     const match = value.match(/^Bearer\s+(.+)$/i);
     return match?.[1]?.trim() || undefined;
   }
+
+  /** The key other devices use when the gateway is shared on the network (made on first use). */
+  lanKey(create = false): string | undefined {
+    let key = db.getSetting("gateway_lan_key") || undefined;
+    if (!key && create) {
+      key = `mlxh-${randomBytes(24).toString("base64url")}`;
+      db.setSetting("gateway_lan_key", key);
+    }
+    return key;
+  }
+
+  /** A new network key; devices using the old one must be updated. */
+  rotateLanKey(): string {
+    const key = `mlxh-${randomBytes(24).toString("base64url")}`;
+    db.setSetting("gateway_lan_key", key);
+    return key;
+  }
+
+  private policy(): GatewayPolicy {
+    return {
+      bindHost: this.host,
+      allowedOrigins: parseList(db.getSetting("gateway_allowed_origins")),
+      trustedHosts: parseList(db.getSetting("gateway_trusted_hosts")),
+    };
+  }
+
+  /** Any key this gateway accepts: a session's key or the network key (Bearer or x-api-key). */
+  private hasValidKey(req: IncomingMessage): boolean {
+    const header = req.headers["x-api-key"];
+    const candidates = [this.bearerCredential(req), Array.isArray(header) ? header[0] : header].filter((v): v is string => !!v);
+    if (candidates.length === 0) return false;
+    const keys = this.gatewayApiKeys();
+    const lan = this.lanKey();
+    if (lan) keys.add(lan);
+    return candidates.some(c => keys.has(c));
+  }
+
+  /** CORS headers for each response, decided once per request in handleRequest. */
+  private corsFor = new WeakMap<ServerResponse, OutgoingHttpHeaders>();
 
   private sendUnauthorized(res: ServerResponse): void {
     this.sendJson(res, 401, {
@@ -449,7 +490,14 @@ export class ApiGateway extends EventEmitter {
   ): boolean {
     if (!this.responseWritable(res)) return false;
     try {
-      res.writeHead(status, headers);
+      // CORS is the gateway's own decision: drop what a backend sent and add
+      // the headers this request earned (none for native clients).
+      const merged: OutgoingHttpHeaders = {};
+      for (const [k, v] of Object.entries(headers ?? {})) {
+        if (!/^access-control-/i.test(k) && !(k.toLowerCase() === "vary" && v === "Origin")) merged[k] = v;
+      }
+      Object.assign(merged, this.corsFor.get(res) ?? {});
+      res.writeHead(status, merged);
       return true;
     } catch (err) {
       if (this.isClientDisconnectError(err)) return false;
@@ -707,18 +755,31 @@ export class ApiGateway extends EventEmitter {
     const url = req.url || "/";
     const method = req.method || "GET";
 
+    // ── Who is asking: this Mac's own names only, no foreign web pages,
+    // and a key for other devices (gatewaySecurity.ts) ──
+    const originHeader = req.headers.origin;
+    const verdict = checkGatewayRequest(
+      {
+        host: req.headers.host,
+        origin: Array.isArray(originHeader) ? originHeader[0] : originHeader,
+        remoteAddress: req.socket?.remoteAddress,
+        hasValidKey: this.hasValidKey(req),
+      },
+      this.policy(),
+      method === "OPTIONS",
+    );
+    if (!verdict.ok) {
+      req.resume();
+      this.sendJson(res, verdict.status, {
+        error: { message: verdict.message, type: verdict.status === 401 ? "authentication_error" : "permission_error", code: verdict.code },
+      });
+      return;
+    }
+    this.corsFor.set(res, verdict.cors);
+
     // ── CORS preflight (Open WebUI, browser clients) ──
     if (method === "OPTIONS") {
-      if (
-        !this.writeHeadResponse(res, 204, {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD",
-          "Access-Control-Allow-Headers":
-            "Content-Type, Authorization, X-Requested-With",
-          "Access-Control-Max-Age": "86400",
-        })
-      )
-        return;
+      if (!this.writeHeadResponse(res, 204, {})) return;
       this.endResponse(res);
       return;
     }
@@ -1252,7 +1313,7 @@ export class ApiGateway extends EventEmitter {
       path: clientReq.url,
       method: clientReq.method,
       headers: {
-        ...clientReq.headers,
+        ...withoutBrowserHeaders(clientReq.headers),
         host: `${session.host}:${session.port}`,
       },
       timeout: this.effectiveGatewayProxyTimeoutMs(session, body),
@@ -2693,7 +2754,6 @@ export class ApiGateway extends EventEmitter {
         !this.writeHeadResponse(res, status, {
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(json),
-          "Access-Control-Allow-Origin": "*",
         })
       )
         return;
@@ -2746,3 +2806,14 @@ export class ApiGateway extends EventEmitter {
 
 // Singleton
 export const apiGateway = new ApiGateway();
+
+/**
+ * Headers forwarded to an engine: the gateway already decided about the web
+ * page (Origin), so the engine sees a native request from this Mac.
+ */
+function withoutBrowserHeaders(headers: IncomingMessage["headers"]): IncomingMessage["headers"] {
+  const out: IncomingMessage["headers"] = { ...headers };
+  delete out.origin;
+  delete out.referer;
+  return out;
+}
