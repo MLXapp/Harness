@@ -332,7 +332,7 @@ export function ApiDashboard() {
               <div className="min-w-0 flex-1 space-y-1">
                 <input value={origins} onChange={e => setOrigins(e.target.value)} onBlur={() => void saveOrigins()}
                   onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur() }}
-                  placeholder="https://chat.example.com" spellCheck={false} data-vmlx-control="gateway-origins"
+                  placeholder={t('api.webPagesPlaceholder')} spellCheck={false} data-vmlx-control="gateway-origins"
                   className="w-full px-2 py-1 bg-background rounded border border-border font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
                 <p className="text-[11px] text-muted-foreground">{t('api.webPagesHint')}</p>
               </div>

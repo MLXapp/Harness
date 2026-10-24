@@ -171,7 +171,8 @@
     "newLanKey": "新密钥",
     "lanKeyHint": "其他设备需将其作为 API 密钥发送。这台 Mac 本身无需密钥。",
     "webPages": "网页",
-    "webPagesHint": "这台 Mac 上的页面(localhost)和应用内网页视图始终可以使用 API。其他网站仅限在此列出的(用逗号分隔)。"
+    "webPagesHint": "这台 Mac 上的页面(localhost)和应用内网页视图始终可以使用 API。其他网站仅限在此列出的(用逗号分隔)。",
+    "webPagesPlaceholder": "https://chat.example.com"
   },
   "endpoints": {
     "title": "端点",

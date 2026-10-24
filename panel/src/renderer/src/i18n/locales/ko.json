@@ -171,7 +171,8 @@
     "newLanKey": "새 키",
     "lanKeyHint": "다른 기기는 이것을 API 키로 보냅니다. 이 Mac에서는 필요 없습니다.",
     "webPages": "웹 페이지",
-    "webPagesHint": "이 Mac의 페이지(localhost)와 앱 웹뷰는 항상 API를 사용할 수 있습니다. 다른 사이트는 여기에 쉼표로 구분해 적은 것만 허용됩니다."
+    "webPagesHint": "이 Mac의 페이지(localhost)와 앱 웹뷰는 항상 API를 사용할 수 있습니다. 다른 사이트는 여기에 쉼표로 구분해 적은 것만 허용됩니다.",
+    "webPagesPlaceholder": "https://chat.example.com"
   },
   "endpoints": {
     "title": "엔드포인트",
