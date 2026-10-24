@@ -202,12 +202,17 @@ class ToolCallGrammar:
     def __call__(self, tokens: Any, logits: Any) -> Any:
         if self.broken:
             return logits
-        generated = _generated(tokens)[1:]
-        if len(generated) < self.seen:  # a fresh context (resumed request): start over, unconstrained
-            self.seen, self.active = len(generated), False
-        for token in generated[self.seen:]:
-            self._advance(token)
-        self.seen = len(generated)
+        try:
+            count = max(len(tokens) - 1, 0)
+        except Exception:
+            return logits
+        if count < self.seen:  # a fresh context (resumed request): start over, unconstrained
+            self.seen, self.active = count, False
+        if count > self.seen:
+            # Only the new tokens are read (the context can be long).
+            for token in _generated(tokens[1 + self.seen:]):
+                self._advance(token)
+            self.seen = count
         if not self.active:
             return logits
         try:
