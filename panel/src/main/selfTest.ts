@@ -188,6 +188,33 @@ export async function runSelfTest(out: string, getWindow: () => BrowserWindow | 
     server.close()
   }
 
+  await check('workspace: a reply\'s site runs in the preview frame', async () => {
+    const r = await getWindow()!.webContents.executeJavaScript(`(async () => {
+      const files = [
+        { path: 'index.html', content: '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><h1>Hi</h1><script src="script.js"></script></body></html>' },
+        { path: 'style.css', content: 'h1 { color: rgb(1, 2, 3); }' },
+        { path: 'script.js', content: 'parent.postMessage({ selfTest: getComputedStyle(document.querySelector("h1")).color }, "*")' },
+      ]
+      const pub = await window.api.workspace.publish('self-test', 'm1', files, 'index.html')
+      if (!pub.ok) return { error: pub.error || 'publish failed' }
+      const got = await new Promise(resolve => {
+        const frame = document.createElement('iframe')
+        frame.setAttribute('sandbox', 'allow-scripts allow-same-origin')
+        frame.style.cssText = 'position:fixed;width:10px;height:10px;opacity:0;left:-20px'
+        const timer = setTimeout(() => resolve('timeout'), 8000)
+        window.addEventListener('message', e => { if (e.data && e.data.selfTest) { clearTimeout(timer); frame.remove(); resolve(e.data.selfTest) } })
+        frame.src = pub.url
+        document.body.appendChild(frame)
+      })
+      const disk = await window.api.models.diskFree()
+      return { url: pub.url, got, disk: typeof disk.freeBytes }
+    })()`)
+    assert(!r.error, r.error)
+    assert(r.got === 'rgb(1, 2, 3)', `the page's stylesheet and script did not run (${r.got})`)
+    assert(r.disk === 'number', 'free disk space did not answer')
+    return r.url
+  })
+
   await check('MLX Node yield watcher runs', async () => {
     const { evaluateYield } = await import('./mlxNodeYield')
     await evaluateYield()

@@ -1,0 +1,998 @@
+{
+ "checked": "2026-10-25",
+ "models": [
+  {
+   "id": "qwen3.8-27b",
+   "name": "Qwen3.8 27B",
+   "maker": "Qwen",
+   "category": "general",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3.8-27B-4bit",
+     "bytes": 16081490933
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Qwen3.8-27B-8bit",
+     "bytes": 29531521322
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Qwen3.8-27B-bf16",
+     "bytes": 54743806677
+    },
+    {
+     "kind": "abliterated",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3.8-27B-OBLITERATED-OptiQ-4bit",
+     "bytes": 20681824044
+    }
+   ]
+  },
+  {
+   "id": "qwen3.8-flash-next",
+   "name": "Qwen3.8 Flash Next",
+   "maker": "Qwen",
+   "category": "general",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3.8-Flash-Next-4bit",
+     "bytes": 111546653418
+    }
+   ]
+  },
+  {
+   "id": "qwen3.6-35b-a3b",
+   "name": "Qwen3.6 35B-A3B",
+   "maker": "Qwen",
+   "category": "general",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3.6-35B-A3B-4bit",
+     "bytes": 20429169263
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/Qwen3.6-35B-A3B-5bit",
+     "bytes": 24758968275
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Qwen3.6-35B-A3B-6bit",
+     "bytes": 29088768041
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Qwen3.6-35B-A3B-8bit",
+     "bytes": 37748367994
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Qwen3.6-35B-A3B-bf16",
+     "bytes": 70241335712
+    },
+    {
+     "kind": "abliterated",
+     "label": "4.4-bit",
+     "repo": "mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq",
+     "bytes": 21219000234
+    }
+   ]
+  },
+  {
+   "id": "qwen3.6-27b",
+   "name": "Qwen3.6 27B",
+   "maker": "Qwen",
+   "category": "general",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3.6-27B-4bit",
+     "bytes": 16081490064
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/Qwen3.6-27B-5bit",
+     "bytes": 19443159244
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Qwen3.6-27B-6bit",
+     "bytes": 22804828230
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Qwen3.6-27B-8bit",
+     "bytes": 29528166726
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Qwen3.6-27B-bf16",
+     "bytes": 54740452239
+    },
+    {
+     "kind": "abliterated",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3.6-27B-OBLITERATED-MLX-4bit",
+     "bytes": 15153248023
+    },
+    {
+     "kind": "abliterated",
+     "label": "4.5-bit",
+     "repo": "mlx-community/Huihui-Qwen3.6-27B-abliterated-4.5bit-msq",
+     "bytes": 16973452914
+    }
+   ]
+  },
+  {
+   "id": "gemma-4-31b",
+   "name": "Gemma 4 31B",
+   "maker": "Google",
+   "category": "general",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/gemma-4-31b-it-4bit",
+     "bytes": 18444421751
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/gemma-4-31b-it-5bit",
+     "bytes": 22282197404
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/gemma-4-31b-it-6bit",
+     "bytes": 26119973860
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/gemma-4-31b-it-8bit",
+     "bytes": 33795525490
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/gemma-4-31b-it-bf16",
+     "bytes": 62578656023
+    },
+    {
+     "kind": "abliterated",
+     "label": "4-bit",
+     "repo": "mlx-community/gemma-4-31B-it-uncensored-heretic-4bit",
+     "bytes": 17301748832
+    }
+   ]
+  },
+  {
+   "id": "gemma-4-26b-a4b",
+   "name": "Gemma 4 26B-A4B",
+   "maker": "Google",
+   "category": "general",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/gemma-4-26b-a4b-it-4bit",
+     "bytes": 15373588575
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/gemma-4-26b-a4b-it-5bit",
+     "bytes": 18526697443
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/gemma-4-26b-a4b-it-6bit",
+     "bytes": 21679806248
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/gemma-4-26b-a4b-it-8bit",
+     "bytes": 27986024228
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/gemma-4-26b-a4b-it-bf16",
+     "bytes": 51644318400
+    },
+    {
+     "kind": "abliterated",
+     "label": "4-bit",
+     "repo": "mlx-community/gemma-4-26B-A4B-it-heretic-4bit",
+     "bytes": 15641243835
+    }
+   ]
+  },
+  {
+   "id": "gemma-4-12b",
+   "name": "Gemma 4 12B",
+   "maker": "Google",
+   "category": "general",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/gemma-4-12B-it-4bit",
+     "bytes": 6773372848
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/gemma-4-12B-it-5bit",
+     "bytes": 8267163734
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/gemma-4-12B-it-6bit",
+     "bytes": 9760954674
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/gemma-4-12B-it-8bit",
+     "bytes": 12748536051
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/gemma-4-12B-it-bf16",
+     "bytes": 23951814902
+    }
+   ]
+  },
+  {
+   "id": "gpt-oss-20b",
+   "name": "gpt-oss 20B",
+   "maker": "OpenAI",
+   "category": "general",
+   "vision": false,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "MXFP4 · 8-bit",
+     "repo": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+     "bytes": 12104218243
+    },
+    {
+     "kind": "standard",
+     "label": "MXFP4 · 4-bit",
+     "repo": "mlx-community/gpt-oss-20b-MXFP4-Q4",
+     "bytes": 11206563096
+    },
+    {
+     "kind": "standard",
+     "label": "MXFP4 · 16-bit",
+     "repo": "mlx-community/gpt-oss-20b-mxfp4-bf16",
+     "bytes": 13789262024
+    }
+   ]
+  },
+  {
+   "id": "nemotron-3.5-lightning",
+   "name": "Nemotron 3.5 Lightning 30B-A3B",
+   "maker": "NVIDIA",
+   "category": "general",
+   "vision": false,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit",
+     "bytes": 17792584702
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-8bit",
+     "bytes": 33577122893
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-bf16",
+     "bytes": 63173061210
+    }
+   ]
+  },
+  {
+   "id": "mistral-small-3.2",
+   "name": "Mistral Small 3.2 24B",
+   "maker": "Mistral AI",
+   "category": "general",
+   "vision": false,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit",
+     "bytes": 13277587940
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Mistral-Small-3.2-24B-Instruct-2506-8bit",
+     "bytes": 25063582104
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Mistral-Small-3.2-24B-Instruct-2506-bf16",
+     "bytes": 47162192857
+    }
+   ]
+  },
+  {
+   "id": "llama-3.3-70b",
+   "name": "Llama 3.3 70B",
+   "maker": "Meta",
+   "category": "large",
+   "vision": false,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Llama-3.3-70B-Instruct-4bit",
+     "bytes": 39706010909
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Llama-3.3-70B-Instruct-6bit",
+     "bytes": 57344107797
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Llama-3.3-70B-Instruct-8bit",
+     "bytes": 74982204669
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Llama-3.3-70B-Instruct-bf16",
+     "bytes": 141124845224
+    }
+   ]
+  },
+  {
+   "id": "qwen3-coder-next",
+   "name": "Qwen3 Coder Next",
+   "maker": "Qwen",
+   "category": "coding",
+   "vision": false,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3-Coder-Next-4bit",
+     "bytes": 44855965826
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/Qwen3-Coder-Next-5bit",
+     "bytes": 54808787345
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Qwen3-Coder-Next-6bit",
+     "bytes": 64761608791
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Qwen3-Coder-Next-8bit",
+     "bytes": 84667251703
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Qwen3-Coder-Next-bf16",
+     "bytes": 159360437968
+    }
+   ]
+  },
+  {
+   "id": "qwen3-coder-30b-a3b",
+   "name": "Qwen3 Coder 30B-A3B",
+   "maker": "Qwen",
+   "category": "coding",
+   "vision": false,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit",
+     "bytes": 17197118924
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit",
+     "bytes": 21007306918
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit",
+     "bytes": 24823795856
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit",
+     "bytes": 32456773757
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-bf16",
+     "bytes": 61080282569
+    }
+   ]
+  },
+  {
+   "id": "devstral-small-2",
+   "name": "Devstral Small 2 24B",
+   "maker": "Mistral AI",
+   "category": "coding",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit",
+     "bytes": 15136819784
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/Devstral-Small-2-24B-Instruct-2512-5bit",
+     "bytes": 17999432232
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Devstral-Small-2-24B-Instruct-2512-6bit",
+     "bytes": 20862044708
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Devstral-Small-2-24B-Instruct-2512-8bit",
+     "bytes": 26587269949
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Devstral-Small-2-24B-Instruct-2512-bf16",
+     "bytes": 48056735351
+    }
+   ]
+  },
+  {
+   "id": "qwen3.5-9b",
+   "name": "Qwen3.5 9B",
+   "maker": "Qwen",
+   "category": "small",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3.5-9B-4bit",
+     "bytes": 5977073303
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/Qwen3.5-9B-5bit",
+     "bytes": 7096165810
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Qwen3.5-9B-6bit",
+     "bytes": 8215258652
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Qwen3.5-9B-8bit",
+     "bytes": 10453444655
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Qwen3.5-9B-bf16",
+     "bytes": 18846523408
+    }
+   ]
+  },
+  {
+   "id": "qwen3.5-4b",
+   "name": "Qwen3.5 4B",
+   "maker": "Qwen",
+   "category": "small",
+   "vision": false,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3.5-4B-4bit",
+     "bytes": 3061130647
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Qwen3.5-4B-6bit",
+     "bytes": 4112328395
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Qwen3.5-4B-8bit",
+     "bytes": 5163526059
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Qwen3.5-4B-bf16",
+     "bytes": 9105418715
+    }
+   ]
+  },
+  {
+   "id": "qwen3.5-2b",
+   "name": "Qwen3.5 2B",
+   "maker": "Qwen",
+   "category": "small",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3.5-2B-4bit",
+     "bytes": 1749081927
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/Qwen3.5-2B-5bit",
+     "bytes": 1984241517
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Qwen3.5-2B-6bit",
+     "bytes": 2219401217
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Qwen3.5-2B-8bit",
+     "bytes": 2689720545
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Qwen3.5-2B-bf16",
+     "bytes": 4453336320
+    }
+   ]
+  },
+  {
+   "id": "qwen3.5-0.8b",
+   "name": "Qwen3.5 0.8B",
+   "maker": "Qwen",
+   "category": "small",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3.5-0.8B-4bit",
+     "bytes": 652029391
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/Qwen3.5-0.8B-5bit",
+     "bytes": 746016289
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Qwen3.5-0.8B-6bit",
+     "bytes": 840003151
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Qwen3.5-0.8B-8bit",
+     "bytes": 1027976863
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Qwen3.5-0.8B-bf16",
+     "bytes": 1732797622
+    }
+   ]
+  },
+  {
+   "id": "gemma-4-e4b",
+   "name": "Gemma 4 E4B",
+   "maker": "Google",
+   "category": "small",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/gemma-4-e4b-it-4bit",
+     "bytes": 5179241512
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/gemma-4-e4b-it-5bit",
+     "bytes": 6112825602
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/gemma-4-e4b-it-6bit",
+     "bytes": 7046371311
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/gemma-4-e4b-it-8bit",
+     "bytes": 8913459492
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/gemma-4-e4b-it-bf16",
+     "bytes": 15914877398
+    },
+    {
+     "kind": "abliterated",
+     "label": "8-bit",
+     "repo": "mlx-community/gemma-4-E4B-it-OBLITERATED-mlx-8Bit",
+     "bytes": 8021018624
+    },
+    {
+     "kind": "abliterated",
+     "label": "16-bit",
+     "repo": "mlx-community/gemma-4-E4B-it-OBLITERATED-mlx-fp16",
+     "bytes": 15068503004
+    }
+   ]
+  },
+  {
+   "id": "gemma-4-e2b",
+   "name": "Gemma 4 E2B",
+   "maker": "Google",
+   "category": "small",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/gemma-4-e2b-it-4bit",
+     "bytes": 3583088661
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/gemma-4-e2b-it-5bit",
+     "bytes": 4162066564
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/gemma-4-e2b-it-6bit",
+     "bytes": 4741044371
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/gemma-4-e2b-it-8bit",
+     "bytes": 5899036930
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/gemma-4-e2b-it-bf16",
+     "bytes": 10241242346
+    }
+   ]
+  },
+  {
+   "id": "llama-3.2-3b",
+   "name": "Llama 3.2 3B",
+   "maker": "Meta",
+   "category": "small",
+   "vision": false,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+     "bytes": 1824825759
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Llama-3.2-3B-Instruct-8bit",
+     "bytes": 3422988832
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Llama-3.2-3B-Instruct-bf16",
+     "bytes": 6434709914
+    },
+    {
+     "kind": "abliterated",
+     "label": "6-bit",
+     "repo": "mlx-community/Llama-3.2-3B-Instruct-abliterated-6bit",
+     "bytes": 2627954873
+    }
+   ]
+  },
+  {
+   "id": "phi-4-mini",
+   "name": "Phi-4 mini",
+   "maker": "Microsoft",
+   "category": "small",
+   "vision": false,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Phi-4-mini-instruct-4bit",
+     "bytes": 2180067259
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Phi-4-mini-instruct-6bit",
+     "bytes": 3139022935
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Phi-4-mini-instruct-8bit",
+     "bytes": 4097978555
+    }
+   ]
+  },
+  {
+   "id": "lfm2.5-1.2b",
+   "name": "LFM2.5 1.2B",
+   "maker": "Liquid AI",
+   "category": "small",
+   "vision": false,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/LFM2.5-1.2B-Instruct-4bit",
+     "bytes": 663395788
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/LFM2.5-1.2B-Instruct-5bit",
+     "bytes": 809580046
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/LFM2.5-1.2B-Instruct-6bit",
+     "bytes": 955856434
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/LFM2.5-1.2B-Instruct-8bit",
+     "bytes": 1248409228
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/LFM2.5-1.2B-Instruct-bf16",
+     "bytes": 2345448041
+    }
+   ]
+  },
+  {
+   "id": "olmocr-2-7b",
+   "name": "olmOCR 2 7B",
+   "maker": "Ai2",
+   "category": "vision",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/olmOCR-2-7B-1025-4bit",
+     "bytes": 5653479824
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/olmOCR-2-7B-1025-5bit",
+     "bytes": 6605395621
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/olmOCR-2-7B-1025-6bit",
+     "bytes": 7557306131
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/olmOCR-2-7B-1025-8bit",
+     "bytes": 9461127147
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/olmOCR-2-7B-1025-bf16",
+     "bytes": 16600404450
+    }
+   ]
+  },
+  {
+   "id": "glm-ocr",
+   "name": "GLM-OCR",
+   "maker": "Z.ai",
+   "category": "vision",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/GLM-OCR-4bit",
+     "bytes": 1254097532
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/GLM-OCR-5bit",
+     "bytes": 1338245856
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/GLM-OCR-6bit",
+     "bytes": 1422394182
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/GLM-OCR-8bit",
+     "bytes": 1590690860
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/GLM-OCR-bf16",
+     "bytes": 2221760976
+    }
+   ]
+  },
+  {
+   "id": "qwen3.5-122b-a10b",
+   "name": "Qwen3.5 122B-A10B",
+   "maker": "Qwen",
+   "category": "large",
+   "vision": true,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/Qwen3.5-122B-A10B-4bit",
+     "bytes": 69620619709
+    },
+    {
+     "kind": "standard",
+     "label": "5-bit",
+     "repo": "mlx-community/Qwen3.5-122B-A10B-5bit",
+     "bytes": 84884300335
+    },
+    {
+     "kind": "standard",
+     "label": "6-bit",
+     "repo": "mlx-community/Qwen3.5-122B-A10B-6bit",
+     "bytes": 100147980490
+    },
+    {
+     "kind": "standard",
+     "label": "8-bit",
+     "repo": "mlx-community/Qwen3.5-122B-A10B-8bit",
+     "bytes": 130675341384
+    },
+    {
+     "kind": "standard",
+     "label": "16-bit",
+     "repo": "mlx-community/Qwen3.5-122B-A10B-bf16",
+     "bytes": 245152648929
+    },
+    {
+     "kind": "abliterated",
+     "label": "2.34-bit",
+     "repo": "mlx-community/Qwen3.5-122B-A10B-heretic-v2-2.34bit-msq",
+     "bytes": 43277997148
+    }
+   ]
+  },
+  {
+   "id": "gpt-oss-120b",
+   "name": "gpt-oss 120B",
+   "maker": "OpenAI",
+   "category": "large",
+   "vision": false,
+   "variants": [
+    {
+     "kind": "standard",
+     "label": "MXFP4 · 8-bit",
+     "repo": "mlx-community/gpt-oss-120b-MXFP4-Q8",
+     "bytes": 63414991226
+    },
+    {
+     "kind": "standard",
+     "label": "MXFP4 · 4-bit",
+     "repo": "mlx-community/gpt-oss-120b-MXFP4-Q4",
+     "bytes": 62358100309
+    },
+    {
+     "kind": "standard",
+     "label": "4-bit",
+     "repo": "mlx-community/gpt-oss-120b-4bit",
+     "bytes": 65802508497
+    }
+   ]
+  }
+ ]
+}

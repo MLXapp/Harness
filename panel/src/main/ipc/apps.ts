@@ -53,6 +53,15 @@ export function appsService(): AppsService {
       chatEnabled: (chatId) => db.getSetting(chatKey(chatId)) === '1',
       readConnected: () => { try { const v = JSON.parse(db.getSetting('apps_connected') || '[]'); return Array.isArray(v) ? v.filter((x: unknown) => typeof x === 'string') : [] } catch { return [] } },
       writeConnected: (list) => db.setSetting('apps_connected', JSON.stringify(list.slice(0, 50))),
+      readPending: () => {
+        try {
+          const v = JSON.parse(db.getSetting('apps_pending') || '{}')
+          const out: Record<string, number> = {}
+          if (v && typeof v === 'object') for (const [k, t] of Object.entries(v)) if (typeof t === 'number' && /^[a-z0-9_]{2,40}$/.test(k)) out[k] = t
+          return out
+        } catch { return {} }
+      },
+      writePending: (pending) => db.setSetting('apps_pending', JSON.stringify(pending)),
       readSchemaCache: () => { try { return JSON.parse(db.getSetting('apps_schema_cache') || '{}') } catch { return {} } },
       writeSchemaCache: (cache) => db.setSetting('apps_schema_cache', JSON.stringify(cache)),
       setChatEnabled: (chatId, on) => { if (on) db.setSetting(chatKey(chatId), '1'); else db.deleteSetting(chatKey(chatId)) },
@@ -62,12 +71,28 @@ export function appsService(): AppsService {
       await shell.openExternal(url)
     },
     onStatus: (status) => broadcast(status),
+    onAppsChanged: () => broadcast(service?.status() ?? { state: 'off', via: null }),
   })
+  // Sign-ins still open when the app last quit are watched again.
+  if (service.isConnected()) service.resumePending()
   return service
 }
 
+/** The status the renderer shows: with every featured app's connection. */
+function statusView(status: AppsStatus) {
+  const apps = appsService()
+  const connected = new Set(apps.connectedApps())
+  const pending = new Set(apps.pendingApps())
+  return {
+    ...status,
+    featured: FEATURED_APPS.map(id => ({ id, name: appName(id), connected: connected.has(id), pending: !connected.has(id) && pending.has(id) })),
+  }
+}
+
 function broadcast(status: AppsStatus): void {
-  for (const win of appWindows()) win.webContents.send('apps:status', status)
+  if (!service) return
+  const view = statusView(status)
+  for (const win of appWindows()) win.webContents.send('apps:status', view)
 }
 
 export function registerAppsHandlers(): void {
@@ -79,10 +104,7 @@ export function registerAppsHandlers(): void {
     mkdirSync(dir, { recursive: true })
     return (await shell.openPath(dir)) === ''
   })
-  ipcMain.handle('apps:status', () => {
-    const connected = new Set(apps.connectedApps())
-    return { ...apps.status(), featured: FEATURED_APPS.map(id => ({ id, name: appName(id), connected: connected.has(id) })) }
-  })
+  ipcMain.handle('apps:status', () => statusView(apps.status()))
   ipcMain.handle('apps:connect', () => apps.connectOAuth())
   ipcMain.handle('apps:connectKey', (_e, key: string) => apps.connectWithKey(typeof key === 'string' ? key : ''))
   ipcMain.handle('apps:cancel', () => { apps.cancelSignIn(); return apps.status() })
@@ -94,6 +116,10 @@ export function registerAppsHandlers(): void {
   ipcMain.handle('apps:checkApp', async (_e, toolkit: string) => {
     if (typeof toolkit !== 'string' || !/^[a-z0-9_]{2,40}$/.test(toolkit)) return { ok: false, connected: false }
     try { return await apps.checkApp(toolkit) } catch (err: any) { return { ok: false, connected: false, message: String(err?.message ?? err) } }
+  })
+  ipcMain.handle('apps:removeApp', (_e, toolkit: string) => {
+    if (typeof toolkit === 'string' && /^[a-z0-9_]{2,40}$/.test(toolkit)) apps.removeApp(toolkit)
+    return statusView(apps.status())
   })
   ipcMain.handle('apps:rules', () => apps.rules())
   ipcMain.handle('apps:setRule', (_e, toolkit: string, rule: AppRule) => {

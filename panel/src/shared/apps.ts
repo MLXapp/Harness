@@ -6,5 +6,5 @@ export interface AppsStatusView {
   via: 'oauth' | 'key' | null
   error?: string
   toolCount?: number
-  featured?: Array<{ id: string; name: string; connected?: boolean }>
+  featured?: Array<{ id: string; name: string; connected?: boolean; pending?: boolean }>
 }

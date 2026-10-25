@@ -169,6 +169,7 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
         return { status: 'started', path: `${MODELS_DIR}/${repoId}` }
       },
       cancelDownload: async () => ({ success: true }),
+      diskFree: async () => ({ freeBytes: 412e9, dir: `${MODELS_DIR}` }),
       getDownloadStatus: async () => ({ active: null, activeAll: [], queue: [], completed: [] }),
       getDownloadDir: async () => downloadDir,
       setDownloadDir: async (dir: string) => { downloadDir = dir; return { success: true } },
@@ -604,6 +605,18 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       ],
       openFolder: async () => true,
     },
+    // Workspace: the preview is the entry page as a blob (no local server in the browser preview).
+    workspace: {
+      publish: async (_chatId: string, _messageId: string, files: Array<{ path: string; content: string }>, entry: string) => {
+        const page = files.find(f => f.path === entry)?.content ?? ''
+        const css = files.filter(f => f.path.endsWith('.css')).map(f => `<style>${f.content}</style>`).join('')
+        const js = files.filter(f => f.path.endsWith('.js')).map(f => `<script>${f.content}<\/script>`).join('')
+        const html = page.replace(/<link[^>]+\.css"?>/g, '').replace(/<script src="[^"]+"><\/script>/g, '').replace('</head>', `${css}</head>`).replace('</body>', `${js}</body>`)
+        return { ok: true, url: URL.createObjectURL(new Blob([html], { type: 'text/html' })), dir: '/tmp/workspace' }
+      },
+      save: async () => ({ ok: true, path: '~/Downloads/Workspace' }),
+      openExternal: async () => true,
+    },
     // Apps (Composio): ?apps=connected starts signed in.
     apps: (() => {
       const featured = [['gmail', 'Gmail'], ['googlecalendar', 'Google Calendar'], ['googledrive', 'Google Drive'], ['slack', 'Slack'], ['notion', 'Notion'], ['github', 'GitHub'], ['linear', 'Linear'], ['outlook', 'Outlook'], ['googlesheets', 'Google Sheets'], ['hubspot', 'HubSpot'], ['jira', 'Jira'], ['todoist', 'Todoist']].map(([id, name]) => ({ id, name }))
@@ -611,15 +624,23 @@ export function createMockApi(fx: Fixtures, events: PreviewEvents): PreviewApi {
       let status: any = params.get('apps') === 'connected' ? { state: 'connected', via: 'oauth', toolCount: 5 } : { state: 'off', via: null }
       let rules: Record<string, any> = { slack: 'always' }
       const chats = new Set<string>()
-      const view = () => ({ ...status, featured })
+      const connected = new Set<string>(['github'])
+      const pending = new Set<string>()
+      const view = () => ({ ...status, featured: featured.map(a => ({ ...a, connected: connected.has(a.id), pending: pending.has(a.id) })) })
       return {
         status: async () => view(),
         connect: async () => { status = { state: 'waiting-for-browser', via: 'oauth' }; events.emit('apps:status', view()); await new Promise(r => setTimeout(r, 900)); status = { state: 'connected', via: 'oauth', toolCount: 5 }; events.emit('apps:status', view()); return view() },
         connectKey: async () => { status = { state: 'connected', via: 'key', toolCount: 5 }; return view() },
         cancel: async () => view(),
         disconnect: async () => { status = { state: 'off', via: null }; return view() },
-        connectApp: async () => ({ ok: true, opened: 1 }),
-        checkApp: async () => ({ ok: true, connected: true }),
+        // A sign-in finishes in the "browser" 2.5 s later, and the row turns connected by itself.
+        connectApp: async (id: string) => {
+          pending.add(id)
+          setTimeout(() => { pending.delete(id); connected.add(id); events.emit('apps:status', view()) }, 2500)
+          return { ok: true, opened: 1, connected: false }
+        },
+        checkApp: async (id: string) => ({ ok: true, connected: connected.has(id), pending: pending.has(id) }),
+        removeApp: async (id: string) => { connected.delete(id); pending.delete(id); return view() },
         rules: async () => rules,
         setRule: async (toolkit: string, rule: string) => { rules = { ...rules, [toolkit]: rule }; if (rule === 'ask') delete rules[toolkit]; return rules },
         chatEnabled: async (chatId: string) => status.state === 'connected' && chats.has(chatId),

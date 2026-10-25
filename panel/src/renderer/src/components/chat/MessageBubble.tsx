@@ -1,3 +1,4 @@
+import { ArtifactCard } from '../workspace/ArtifactCard'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
@@ -74,7 +75,8 @@ function parseMarkdown(
   renderer.code = (code, lang) => {
   const highlighted = highlightCodeBlock(code, lang, userContent)
   const headerHtml = `<div class="code-header"><span class="code-lang">${lang || defaultLanguage}</span><button class="code-copy-btn">${copyLabel}</button></div>`
-  return `<div class="code-block-wrapper">${headerHtml}<pre><code class="hljs language-${lang || 'plaintext'}">${highlighted}</code></pre></div>`
+  const long = !userContent && code.split('\n').length > 28 ? ' is-long' : ''
+  return `<div class="code-block-wrapper${long}">${headerHtml}<pre><code class="hljs language-${lang || 'plaintext'}">${highlighted}</code></pre></div>`
   }
   // renderChatMarkdownHtml owns prepare -> marked -> KaTeX-splice ordering so
   // renderer-owned math HTML never flows through marked. Assistant-only
@@ -720,6 +722,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
           </div>
         )}
 
+        {message.content && <ArtifactCard messageId={message.id} content={message.content} streaming={!!isStreaming} />}
         {!isStreaming && <TurnChangesPill messageId={message.id} />}
         {renderMetrics()}
       </div>

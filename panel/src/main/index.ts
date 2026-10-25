@@ -10,6 +10,8 @@ import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerSessionHandlers } from './ipc/sessions'
 import { registerChatHandlers, activeAgentChatIds, abortAllChatRequests } from './ipc/chat'
+import { registerWorkspaceHandlers } from './workspace/workspace'
+import { PREVIEW_CSP, isPreviewUrl, stopPreviewServer } from './workspace/previewServer'
 import { registerProviderHandlers } from './ipc/providers'
 import { getHardware } from './hardware'
 import { registerDictationIpc } from './dictation'
@@ -275,6 +277,7 @@ function createWindow(): void {
   if (!handlersRegistered) {
     registerSessionHandlers(() => mainWindow)
     registerChatHandlers(() => mainWindow)
+    registerWorkspaceHandlers(() => mainWindow)
     registerProviderHandlers(() => mainWindow)
     registerDictationIpc()
     registerModelHandlers()
@@ -460,7 +463,8 @@ function createWindow(): void {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [buildContentSecurityPolicy({ devRenderer })]
+        // Workspace previews (a reply's website) keep their own, looser policy.
+        'Content-Security-Policy': [isPreviewUrl(details.url) ? PREVIEW_CSP : buildContentSecurityPolicy({ devRenderer })]
       }
     })
   })
@@ -742,6 +746,8 @@ app.whenReady().then(async () => {
 })
 
 // Stop owned engines on quit; slow persistence offers an explicit force choice.
+app.on('will-quit', () => stopPreviewServer())
+
 app.on('before-quit', async (e) => {
   if (isQuitting) { e.preventDefault(); return }
   // Closing the window keeps an agent turn running; quitting stops it, so ask

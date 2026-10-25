@@ -82,3 +82,90 @@ describe('connectionState', () => {
     expect(connectionState(undefined, 'Gmail is already connected.')).toBe('yes')
   })
 })
+
+describe('connection replies Composio sends', () => {
+  it('reads the app entry first; an active connection beats an older pending one', async () => {
+    const { connectionState } = await import('../src/main/apps/composioPolicy')
+    // A second attempt leaves an initiated account beside the active one.
+    expect(connectionState({ data: { results: { gmail: { toolkit: 'gmail', status: 'active', has_active_connection: true, connected_accounts: [{ status: 'INITIATED' }] } } } }, '', 'gmail')).toBe('yes')
+    // Summary counts: zero failures are not a failure.
+    expect(connectionState({ data: { message: '1 active, 0 initiated, 0 failed', results: {}, summary: { total_toolkits: 1, active_connections: 1, initiated_connections: 0, failed_connections: 0 } } }, '', 'gmail')).toBe('yes')
+    expect(connectionState(undefined, 'Checked 1 toolkit: 1 active, 0 failed', 'gmail')).toBe('yes')
+    expect(connectionState({ data: { results: { gmail: { status: 'initiated', redirect_url: 'https://connect.composio.dev/link/x' } }, summary: { total_toolkits: 1, active_connections: 0, initiated_connections: 1 } } }, '', 'gmail')).toBe('no')
+    // Results as a list naming the toolkit.
+    expect(connectionState({ data: { results: [{ toolkit: 'slack', status: 'ACTIVE' }, { toolkit: 'gmail', status: 'INITIATED' }] } }, '', 'slack')).toBe('yes')
+    expect(connectionState({ data: { results: [{ toolkit: 'slack', status: 'ACTIVE' }, { toolkit: 'gmail', status: 'INITIATED' }] } }, '', 'gmail')).toBe('no')
+    // The user's own profile data is never read as a status.
+    expect(connectionState({ data: { results: { gmail: { has_active_connection: true, current_user_info: { status: 'disabled' } } } } }, '', 'gmail')).toBe('yes')
+  })
+})
+
+describe('connecting an app through the browser', () => {
+  let server: Server | null = null
+  afterEach(() => { server?.close(); server = null })
+
+  it('stays pending across a reopen, turns connected by itself, and stays until removed', async () => {
+    let signedIn = false
+    let manageCalls = 0
+    server = createServer(async (req, res) => {
+      const mcp = new McpServer({ name: 'fake', version: '1' })
+      mcp.tool('COMPOSIO_MANAGE_CONNECTIONS', 'conn', { toolkits: z.array(z.string()) }, async ({ toolkits }) => {
+        manageCalls++
+        const tk = toolkits[0]
+        const results = signedIn
+          ? { [tk]: { toolkit: tk, status: 'ACTIVE', has_active_connection: true } }
+          : { [tk]: { toolkit: tk, status: 'INITIATED', redirect_url: 'https://connect.composio.dev/link/abc' } }
+        return { content: [{ type: 'text', text: JSON.stringify({ data: { message: 'ok', results }, successful: true }) }] }
+      })
+      mcp.tool('COMPOSIO_WAIT_FOR_CONNECTIONS', 'wait', { toolkits: z.array(z.string()), timeout_seconds: z.number().min(1).max(60).optional() }, async ({ toolkits }) => ({
+        content: [{ type: 'text', text: JSON.stringify({ data: { results: { [toolkits[0]]: { status: signedIn ? 'active' : 'initiated' } } } }) }],
+      }))
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
+      res.on('close', () => { void transport.close(); void mcp.close() })
+      await mcp.connect(transport)
+      const chunks: Buffer[] = []
+      for await (const c of req) chunks.push(c as Buffer)
+      await transport.handleRequest(req, res, chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : undefined)
+    })
+    await new Promise<void>(r => server!.listen(0, '127.0.0.1', () => r()))
+    const url = `http://127.0.0.1:${(server!.address() as AddressInfo).port}/mcp`
+    let connected: string[] = []
+    let pending: Record<string, number> = {}
+    let changes = 0
+    const opened: string[] = []
+    const storage: AppsStorage = {
+      readOAuth: () => null, writeOAuth: () => {}, readKey: () => 'ck', writeKey: () => {},
+      readRules: () => ({}), writeRules: () => {}, chatEnabled: () => true, setChatEnabled: () => {},
+      readConnected: () => connected, writeConnected: v => { connected = v },
+      readPending: () => pending, writePending: v => { pending = v },
+    }
+    const make = () => new AppsService({ storage, openExternal: u => { opened.push(u) }, connectUrl: url, onAppsChanged: () => { changes++ }, watchEveryMs: 50 })
+    const apps = make()
+    const r = await apps.connectApp('gmail')
+    expect(r).toMatchObject({ ok: true, opened: 1, connected: false })
+    expect(opened).toEqual(['https://connect.composio.dev/link/abc'])
+    expect(Object.keys(pending)).toEqual(['gmail'])
+    expect(await apps.checkApp('gmail')).toMatchObject({ ok: true, connected: false, pending: true })
+
+    // Preferences closed and reopened (a new service, as after a restart): still pending.
+    const again = make()
+    expect(again.pendingApps()).toEqual(['gmail'])
+    again.resumePending()
+    signedIn = true // the user finishes in the browser
+    await new Promise(r => setTimeout(r, 400))
+    expect(connected).toEqual(['gmail'])
+    expect(pending).toEqual({})
+    expect(changes).toBeGreaterThan(0)
+
+    // Stays connected; Connect on an app already active opens nothing.
+    expect(make().connectedApps()).toEqual(['gmail'])
+    const before = opened.length
+    expect(await again.connectApp('gmail')).toMatchObject({ ok: true, opened: 0, connected: true })
+    expect(opened.length).toBe(before)
+
+    again.removeApp('gmail')
+    expect(connected).toEqual([])
+    expect(manageCalls).toBeGreaterThan(0)
+    apps.removeApp('gmail')
+  })
+})

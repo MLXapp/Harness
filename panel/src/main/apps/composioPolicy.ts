@@ -215,31 +215,107 @@ export function connectionLinks(result: unknown): Array<{ toolkit: string; url: 
 }
 
 /**
- * Whether a COMPOSIO_MANAGE_CONNECTIONS reply says the app is connected:
- * 'yes' only on a positive signal (an active status, a connected flag, or the
- * reply saying so), 'no' on a sign-in link or a pending/failed status, and
- * 'unknown' otherwise, so an unexpected reply never turns an app on.
+ * Whether a COMPOSIO_MANAGE_CONNECTIONS / COMPOSIO_WAIT_FOR_CONNECTIONS reply
+ * says the app is connected. The reply is `{data: {message, results: {<app>:
+ * {...}}, summary: {active_connections, initiated_connections, …}}}`.
+ *
+ * - The app's own entry decides first, and there an active connection wins
+ *   over an older pending one (a second sign-in attempt leaves an
+ *   "initiated" account next to the active one).
+ * - Then the summary counts (when the reply is about this one app).
+ * - Then any status anywhere, then the text ("1 active, 0 failed" is
+ *   connected: a count of zero is no signal).
+ * 'unknown' changes nothing, so an odd reply never turns an app on or off.
  */
-export function connectionState(json: unknown, text = ''): 'yes' | 'no' | 'unknown' {
-  if (connectionLinks(json).length > 0) return 'no'
-  let yes = false
-  let no = false
-  const POS = /^(active|connected|enabled|success|ready)$/i
-  const NEG = /^(initiated|initializing|pending|inactive|failed|expired|disabled|error|not[_ ]connected)$/i
-  const walk = (node: unknown, depth: number) => {
-    if (depth > 6 || node === null || typeof node !== 'object') return
-    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
-      if (typeof v === 'string' && /status|state/i.test(k)) { if (POS.test(v)) yes = true; else if (NEG.test(v)) no = true }
-      else if (typeof v === 'boolean' && /^(is_?)?(connected|active)$|^has_active_connection$/i.test(k)) { if (v) yes = true; else no = true }
-      else if (v && typeof v === 'object') walk(v, depth + 1)
+export function connectionState(json: unknown, text = '', toolkit?: string): 'yes' | 'no' | 'unknown' {
+  const entry = toolkit ? toolkitEntry(json, toolkit) : undefined
+  if (entry !== undefined) {
+    const own = signals(entry)
+    if (own.yes) return 'yes'
+    if (own.no || connectionLinks(entry).length > 0) return 'no'
+  }
+  const summary = findKey(json, 'summary')
+  if (summary && typeof summary === 'object') {
+    const n = (k: string) => Number((summary as Record<string, unknown>)[k] ?? 0) || 0
+    const total = n('total_toolkits')
+    if (total <= 1 || !toolkit) {
+      if (n('active_connections') > 0) return 'yes'
+      if (n('initiated_connections') > 0 || n('failed_connections') > 0) return 'no'
     }
   }
-  walk(json, 0)
-  if (no) return 'no'
-  if (yes) return 'yes'
-  if (/\b(not connected|inactive|expired|failed)\b/i.test(text)) return 'no'
-  if (/\b(already connected|is connected|connection is active|active connection)\b/i.test(text)) return 'yes'
+  if (entry === undefined) {
+    const all = signals(json)
+    // Without the app's own entry, mixed signals are not trusted either way.
+    if (all.yes && !all.no && connectionLinks(json).length === 0) return 'yes'
+    if (all.no || connectionLinks(json).length > 0) return all.yes ? 'unknown' : 'no'
+  }
+  const active = /\b(\d+)\s+active\b/i.exec(text)
+  if (active) return Number(active[1]) > 0 ? 'yes' : 'unknown'
+  if (/\b(already connected|is connected|connection is active|active connection|connected successfully)\b/i.test(text)) return 'yes'
+  if (/\b(not connected|no active connection|not yet connected|expired|needs? to (connect|authenticate|authorize))\b/i.test(text)) return 'no'
   return 'unknown'
+}
+
+const POS_STATUS = /^(active|connected|enabled|success|ready)$/i
+const NEG_STATUS = /^(initiated|initializing|pending|inactive|failed|expired|disabled|error|not[_ ]connected)$/i
+
+function signals(node: unknown): { yes: boolean; no: boolean } {
+  let yes = false
+  let no = false
+  const walk = (n: unknown, depth: number) => {
+    if (depth > 6 || n === null || typeof n !== 'object') return
+    for (const [k, v] of Object.entries(n as Record<string, unknown>)) {
+      if (typeof v === 'string' && /status|state/i.test(k)) { if (POS_STATUS.test(v)) yes = true; else if (NEG_STATUS.test(v)) no = true }
+      else if (typeof v === 'boolean' && /^(is_?)?(connected|active)$|^has_active_connections?$/i.test(k)) { if (v) yes = true; else no = true }
+      else if (v && typeof v === 'object' && !/^(current_user_info|user_info|profile)$/i.test(k)) walk(v, depth + 1)
+    }
+  }
+  walk(node, 0)
+  return { yes, no }
+}
+
+function findKey(node: unknown, key: string, depth = 0): unknown {
+  if (depth > 4 || node === null || typeof node !== 'object') return undefined
+  const own = node as Record<string, unknown>
+  if (key in own) return own[key]
+  for (const v of Object.values(own)) {
+    const hit = findKey(v, key, depth + 1)
+    if (hit !== undefined) return hit
+  }
+  return undefined
+}
+
+/** The reply's entry for one app: keyed by its slug, or naming it in a toolkit field. */
+function toolkitEntry(node: unknown, toolkit: string, depth = 0): unknown {
+  if (depth > 6 || node === null || typeof node !== 'object') return undefined
+  const want = toolkit.toLowerCase()
+  if (!Array.isArray(node)) {
+    const own = node as Record<string, unknown>
+    for (const [k, v] of Object.entries(own)) if (k.toLowerCase() === want && v && typeof v === 'object') return v
+    const named = ['toolkit', 'toolkit_slug', 'slug', 'app', 'app_name']
+      .map(k => own[k]).find(v => typeof v === 'string' || (v && typeof v === 'object'))
+    const name = typeof named === 'string' ? named : named && typeof (named as any).slug === 'string' ? (named as any).slug : undefined
+    if (typeof name === 'string' && name.toLowerCase() === want) return own
+  }
+  for (const v of Object.values(node as Record<string, unknown>)) {
+    const hit = toolkitEntry(v, toolkit, depth + 1)
+    if (hit !== undefined) return hit
+  }
+  return undefined
+}
+
+/** A short, data-free outline of a reply for the log (keys, statuses, counts). */
+export function replyOutline(json: unknown, depth = 0): string {
+  if (depth > 4) return '…'
+  if (json === null || typeof json !== 'object') {
+    return typeof json === 'string' ? (json.length <= 24 && /^[\w .-]*$/.test(json) ? JSON.stringify(json) : '"…"') : String(json)
+  }
+  if (Array.isArray(json)) return `[${json.slice(0, 3).map(v => replyOutline(v, depth + 1)).join(',')}${json.length > 3 ? ',…' : ''}]`
+  return `{${Object.entries(json as Record<string, unknown>).slice(0, 12).map(([k, v]) => {
+    if (/^(current_user_info|user_info|profile|instructions|message)$/i.test(k)) return `${k}:…`
+    if (/url|link/i.test(k)) return `${k}:<url>`
+    return `${k}:${replyOutline(v, depth + 1)}`
+  }).join(',')}}`
 }
 
 /** Text content of an MCP tool result. */

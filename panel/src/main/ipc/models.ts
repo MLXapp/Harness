@@ -13,7 +13,8 @@ import {
   realpath,
 } from "fs/promises";
 import { existsSync, readFileSync } from "fs";
-import { join, basename, isAbsolute, relative, resolve, sep } from "path";
+import { statfs as statfsAsync } from "fs/promises";
+import { join, basename, dirname, isAbsolute, relative, resolve, sep } from "path";
 import { homedir, totalmem } from "os";
 import { autoStreamCandidate } from "../flashMoeAuto";
 import { estimateModelFileBytes } from "../modelLaunchMemory";
@@ -2552,6 +2553,23 @@ export function registerModelHandlers(): void {
   );
 
   // Start a download (non-blocking — returns jobId immediately)
+  // Free space where downloads go (the Models page checks it before a download).
+  ipcMain.handle("models:diskFree", async () => {
+    const dir = getDownloadDirectory();
+    let probe = dir;
+    while (!existsSync(probe)) {
+      const up = dirname(probe);
+      if (up === probe) break;
+      probe = up;
+    }
+    try {
+      const s = await statfsAsync(probe);
+      return { freeBytes: Number(s.bavail) * Number(s.bsize), dir };
+    } catch {
+      return { freeBytes: null, dir };
+    }
+  });
+
   ipcMain.handle("models:startDownload", async (_, repoId: string) => {
     // Check if already active or queued
     for (const [, aj] of activeJobs) {

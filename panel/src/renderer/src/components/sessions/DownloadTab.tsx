@@ -6,6 +6,7 @@ import { useTranslation } from '../../i18n'
 import type { DownloadModelType } from '../../../../shared/modelDiscoveryNavigation'
 import { memoryToRunWell, searchFit } from '../../../../shared/searchFit'
 import { useMac } from '../media/hooks'
+import { ModelCatalog } from '../models/ModelCatalog'
 
 interface HFModel {
   id: string
@@ -53,6 +54,16 @@ type CollectionTab = 'jang' | 'uncensored'
 
 export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: DownloadTabProps) {
   const { t } = useTranslation()
+  // The catalog is the page's default; Hugging Face search stays one click
+  // away (and is where image models are found).
+  const [view, setView] = useState<'catalog' | 'hub'>(() => {
+    if (initialModelType !== 'text') return 'hub'
+    try { return localStorage.getItem('vmlx.models.view') === 'hub' ? 'hub' : 'catalog' } catch { return 'catalog' }
+  })
+  const chooseView = (v: 'catalog' | 'hub') => {
+    setView(v)
+    try { localStorage.setItem('vmlx.models.view', v) } catch { /* per-viewer convenience */ }
+  }
   const { showToast } = useToast()
   const [searchQuery, setSearchQuery] = useState('')
   const [modelType, setModelType] = useState<DownloadModelType>(initialModelType)
@@ -414,7 +425,7 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
   }
   const isCollectionLoading = !searchQuery.trim() && !!loadingCollectionTabs[collectionKey]
 
-  return (
+  const hub = (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
@@ -722,6 +733,36 @@ export function DownloadTab({ onDownloadComplete, initialModelType = 'text' }: D
             </div>
           )}
         </div>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="space-y-4" data-vmlx-surface="models-page">
+      <div className="flex flex-wrap items-center gap-3">
+        <div role="tablist" aria-label={t('models.catalog.viewLabel')}
+          className="relative grid w-[320px] grid-cols-2 rounded-[9px] bg-[var(--seg-track)] p-[2px]">
+          <div aria-hidden className="absolute bottom-[2px] left-[2px] top-[2px] rounded-[7px] bg-[var(--seg-thumb)] shadow-[var(--elev-1)] transition-transform duration-300 ease-mlx"
+            style={{ width: 'calc((100% - 4px) / 2)', transform: `translateX(${view === 'catalog' ? 0 : 100}%)` }} />
+          {(['catalog', 'hub'] as const).map(v => (
+            <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => chooseView(v)}
+              data-vmlx-control={`models-view-${v}`}
+              className={`relative h-7 rounded-[7px] text-[12.5px] font-medium transition-colors ${view === v ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              {t(`models.catalog.view.${v}`)}
+            </button>
+          ))}
+        </div>
+        {view === 'catalog' && (
+          <span className="min-w-0 flex-1 truncate text-right text-[12px] text-muted-foreground" title={downloadDir}>
+            {t('models.catalog.savesTo')} <span className="font-mono">{downloadDir}</span>{' '}
+            <button type="button" onClick={handleBrowseDownloadDir} className="text-[color:var(--link)] hover:underline">{t('sessions.download.change')}</button>
+          </span>
+        )}
+      </div>
+      <div key={view} className="mlx-fade-in">
+        {view === 'catalog'
+          ? <ModelCatalog downloading={downloadingRepos} downloaded={localModelIds} onDownload={repo => void handleDownload(repo)} />
+          : hub}
       </div>
     </div>
   )

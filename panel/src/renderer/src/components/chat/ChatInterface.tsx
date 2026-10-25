@@ -1,4 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { WorkspacePanel } from '../workspace/WorkspacePanel'
+import { WorkspaceProvider } from '../workspace/context'
+import { extractArtifacts, hasPreview } from '../../../../shared/artifacts'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Sparkles, Loader2, X } from 'lucide-react'
 import { Reveal } from '../ui/Reveal'
 import { BrowserLiveView } from './BrowserLiveView'
@@ -270,6 +273,32 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
     return () => window.clearTimeout(id)
   }, [loading, queued, sessionEndpoint, sessionId])
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
+  // Workspace panel: the reply whose files it shows. It opens by itself when
+  // a reply starts writing a page (not again once closed for that reply).
+  const [workspace, setWorkspace] = useState<{ messageId: string; path?: string } | null>(null)
+  const [workspaceShown, setWorkspaceShown] = useState<{ messageId: string; path?: string } | null>(null)
+  const workspaceDismissed = useRef<Set<string>>(new Set())
+  useEffect(() => { setWorkspace(null); setWorkspaceShown(null); workspaceDismissed.current = new Set() }, [chatId])
+  useEffect(() => { if (workspace) setWorkspaceShown(workspace) }, [workspace])
+  const streamingContent = streamingMessageId ? messages.find(m => m.id === streamingMessageId)?.content ?? '' : ''
+  const streamingWritesPage = useMemo(() => {
+    if (!streamingMessageId || !PAGE_FENCE.test(streamingContent)) return false
+    return hasPreview(extractArtifacts(streamingContent))
+  }, [streamingMessageId, streamingContent])
+  useEffect(() => {
+    if (!streamingMessageId || !streamingWritesPage || workspaceDismissed.current.has(streamingMessageId)) return
+    setWorkspace(w => (w?.messageId === streamingMessageId ? w : { messageId: streamingMessageId }))
+  }, [streamingMessageId, streamingWritesPage])
+  const workspaceApi = useMemo(() => ({
+    open: (messageId: string, path?: string) => {
+      workspaceDismissed.current.delete(messageId)
+      setWorkspace({ messageId, path })
+    },
+    activeMessageId: workspace?.messageId ?? null,
+  }), [workspace?.messageId])
+  const closeWorkspace = useCallback(() => {
+    setWorkspace(w => { if (w) workspaceDismissed.current.add(w.messageId); return null })
+  }, [])
   const [currentMetrics, setCurrentMetrics] = useState<MessageMetrics | null>(null)
   // Reasoning state: track per-message reasoning content and done status
   const [reasoningMap, setReasoningMap] = useState<Record<string, string>>({})
@@ -862,9 +891,12 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
   }
 
   sendRef.current = (content: string) => handleSend(content)
+  const workspaceMessage = workspaceShown ? messages.find(m => m.id === workspaceShown.messageId) : undefined
   return (
     <ChangesProvider chatId={chatId} onSendComments={text => { void handleSend(text) }}>
-    <div className="relative flex flex-col h-full min-h-0">
+    <WorkspaceProvider value={workspaceApi}>
+    <div className="flex h-full min-h-0">
+    <div className="relative flex min-w-0 flex-1 flex-col h-full min-h-0">
       <BrowserLiveView chatId={chatId} />
       <MessageList
         messages={messages}
@@ -1014,9 +1046,17 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
         />
       </div>
     </div>
+    <WorkspacePanel chatId={chatId} open={!!workspace} messageId={workspaceShown?.messageId ?? null}
+      content={workspaceMessage?.content ?? ''} streaming={!!workspaceShown && workspaceShown.messageId === streamingMessageId}
+      initialPath={workspaceShown?.path} onClose={closeWorkspace} />
+    </div>
+    </WorkspaceProvider>
     </ChangesProvider>
   )
 }
+
+/** A fence a page is written in (cheap test before parsing a streaming reply). */
+const PAGE_FENCE = /```\s*(?:html?|jsx|tsx|svg)\b|<!doctype html/i
 
 interface QueuedMessage { id: string; text: string }
 

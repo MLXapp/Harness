@@ -40,6 +40,7 @@ const api = {
     getCollectionModels: (slug: string) => ipcRenderer.invoke('models:getCollectionModels', slug),
     downloadModel: (repoId: string) => ipcRenderer.invoke('models:downloadModel', repoId),
     startDownload: (repoId: string) => ipcRenderer.invoke('models:startDownload', repoId),
+    diskFree: (): Promise<{ freeBytes: number | null; dir: string }> => ipcRenderer.invoke('models:diskFree'),
     cancelDownload: (jobId?: string) => ipcRenderer.invoke('models:cancelDownload', jobId),
     getDownloadStatus: () => ipcRenderer.invoke('models:getDownloadStatus'),
     getDownloadDir: () => ipcRenderer.invoke('models:getDownloadDir'),
@@ -498,6 +499,14 @@ const api = {
     list: (): Promise<Array<{ name: string; description: string; scope: 'user' | 'project'; dir: string }>> => ipcRenderer.invoke('skills:list'),
     openFolder: (): Promise<boolean> => ipcRenderer.invoke('skills:openFolder'),
   },
+  // Workspace: files a reply made, previewed from 127.0.0.1 (main/workspace).
+  workspace: {
+    publish: (chatId: string, messageId: string, files: Array<{ path: string; content: string }>, entry: string): Promise<{ ok: boolean; url?: string; dir?: string; error?: string }> =>
+      ipcRenderer.invoke('workspace:publish', chatId, messageId, files, entry),
+    save: (files: Array<{ path: string; content: string }>, name: string): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> =>
+      ipcRenderer.invoke('workspace:save', files, name),
+    openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('workspace:openExternal', url),
+  },
   // Apps through Composio (main/ipc/apps.ts). Credentials never come here.
   apps: {
     status: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:status'),
@@ -505,8 +514,9 @@ const api = {
     connectKey: (key: string): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:connectKey', key),
     cancel: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:cancel'),
     disconnect: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:disconnect'),
-    connectApp: (toolkit: string): Promise<{ ok: boolean; opened: number; message?: string }> => ipcRenderer.invoke('apps:connectApp', toolkit),
-    checkApp: (toolkit: string): Promise<{ ok: boolean; connected: boolean; message?: string }> => ipcRenderer.invoke('apps:checkApp', toolkit),
+    connectApp: (toolkit: string): Promise<{ ok: boolean; opened: number; connected?: boolean; message?: string }> => ipcRenderer.invoke('apps:connectApp', toolkit),
+    checkApp: (toolkit: string): Promise<{ ok: boolean; connected: boolean; pending?: boolean; message?: string }> => ipcRenderer.invoke('apps:checkApp', toolkit),
+    removeApp: (toolkit: string): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:removeApp', toolkit),
     rules: (): Promise<Record<string, import('../shared/apps').AppRule>> => ipcRenderer.invoke('apps:rules'),
     setRule: (toolkit: string, rule: import('../shared/apps').AppRule): Promise<Record<string, import('../shared/apps').AppRule>> => ipcRenderer.invoke('apps:setRule', toolkit, rule),
     chatEnabled: (chatId: string): Promise<boolean> => ipcRenderer.invoke('apps:chatEnabled', chatId),

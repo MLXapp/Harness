@@ -184,6 +184,7 @@ declare global {
         startDownload: (
           repoId: string,
         ) => Promise<{ status: string; path?: string; error?: string }>;
+        diskFree: () => Promise<{ freeBytes: number | null; dir: string }>;
         checkImageModel: (
           modelName: string,
           quantize?: number,
@@ -503,14 +504,20 @@ declare global {
         list: () => Promise<Array<{ name: string; description: string; scope: 'user' | 'project'; dir: string }>>;
         openFolder: () => Promise<boolean>;
       };
+      workspace: {
+        publish: (chatId: string, messageId: string, files: Array<{ path: string; content: string }>, entry: string) => Promise<{ ok: boolean; url?: string; dir?: string; error?: string }>;
+        save: (files: Array<{ path: string; content: string }>, name: string) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
+        openExternal: (url: string) => Promise<boolean>;
+      };
       apps: {
         status: () => Promise<import('./shared/apps').AppsStatusView>;
         connect: () => Promise<import('./shared/apps').AppsStatusView>;
         connectKey: (key: string) => Promise<import('./shared/apps').AppsStatusView>;
         cancel: () => Promise<import('./shared/apps').AppsStatusView>;
         disconnect: () => Promise<import('./shared/apps').AppsStatusView>;
-        connectApp: (toolkit: string) => Promise<{ ok: boolean; opened: number; message?: string }>;
-        checkApp: (toolkit: string) => Promise<{ ok: boolean; connected: boolean; message?: string }>;
+        connectApp: (toolkit: string) => Promise<{ ok: boolean; opened: number; connected?: boolean; message?: string }>;
+        checkApp: (toolkit: string) => Promise<{ ok: boolean; connected: boolean; pending?: boolean; message?: string }>;
+        removeApp: (toolkit: string) => Promise<import('./shared/apps').AppsStatusView>;
         rules: () => Promise<Record<string, import('./shared/apps').AppRule>>;
         setRule: (toolkit: string, rule: import('./shared/apps').AppRule) => Promise<Record<string, import('./shared/apps').AppRule>>;
         chatEnabled: (chatId: string) => Promise<boolean>;

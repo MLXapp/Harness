@@ -20,6 +20,9 @@ export function buildContentSecurityPolicy(options: { devRenderer?: boolean } = 
     // URLs. Keep remote media blocked while allowing those local payloads,
     // object URLs created by the renderer, and generated media from MLX
     // Harness's own folder (mlx-media://, main/media/protocol.ts).
-    " media-src 'self' data: blob: mlx-media:;"
+    " media-src 'self' data: blob: mlx-media:;" +
+    // The workspace panel shows a reply's website from MLX Harness's own
+    // preview server (main/workspace/previewServer.ts, 127.0.0.1 only).
+    " frame-src 'self' http://127.0.0.1:*;"
   )
 }

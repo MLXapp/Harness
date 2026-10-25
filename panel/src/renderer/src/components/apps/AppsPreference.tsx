@@ -41,15 +41,16 @@ export function AppsPreference() {
   const connected = status?.state === 'connected'
   const waiting = status?.state === 'waiting-for-browser' || status?.state === 'connecting'
 
-  const [pending, setPending] = useState<string[]>([])
+  // Pending sign-ins live in the main process (watched there until Composio
+  // reports them done), so they survive closing Preferences or the app.
+  const pending = (status?.featured ?? []).filter(a => a.pending && !a.connected).map(a => a.id)
   const lastCheck = useRef<Record<string, number>>({})
   const refreshStatus = () => { void window.api.apps.status().then(s => window.dispatchEvent(new CustomEvent('vmlx:apps-status', { detail: s }))).catch(() => undefined) }
   const connectApp = async (id: string) => {
     setBusy(id)
     try {
       const r = await window.api.apps.connectApp(id)
-      setNote(n => ({ ...n, [id]: r.ok ? (r.opened ? t('apps.finishInBrowser') : t('apps.alreadyConnected')) : (r.message || t('apps.connectFailed')) }))
-      if (r.ok && r.opened) setPending(p => [...new Set([...p, id])])
+      setNote(n => ({ ...n, [id]: r.ok ? (r.connected ? t('apps.alreadyConnected') : r.opened ? t('apps.finishInBrowser') : t('apps.waitingApp')) : (r.message || t('apps.connectFailed')) }))
       refreshStatus()
     } catch (err: any) {
       setNote(n => ({ ...n, [id]: String(err?.message ?? t('apps.connectFailed')) }))
@@ -58,15 +59,29 @@ export function AppsPreference() {
     }
   }
   // Back from the browser: see whether the sign-in finished.
-  const check = async (id: string) => {
+  const check = async (id: string, quiet = false) => {
+    if (!quiet) setBusy(id)
     try {
       const r = await window.api.apps.checkApp(id)
-      if (r.connected) {
-        setPending(p => p.filter(x => x !== id))
-        setNote(n => ({ ...n, [id]: t('apps.nowConnected') }))
-        refreshStatus()
-      }
-    } catch { /* stays pending */ }
+      if (r.connected) setNote(n => ({ ...n, [id]: t('apps.nowConnected') }))
+      else if (!quiet) setNote(n => ({ ...n, [id]: r.ok ? t('apps.notYet') : (r.message || t('apps.connectFailed')) }))
+      refreshStatus()
+    } catch { /* stays pending */ } finally {
+      if (!quiet) setBusy(null)
+    }
+  }
+  // A sign-in finished in the background: the row's note says so.
+  const connectedIds = (status?.featured ?? []).filter(a => a.connected).map(a => a.id).join(',')
+  const wasPending = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    for (const id of pending) wasPending.current.add(id)
+    for (const id of connectedIds.split(',').filter(Boolean)) {
+      if (wasPending.current.delete(id)) setNote(n => ({ ...n, [id]: t('apps.nowConnected') }))
+    }
+  }, [connectedIds, pending.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
+  const removeApp = async (id: string) => {
+    setNote(n => ({ ...n, [id]: '' }))
+    window.dispatchEvent(new CustomEvent('vmlx:apps-status', { detail: await window.api.apps.removeApp(id) }))
   }
   useEffect(() => {
     if (pending.length === 0) return
@@ -77,12 +92,12 @@ export function AppsPreference() {
       for (const id of pending) {
         if (now - (lastCheck.current[id] ?? 0) < 8000) continue
         lastCheck.current[id] = now
-        void check(id)
+        void check(id, true)
       }
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [pending]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pending.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
   const setRule = async (id: string, rule: AppRule) => setRules(await window.api.apps.setRule(id, rule))
 
   return (
@@ -155,12 +170,17 @@ export function AppsPreference() {
                     </button>
                   ))}
                 </div>
-                {app.connected && !pending.includes(app.id) ? (
-                  <span className="inline-flex h-7 items-center gap-1.5 px-1 text-[12.5px] text-muted-foreground">
-                    <Check className="h-3.5 w-3.5 text-success" />{t('apps.connectedApp')}
+                {app.connected ? (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="inline-flex h-7 items-center gap-1.5 px-1 text-[12.5px] text-muted-foreground" data-vmlx-app-connected={app.id}>
+                      <Check className="h-3.5 w-3.5 text-success" />{t('apps.connectedApp')}
+                    </span>
+                    <Btn size="md" variant="plain" data-vmlx-control={`apps-remove-${app.id}`} onClick={() => void removeApp(app.id)}>{t('apps.removeApp')}</Btn>
                   </span>
                 ) : pending.includes(app.id) ? (
-                  <Btn size="md" data-vmlx-control={`apps-check-${app.id}`} onClick={() => void check(app.id)}>{t('apps.checkAgain')}</Btn>
+                  <Btn size="md" disabled={busy === app.id} data-vmlx-control={`apps-check-${app.id}`} onClick={() => void check(app.id)}>
+                    {busy === app.id && <Spinner />}{t('apps.checkAgain')}
+                  </Btn>
                 ) : (
                   <Btn size="md" disabled={busy === app.id || rule === 'blocked'} data-vmlx-control={`apps-connect-${app.id}`} onClick={() => void connectApp(app.id)}>
                     {busy === app.id ? <Spinner /> : <ExternalLink className="h-3.5 w-3.5" />}{t('apps.connectApp')}

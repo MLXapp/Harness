@@ -18,7 +18,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js'
 import { pickDirectSlugs, parseToolSchemas, slugForDirect, toDirectTools, type DirectSchema } from './composioDirect'
-import { COMPOSIO_CONNECT_URL, connectionLinks, connectionState, isOfferedTool, mcpResultText, sanitizeArguments, type AppRule } from './composioPolicy'
+import { COMPOSIO_CONNECT_URL, connectionLinks, connectionState, isOfferedTool, mcpResultText, replyOutline, sanitizeArguments, type AppRule } from './composioPolicy'
 
 export const OAUTH_CALLBACK_PORT = 47391
 export const OAUTH_CALLBACK_PATH = '/oauth/composio'
@@ -37,6 +37,9 @@ export interface AppsStorage {
   /** Apps the user connected from Preferences → Apps (toolkit slugs). Optional for tests. */
   readConnected?(): string[]
   writeConnected?(apps: string[]): void
+  /** Apps whose sign-in was opened and not yet seen finished: slug → when (ms). */
+  readPending?(): Record<string, number>
+  writePending?(pending: Record<string, number>): void
   /** Cached direct-tool schemas, by slug. */
   readSchemaCache?(): Record<string, DirectSchema>
   writeSchemaCache?(cache: Record<string, DirectSchema>): void
@@ -46,9 +49,14 @@ export interface AppsDeps {
   storage: AppsStorage
   openExternal: (url: string) => Promise<void> | void
   onStatus?: (status: AppsStatus) => void
+  /** An app's connection changed (connected, pending, removed). */
+  onAppsChanged?: () => void
   /** For tests. */
   connectUrl?: string
   callbackPort?: number
+  /** For tests: how often a pending sign-in is checked, and for how long. */
+  watchEveryMs?: number
+  watchForMs?: number
 }
 
 export interface AppsStatus {
@@ -301,6 +309,8 @@ export class AppsService {
     this.deps.storage.writeOAuth(null)
     this.deps.storage.writeKey(null)
     this.deps.storage.writeConnected?.([])
+    this.deps.storage.writePending?.({})
+    this.stopWatching()
     this.tools = null
     this.direct = []
     return this.setAndReturn({ state: 'off', via: null })
@@ -395,26 +405,121 @@ export class AppsService {
   }
 
   /** Start connecting one app (Preferences → Apps): opens its sign-in page. */
-  async connectApp(toolkit: string): Promise<{ ok: boolean; opened: number; message?: string }> {
+  async connectApp(toolkit: string): Promise<{ ok: boolean; opened: number; connected?: boolean; message?: string }> {
     const { json, text, isError } = await this.call('COMPOSIO_MANAGE_CONNECTIONS', { toolkits: [toolkit] })
     if (isError) return { ok: false, opened: 0, message: text.slice(0, 300) }
+    const state = connectionState(json, text, toolkit)
+    console.log(`[apps] connect ${toolkit}: ${state} ${replyOutline(json)}`)
+    // Already connected on Composio (an earlier sign-in): nothing to open.
+    if (state === 'yes') {
+      this.markConnected(toolkit, true)
+      return { ok: true, opened: 0, connected: true, message: 'Already connected.' }
+    }
     const links = connectionLinks(json)
     for (const l of links.slice(0, 1)) await this.deps.openExternal(l.url)
-    // Only an app Composio reports as connected counts as connected; an
-    // opened sign-in page is pending until checkApp() sees it done.
-    const state = connectionState(json, text)
-    if (state === 'yes') this.markConnected(toolkit, true)
-    return { ok: true, opened: Math.min(1, links.length), message: links.length ? undefined : state === 'yes' ? 'Already connected.' : undefined }
+    // Pending until Composio reports the connection active: watched in the
+    // background (also after the window or the app is closed and reopened).
+    this.setPending(toolkit, true)
+    this.watch(toolkit)
+    return { ok: true, opened: Math.min(1, links.length), connected: false }
   }
 
   /** After a sign-in in the browser: is the app connected now? Opens nothing. */
-  async checkApp(toolkit: string): Promise<{ ok: boolean; connected: boolean; message?: string }> {
-    const { json, text, isError } = await this.call('COMPOSIO_MANAGE_CONNECTIONS', { toolkits: [toolkit] })
-    if (isError) return { ok: false, connected: false, message: text.slice(0, 300) }
-    const state = connectionState(json, text)
+  async checkApp(toolkit: string): Promise<{ ok: boolean; connected: boolean; pending?: boolean; message?: string }> {
+    const r = await this.connectionNow(toolkit)
+    if (!r.ok) return { ok: false, connected: false, pending: this.isPending(toolkit), message: r.message }
     // 'unknown' changes nothing: an odd reply never turns an app on or off.
-    if (state !== 'unknown') this.markConnected(toolkit, state === 'yes')
-    return { ok: true, connected: state === 'yes' }
+    if (r.state === 'yes') { this.markConnected(toolkit, true); this.setPending(toolkit, false) }
+    return { ok: true, connected: r.state === 'yes', pending: this.isPending(toolkit) }
+  }
+
+  /** Forget an app (its Remove button). Composio keeps the account until revoked there. */
+  removeApp(toolkit: string): void {
+    this.setPending(toolkit, false)
+    this.markConnected(toolkit, false)
+  }
+
+  pendingApps(): string[] { return Object.keys(this.readPending()) }
+  private isPending(toolkit: string): boolean { return toolkit in this.readPending() }
+
+  /** Watch every pending sign-in again (after a restart). */
+  resumePending(): void { for (const tk of this.pendingApps()) this.watch(tk) }
+
+  /**
+   * The app's connection state, read without starting a new sign-in when
+   * Composio offers COMPOSIO_WAIT_FOR_CONNECTIONS (a short wait), else from
+   * COMPOSIO_MANAGE_CONNECTIONS.
+   */
+  private async connectionNow(toolkit: string): Promise<{ ok: boolean; state: 'yes' | 'no' | 'unknown'; message?: string }> {
+    const waitArgs = await this.waitArguments(toolkit)
+    if (waitArgs) {
+      const r = await this.call('COMPOSIO_WAIT_FOR_CONNECTIONS', waitArgs)
+      if (!r.isError) {
+        const state = connectionState(r.json, r.text, toolkit)
+        console.log(`[apps] wait ${toolkit}: ${state} ${replyOutline(r.json)}`)
+        if (state !== 'unknown') return { ok: true, state }
+      }
+    }
+    const { json, text, isError } = await this.call('COMPOSIO_MANAGE_CONNECTIONS', { toolkits: [toolkit] })
+    if (isError) return { ok: false, state: 'unknown', message: text.slice(0, 300) }
+    const state = connectionState(json, text, toolkit)
+    console.log(`[apps] check ${toolkit}: ${state} ${replyOutline(json)}`)
+    return { ok: true, state }
+  }
+
+  /** Arguments for COMPOSIO_WAIT_FOR_CONNECTIONS built from its own schema, or null. */
+  private async waitArguments(toolkit: string): Promise<Record<string, unknown> | null> {
+    const tool = (await this.listTools().catch(() => [] as AppTool[])).find(t => t.function.name === 'COMPOSIO_WAIT_FOR_CONNECTIONS')
+    const schema = tool?.function.parameters as { properties?: Record<string, any>; required?: string[] } | undefined
+    if (!schema?.properties) return null
+    const args: Record<string, unknown> = {}
+    for (const [name, prop] of Object.entries(schema.properties)) {
+      if (prop?.type === 'array' && /toolkit|app/i.test(name)) args[name] = [toolkit]
+      else if ((prop?.type === 'number' || prop?.type === 'integer') && /timeout|seconds|wait/i.test(name)) {
+        const min = Number.isFinite(prop.minimum) ? prop.minimum : 1
+        const max = Number.isFinite(prop.maximum) ? prop.maximum : 30
+        args[name] = Math.min(Math.max(/ms|milli/i.test(name) ? 5000 : 5, min), max)
+      }
+    }
+    const required = schema.required ?? []
+    if (!Object.values(args).some(Array.isArray)) return null
+    return required.every(r => r in args) ? args : null
+  }
+
+  private watchers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  /** Check a pending sign-in now and then until it is done or stale. */
+  private watch(toolkit: string): void {
+    if (this.watchers.has(toolkit)) return
+    const every = this.deps.watchEveryMs ?? 5000
+    const forMs = this.deps.watchForMs ?? 15 * 60_000
+    const tick = async () => {
+      this.watchers.delete(toolkit)
+      const since = this.readPending()[toolkit]
+      if (since === undefined) return
+      if (Date.now() - since > forMs) { this.setPending(toolkit, false); return }
+      try { await this.checkApp(toolkit) } catch { /* try again */ }
+      if (this.isPending(toolkit) && !this.watchers.has(toolkit)) {
+        this.watchers.set(toolkit, setTimeout(() => void tick(), every))
+      }
+    }
+    this.watchers.set(toolkit, setTimeout(() => void tick(), every))
+  }
+
+  private stopWatching(): void {
+    for (const t of this.watchers.values()) clearTimeout(t)
+    this.watchers.clear()
+  }
+
+  private readPending(): Record<string, number> { return { ...(this.deps.storage.readPending?.() ?? {}) } }
+
+  private setPending(toolkit: string, on: boolean): void {
+    const pending = this.readPending()
+    if (on === toolkit in pending) return
+    if (on) pending[toolkit] = Date.now(); else delete pending[toolkit]
+    this.deps.storage.writePending?.(pending)
+    if (!on) { const t = this.watchers.get(toolkit); if (t) clearTimeout(t); this.watchers.delete(toolkit) }
+    this.deps.onAppsChanged?.()
   }
 
   private markConnected(toolkit: string, on: boolean): void {
@@ -422,5 +527,6 @@ export class AppsService {
     if (on === known.has(toolkit)) return
     if (on) known.add(toolkit); else known.delete(toolkit)
     this.deps.storage.writeConnected?.([...known])
+    this.deps.onAppsChanged?.()
   }
 }
