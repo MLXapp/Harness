@@ -243,34 +243,42 @@ export function connectionState(json: unknown, text = '', toolkit?: string): 'ye
       if (n('initiated_connections') > 0 || n('failed_connections') > 0) return 'no'
     }
   }
-  if (entry === undefined) {
-    const all = signals(json)
-    // Without the app's own entry, mixed signals are not trusted either way.
-    if (all.yes && !all.no && connectionLinks(json).length === 0) return 'yes'
-    if (all.no || connectionLinks(json).length > 0) return all.yes ? 'unknown' : 'no'
-  }
+  if (entry === undefined && connectionLinks(json).length > 0) return 'no'
+  // Text last, negatives first ("no active connection" is not "active connection").
+  if (/\b(not connected|no active connection|not yet connected|expired|needs? to (connect|authenticate|authorize)|timed? ?out)\b/i.test(text)) return 'no'
   const active = /\b(\d+)\s+active\b/i.exec(text)
   if (active) return Number(active[1]) > 0 ? 'yes' : 'unknown'
-  if (/\b(already connected|is connected|connection is active|active connection|connected successfully)\b/i.test(text)) return 'yes'
-  if (/\b(not connected|no active connection|not yet connected|expired|needs? to (connect|authenticate|authorize))\b/i.test(text)) return 'no'
+  if (/\b(already connected|is connected|connection is active|connected successfully)\b/i.test(text)) return 'yes'
   return 'unknown'
 }
 
-const POS_STATUS = /^(active|connected|enabled|success|ready)$/i
-const NEG_STATUS = /^(initiated|initializing|pending|inactive|failed|expired|disabled|error|not[_ ]connected)$/i
+const POS_STATUS = /^(active|connected)$/i
+const NEG_STATUS = /^(initiated|initializing|pending|inactive|failed|expired|disabled|error|not[_ ]connected|timeout|timed[_ ]out|waiting)$/i
+const ACCOUNT_LISTS = /^(connected_accounts?|accounts?|connections?)$/i
 
-function signals(node: unknown): { yes: boolean; no: boolean } {
+/**
+ * A connection's own signals: the entry's status and connected flags, and
+ * the statuses of its connected accounts. Nothing else nested counts (an
+ * auth config "ENABLED", a toolkit "is_active" say nothing about the user).
+ */
+function signals(entry: unknown): { yes: boolean; no: boolean } {
   let yes = false
   let no = false
-  const walk = (n: unknown, depth: number) => {
-    if (depth > 6 || n === null || typeof n !== 'object') return
-    for (const [k, v] of Object.entries(n as Record<string, unknown>)) {
-      if (typeof v === 'string' && /status|state/i.test(k)) { if (POS_STATUS.test(v)) yes = true; else if (NEG_STATUS.test(v)) no = true }
-      else if (typeof v === 'boolean' && /^(is_?)?(connected|active)$|^has_active_connections?$/i.test(k)) { if (v) yes = true; else no = true }
-      else if (v && typeof v === 'object' && !/^(current_user_info|user_info|profile)$/i.test(k)) walk(v, depth + 1)
+  const read = (node: unknown, accounts: boolean) => {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (typeof v === 'string' && /^(status|state|connection_status|connection_state)$/i.test(k)) {
+        if (POS_STATUS.test(v)) yes = true; else if (NEG_STATUS.test(v)) no = true
+      } else if (typeof v === 'boolean' && /^(is_?connected|connected|has_active_connections?)$/i.test(k)) {
+        if (v) yes = true; else no = true
+      } else if (typeof v === 'boolean' && accounts && /^is_?active$/i.test(k)) {
+        if (v) yes = true
+      } else if (!accounts && ACCOUNT_LISTS.test(k)) {
+        for (const a of Array.isArray(v) ? v : [v]) read(a, true)
+      }
     }
   }
-  walk(node, 0)
+  read(entry, false)
   return { yes, no }
 }
 

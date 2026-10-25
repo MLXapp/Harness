@@ -3297,7 +3297,9 @@
     "checkAgain": "再次检查",
     "waitingApp": "正在等待登录完成…",
     "notYet": "尚未完成。请在浏览器中完成登录，这里会自动更新。",
-    "removeApp": "移除"
+    "removeApp": "移除",
+    "openSignIn": "打开登录页",
+    "removeTitle": "MLX Harness 将停止使用 {name} 并阻止其操作。在你于 Composio 账户中移除之前，连接会保留在那里。"
   },
   "skills": {
     "intro": "技能是包含 SKILL.md 的文件夹：针对某类工作的说明（有时附带脚本），格式与 Claude Code 相同。智能体只看到名称和描述，需要时才读取说明。脚本通过普通工具运行，因此会像其他命令一样先询问。",
@@ -3546,6 +3548,10 @@
     "empty": "此回复没有文件。",
     "localOnly": "仅限本机",
     "openPreview": "打开预览",
-    "openFiles": "打开文件"
+    "openFiles": "打开文件",
+    "allowInternet": "允许联网",
+    "allowInternetTitle": "此页面离线运行，无法向任何地方发送数据。允许它从网络加载图片和数据。",
+    "online": "已联网 · 关闭",
+    "goOfflineTitle": "让页面重新离线运行。"
   }
 }

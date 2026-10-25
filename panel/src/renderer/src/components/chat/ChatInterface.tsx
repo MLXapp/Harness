@@ -281,9 +281,14 @@ export function ChatInterface({ chatId, onNewChat, sessionEndpoint, sessionId, s
   useEffect(() => { setWorkspace(null); setWorkspaceShown(null); workspaceDismissed.current = new Set() }, [chatId])
   useEffect(() => { if (workspace) setWorkspaceShown(workspace) }, [workspace])
   const streamingContent = streamingMessageId ? messages.find(m => m.id === streamingMessageId)?.content ?? '' : ''
+  // Parsed only until the reply is found writing a page (not on every later token).
+  const pageFound = useRef<string | null>(null)
   const streamingWritesPage = useMemo(() => {
-    if (!streamingMessageId || !PAGE_FENCE.test(streamingContent)) return false
-    return hasPreview(extractArtifacts(streamingContent))
+    if (!streamingMessageId) return false
+    if (pageFound.current === streamingMessageId) return true
+    if (!PAGE_FENCE.test(streamingContent) || !hasPreview(extractArtifacts(streamingContent))) return false
+    pageFound.current = streamingMessageId
+    return true
   }, [streamingMessageId, streamingContent])
   useEffect(() => {
     if (!streamingMessageId || !streamingWritesPage || workspaceDismissed.current.has(streamingMessageId)) return

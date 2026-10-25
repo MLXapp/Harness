@@ -3297,7 +3297,9 @@
     "checkAgain": "Check Again",
     "waitingApp": "Waiting for the sign-in to finish…",
     "notYet": "Not finished yet. Complete the sign-in in your browser; this updates by itself.",
-    "removeApp": "Remove"
+    "removeApp": "Remove",
+    "openSignIn": "Open sign-in",
+    "removeTitle": "MLX Harness stops using {name} and blocks its actions. The connection stays in your Composio account until you remove it there."
   },
   "skills": {
     "intro": "Skills are folders with a SKILL.md: instructions (and sometimes scripts) for a kind of work, in the same format as Claude Code. The agent sees each skill's name and description and reads the instructions only when a task needs them. Scripts run with the normal tools, so they ask like any command.",
@@ -3546,6 +3548,10 @@
     "empty": "No files in this reply.",
     "localOnly": "Only on this Mac",
     "openPreview": "Open preview",
-    "openFiles": "Open files"
+    "openFiles": "Open files",
+    "allowInternet": "Allow internet",
+    "allowInternetTitle": "The page runs offline, so it can't send anything anywhere. Allow it to load images and data from the web.",
+    "online": "Online · Turn off",
+    "goOfflineTitle": "Run the page offline again."
   }
 }

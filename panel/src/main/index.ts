@@ -10,8 +10,8 @@ import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerSessionHandlers } from './ipc/sessions'
 import { registerChatHandlers, activeAgentChatIds, abortAllChatRequests } from './ipc/chat'
-import { registerWorkspaceHandlers } from './workspace/workspace'
-import { PREVIEW_CSP, isPreviewUrl, stopPreviewServer } from './workspace/previewServer'
+import { registerWorkspaceHandlers, workspaceRoot } from './workspace/workspace'
+import { isPreviewUrl, previewOrigin, startPreviewServer, stopPreviewServer } from './workspace/previewServer'
 import { registerProviderHandlers } from './ipc/providers'
 import { getHardware } from './hardware'
 import { registerDictationIpc } from './dictation'
@@ -460,11 +460,12 @@ function createWindow(): void {
   // Content Security Policy — hardens renderer against XSS
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const devRenderer = is.dev && !!process.env['ELECTRON_RENDERER_URL']
+    // Workspace previews (a reply's website) keep the policy their server sent.
+    if (isPreviewUrl(details.url)) { callback({ responseHeaders: details.responseHeaders }); return }
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        // Workspace previews (a reply's website) keep their own, looser policy.
-        'Content-Security-Policy': [isPreviewUrl(details.url) ? PREVIEW_CSP : buildContentSecurityPolicy({ devRenderer })]
+        'Content-Security-Policy': [buildContentSecurityPolicy({ devRenderer, previewOrigin: previewOrigin() })]
       }
     })
   })
@@ -625,6 +626,10 @@ app.whenReady().then(async () => {
   } catch (e) {
     console.error('[STARTUP] Error checking engine version:', e)
   }
+
+  // The workspace preview server starts first: the window's CSP lets frames
+  // load only from its exact address.
+  try { await startPreviewServer(workspaceRoot()) } catch (e) { console.error('[WORKSPACE] Preview server did not start:', e) }
 
   createWindow()
 

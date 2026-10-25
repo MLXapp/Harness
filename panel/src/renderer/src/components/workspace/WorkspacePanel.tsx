@@ -13,7 +13,7 @@ import { Check, Code2, Copy, Download, ExternalLink, FileCode2, Globe, Image as 
 import { useTranslation } from '../../i18n'
 import { Btn, Spinner } from '../accounts/ui'
 import { extractArtifacts, hasPreview, previewFiles, type ArtifactSet } from '../../../../shared/artifacts'
-import { highlightCodeBlock } from '../chat/MessageBubble'
+import { escapeCodeHtml, highlightCodeBlock } from '../chat/MessageBubble'
 
 const WIDTH_KEY = 'mlx.workspace.width'
 const MIN_W = 360
@@ -33,7 +33,9 @@ export function WorkspacePanel({ chatId, open, messageId, content, streaming, in
   onClose: () => void
 }) {
   const { t } = useTranslation()
-  const set = useMemo<ArtifactSet>(() => extractArtifacts(content), [content])
+  // While a reply streams, parse and draw at most every 150 ms (not per token).
+  const shownContent = useThrottled(content, streaming ? 150 : 0)
+  const set = useMemo<ArtifactSet>(() => extractArtifacts(shownContent), [shownContent])
   const previewable = hasPreview(set)
   const [tab, setTab] = useState<'preview' | 'code'>('preview')
   const [path, setPath] = useState<string | undefined>(initialPath)
@@ -45,13 +47,24 @@ export function WorkspacePanel({ chatId, open, messageId, content, streaming, in
   const [copied, setCopied] = useState(false)
   const [width, setWidth] = useState(readWidth)
   const [dragging, setDragging] = useState(false)
+  // A reply's page runs offline until the user allows it the internet.
+  const [online, setOnline] = useState(false)
   const published = useRef<string>('')
+  const version = useRef(0)
+  // The frame (and whatever the page runs) goes away once the panel has closed.
+  const [frameAlive, setFrameAlive] = useState(open)
+  useEffect(() => {
+    if (open) { setFrameAlive(true); return }
+    const id = window.setTimeout(() => setFrameAlive(false), 420)
+    return () => window.clearTimeout(id)
+  }, [open])
 
   // A new reply in the panel starts on its page (or the file asked for).
   useEffect(() => {
     setPath(initialPath)
     setUrl(null)
     setError(null)
+    setOnline(false)
     published.current = ''
   }, [messageId, initialPath])
 
@@ -69,21 +82,25 @@ export function WorkspacePanel({ chatId, open, messageId, content, streaming, in
     if (!open || streaming || !messageId || !previewable) return
     const preview = previewFiles(set)
     if (!preview) return
-    const key = JSON.stringify(preview)
+    const key = `${online ? 1 : 0}:${JSON.stringify(preview)}`
     if (published.current === key) return
-    published.current = key
     let alive = true
     setPublishing(true)
     setError(null)
-    window.api.workspace.publish(chatId, messageId, preview.files, preview.entry)
+    window.api.workspace.publish(chatId, messageId, preview.files, preview.entry, online)
       .then(r => {
         if (!alive) return
-        if (r.ok && r.url) { setFrameReady(false); setUrl(r.url) } else setError(r.error || t('workspace.previewFailed'))
+        if (r.ok && r.url) {
+          // Marked published only once it is; each version gets its own address so the frame reloads.
+          published.current = key
+          setFrameReady(false)
+          setUrl(`${r.url}?v=${++version.current}`)
+        } else setError(r.error || t('workspace.previewFailed'))
       })
       .catch(err => { if (alive) setError(String(err?.message ?? err)) })
       .finally(() => { if (alive) setPublishing(false) })
     return () => { alive = false }
-  }, [open, streaming, messageId, chatId, set, previewable, t])
+  }, [open, streaming, messageId, chatId, set, previewable, online, t])
 
   const codeRef = useRef<HTMLDivElement>(null)
   // Follow the code while it is being written.
@@ -91,7 +108,8 @@ export function WorkspacePanel({ chatId, open, messageId, content, streaming, in
     if (streaming && tab === 'code' && codeRef.current) codeRef.current.scrollTop = codeRef.current.scrollHeight
   }, [streaming, tab, current?.code])
 
-  const highlighted = useMemo(() => current ? highlightCodeBlock(current.code, current.language) : '', [current?.code, current?.language]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Highlighting a whole page on every update is too slow while it is written: plain text until done.
+  const highlighted = useMemo(() => !current ? '' : streaming ? escapeCodeHtml(current.code) : highlightCodeBlock(current.code, current.language), [current?.code, current?.language, streaming]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const download = async () => {
     const preview = previewable ? previewFiles(set) : null
@@ -110,6 +128,8 @@ export function WorkspacePanel({ chatId, open, messageId, content, streaming, in
   // Drag the left edge to resize.
   const startDrag = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
+    // Keep the pointer on the handle even over the page's frame.
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* not supported */ }
     const startX = e.clientX
     const startW = width
     setDragging(true)
@@ -189,10 +209,11 @@ export function WorkspacePanel({ chatId, open, messageId, content, streaming, in
         <div className="relative min-h-0 flex-1">
           {/* Preview and code share one cell and cross-fade (no jump cut). */}
           <div className={`absolute inset-0 transition-opacity duration-300 ease-mlx ${tab === 'preview' && previewable ? 'opacity-100' : 'pointer-events-none opacity-0'}`}>
-            {url && (
+            {url && frameAlive && (
+              // Its own origin (127.0.0.1:port), no popups, dialogs, downloads or navigation away.
               <iframe key={`${url}#${reload}`} src={url} title={set.title}
-                sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads"
-                className={`h-full w-full border-0 bg-white transition-opacity duration-300 ${frameReady ? 'opacity-100' : 'opacity-0'}`}
+                sandbox="allow-scripts allow-same-origin allow-forms"
+                className={`h-full w-full border-0 bg-white transition-opacity duration-300 ${frameReady ? 'opacity-100' : 'opacity-0'} ${dragging ? 'pointer-events-none' : ''}`}
                 onLoad={() => setFrameReady(true)} data-vmlx-workspace-frame="" />
             )}
             {(!url || !frameReady) && (
@@ -214,11 +235,32 @@ export function WorkspacePanel({ chatId, open, messageId, content, streaming, in
         {url && tab === 'preview' && (
           <footer className="flex h-8 shrink-0 items-center gap-2 border-t border-border/60 px-3 text-[11.5px] text-muted-foreground">
             <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden />
-            <span className="min-w-0 flex-1 truncate font-mono" title={url}>{url}</span>
+            <span className="min-w-0 flex-1 truncate font-mono" title={url}>{url.replace(/\?v=\d+$/, '')}</span>
+            {online ? (
+              <button type="button" className="text-[color:var(--link)] hover:underline" data-vmlx-control="workspace-offline"
+                title={t('workspace.goOfflineTitle')} onClick={() => setOnline(false)}>{t('workspace.online')}</button>
+            ) : (
+              <button type="button" className="text-[color:var(--link)] hover:underline" data-vmlx-control="workspace-allow-internet"
+                title={t('workspace.allowInternetTitle')} onClick={() => setOnline(true)}>{t('workspace.allowInternet')}</button>
+            )}
+            <span aria-hidden>·</span>
             <span>{t('workspace.localOnly')}</span>
           </footer>
         )}
       </div>
     </aside>
   )
+}
+
+/** The value, updated at most every `ms` (0: at once). The last value always lands. */
+function useThrottled<T>(value: T, ms: number): T {
+  const [shown, setShown] = useState(value)
+  const last = useRef(0)
+  useEffect(() => {
+    if (!ms) { setShown(value); last.current = Date.now(); return }
+    const wait = Math.max(0, last.current + ms - Date.now())
+    const id = window.setTimeout(() => { last.current = Date.now(); setShown(value) }, wait)
+    return () => window.clearTimeout(id)
+  }, [value, ms])
+  return ms ? shown : value
 }

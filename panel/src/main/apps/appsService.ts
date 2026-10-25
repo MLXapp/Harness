@@ -236,6 +236,8 @@ export class AppsService {
 
   /** "Continue with Composio": browser sign-in, then connect. */
   async connectOAuth(): Promise<AppsStatus> {
+    this.generation++
+    this.stopWatching()
     this.signIn?.abort()
     const abort = new AbortController()
     this.signIn = abort
@@ -265,6 +267,7 @@ export class AppsService {
       this.tools = null
       const tools = await this.listTools()
       this.setStatus({ state: 'connected', via: 'oauth', toolCount: tools.length })
+      this.resumePending()
     } catch (err: any) {
       callback.close()
       // A newer sign-in started meanwhile: leave its status alone.
@@ -284,6 +287,8 @@ export class AppsService {
   async connectWithKey(key: string): Promise<AppsStatus> {
     const trimmed = key.trim()
     if (!trimmed) return this.setAndReturn({ state: 'error', via: null, error: 'Paste your Composio key first.' })
+    this.generation++
+    this.stopWatching()
     await this.close()
     this.deps.storage.writeOAuth(null)
     this.deps.storage.writeKey(trimmed)
@@ -293,6 +298,7 @@ export class AppsService {
       this.tools = null
       const tools = await this.listTools()
       this.setStatus({ state: 'connected', via: 'key', toolCount: tools.length })
+      this.resumePending()
     } catch (err: any) {
       this.deps.storage.writeKey(null)
       this.client = null
@@ -304,6 +310,7 @@ export class AppsService {
   private setAndReturn(s: AppsStatus): AppsStatus { this.setStatus(s); return s }
 
   async disconnect(): Promise<AppsStatus> {
+    this.generation++
     this.signIn?.abort()
     await this.close()
     this.deps.storage.writeOAuth(null)
@@ -388,17 +395,18 @@ export class AppsService {
     return slug ? { tools: [{ tool_slug: slug, arguments: args }] } : null
   }
 
-  async call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<{ text: string; isError: boolean; json: unknown }> {
+  async call(name: string, args: Record<string, unknown>, signal?: AbortSignal, opts: { timeoutMs?: number; keepClient?: boolean } = {}): Promise<{ text: string; isError: boolean; json: unknown }> {
     const client = await this.ensure()
     if (!client) return { text: 'Apps are not connected. The user can connect them in Preferences → Apps.', isError: true, json: undefined }
     let result: unknown
     try {
-      result = await client.callTool({ name, arguments: sanitizeArguments(name, args) }, undefined, { signal, timeout: 120_000 })
+      result = await client.callTool({ name, arguments: sanitizeArguments(name, args) }, undefined, { signal, timeout: opts.timeoutMs ?? 120_000 })
     } catch (err: any) {
       if (signal?.aborted) throw err
       // Transport or session trouble: drop the client so the next call
-      // reconnects instead of failing until the app restarts.
-      if (this.client === client) await this.close()
+      // reconnects instead of failing until the app restarts. A short status
+      // check that ran out of time says nothing about the connection.
+      if (!opts.keepClient && this.client === client) await this.close()
       return { text: `The app call failed: ${String(err?.message ?? err)}`, isError: true, json: undefined }
     }
     return mcpResultText(result)
@@ -406,60 +414,92 @@ export class AppsService {
 
   /** Start connecting one app (Preferences → Apps): opens its sign-in page. */
   async connectApp(toolkit: string): Promise<{ ok: boolean; opened: number; connected?: boolean; message?: string }> {
+    const gen = this.generation
     const { json, text, isError } = await this.call('COMPOSIO_MANAGE_CONNECTIONS', { toolkits: [toolkit] })
     if (isError) return { ok: false, opened: 0, message: text.slice(0, 300) }
+    if (gen !== this.generation) return { ok: false, opened: 0 }
     const state = connectionState(json, text, toolkit)
     console.log(`[apps] connect ${toolkit}: ${state} ${replyOutline(json)}`)
     // Already connected on Composio (an earlier sign-in): nothing to open.
     if (state === 'yes') {
       this.markConnected(toolkit, true)
+      this.setPending(toolkit, false)
       return { ok: true, opened: 0, connected: true, message: 'Already connected.' }
     }
     const links = connectionLinks(json)
-    for (const l of links.slice(0, 1)) await this.deps.openExternal(l.url)
+    if (links.length === 0) {
+      // No sign-in page and not connected: Composio could not start it.
+      const said = (json as any)?.data?.message ?? (json as any)?.error
+      return { ok: false, opened: 0, message: typeof said === 'string' && said ? said.slice(0, 300) : 'Composio did not offer a sign-in for this app. Try again.' }
+    }
+    await this.deps.openExternal(links[0].url)
     // Pending until Composio reports the connection active: watched in the
     // background (also after the window or the app is closed and reopened).
     this.setPending(toolkit, true)
     this.watch(toolkit)
-    return { ok: true, opened: Math.min(1, links.length), connected: false }
+    return { ok: true, opened: 1, connected: false }
   }
 
   /** After a sign-in in the browser: is the app connected now? Opens nothing. */
-  async checkApp(toolkit: string): Promise<{ ok: boolean; connected: boolean; pending?: boolean; message?: string }> {
-    const r = await this.connectionNow(toolkit)
-    if (!r.ok) return { ok: false, connected: false, pending: this.isPending(toolkit), message: r.message }
-    // 'unknown' changes nothing: an odd reply never turns an app on or off.
-    if (r.state === 'yes') { this.markConnected(toolkit, true); this.setPending(toolkit, false) }
-    return { ok: true, connected: r.state === 'yes', pending: this.isPending(toolkit) }
+  async checkApp(toolkit: string, opts: { manage?: boolean } = {}): Promise<{ ok: boolean; connected: boolean; pending?: boolean; message?: string }> {
+    // One check per app at a time (the watcher, window focus and the button).
+    const running = this.checks.get(toolkit)
+    if (running) return running
+    const gen = this.generation
+    const run = (async () => {
+      const r = await this.connectionNow(toolkit, opts.manage !== false)
+      if (gen !== this.generation) return { ok: false, connected: false }
+      if (!r.ok) return { ok: false, connected: false, pending: this.isPending(toolkit), message: r.message }
+      // 'unknown' and 'no' change nothing: a pending sign-in stays pending.
+      if (r.state === 'yes') { this.markConnected(toolkit, true); this.setPending(toolkit, false) }
+      return { ok: true, connected: r.state === 'yes', pending: this.isPending(toolkit) }
+    })().finally(() => this.checks.delete(toolkit))
+    this.checks.set(toolkit, run)
+    return run
   }
 
-  /** Forget an app (its Remove button). Composio keeps the account until revoked there. */
+  private checks = new Map<string, Promise<{ ok: boolean; connected: boolean; pending?: boolean; message?: string }>>()
+  /** Bumped by every sign-in change, so a check that started before it changes nothing after it. */
+  private generation = 0
+
+  /**
+   * Remove (Preferences → Apps): MLX Harness stops using the app — it is no
+   * longer listed as connected and its actions are blocked. The account stays
+   * in the user's Composio account until they remove it there.
+   */
   removeApp(toolkit: string): void {
     this.setPending(toolkit, false)
     this.markConnected(toolkit, false)
+    this.setRule(toolkit, 'blocked')
   }
 
   pendingApps(): string[] { return Object.keys(this.readPending()) }
   private isPending(toolkit: string): boolean { return toolkit in this.readPending() }
 
-  /** Watch every pending sign-in again (after a restart). */
+  /** Watch every pending sign-in again (after a restart or a new sign-in). */
   resumePending(): void { for (const tk of this.pendingApps()) this.watch(tk) }
 
+  private lastManage = new Map<string, number>()
+
   /**
-   * The app's connection state, read without starting a new sign-in when
-   * Composio offers COMPOSIO_WAIT_FOR_CONNECTIONS (a short wait), else from
-   * COMPOSIO_MANAGE_CONNECTIONS.
+   * The app's connection state. COMPOSIO_WAIT_FOR_CONNECTIONS (a short,
+   * read-only wait) when Composio offers it. COMPOSIO_MANAGE_CONNECTIONS can
+   * start a new sign-in for an app that isn't connected, so it is used only
+   * when `manage` allows it, and at most every 30 s per app.
    */
-  private async connectionNow(toolkit: string): Promise<{ ok: boolean; state: 'yes' | 'no' | 'unknown'; message?: string }> {
+  private async connectionNow(toolkit: string, manage: boolean): Promise<{ ok: boolean; state: 'yes' | 'no' | 'unknown'; message?: string }> {
     const waitArgs = await this.waitArguments(toolkit)
     if (waitArgs) {
-      const r = await this.call('COMPOSIO_WAIT_FOR_CONNECTIONS', waitArgs)
+      const r = await this.call('COMPOSIO_WAIT_FOR_CONNECTIONS', waitArgs, undefined, { timeoutMs: 20_000, keepClient: true })
       if (!r.isError) {
         const state = connectionState(r.json, r.text, toolkit)
         console.log(`[apps] wait ${toolkit}: ${state} ${replyOutline(r.json)}`)
         if (state !== 'unknown') return { ok: true, state }
       }
     }
+    const last = this.lastManage.get(toolkit) ?? 0
+    if (!manage || Date.now() - last < 30_000) return { ok: true, state: 'unknown' }
+    this.lastManage.set(toolkit, Date.now())
     const { json, text, isError } = await this.call('COMPOSIO_MANAGE_CONNECTIONS', { toolkits: [toolkit] })
     if (isError) return { ok: false, state: 'unknown', message: text.slice(0, 300) }
     const state = connectionState(json, text, toolkit)
@@ -479,11 +519,12 @@ export class AppsService {
         const min = Number.isFinite(prop.minimum) ? prop.minimum : 1
         const max = Number.isFinite(prop.maximum) ? prop.maximum : 30
         args[name] = Math.min(Math.max(/ms|milli/i.test(name) ? 5000 : 5, min), max)
+      } else if (Array.isArray(prop?.enum) && prop.enum.length > 0 && (schema.required ?? []).includes(name) && prop.default !== undefined) {
+        args[name] = prop.default
       }
     }
-    const required = schema.required ?? []
     if (!Object.values(args).some(Array.isArray)) return null
-    return required.every(r => r in args) ? args : null
+    return (schema.required ?? []).every(r => r in args) ? args : null
   }
 
   private watchers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -498,7 +539,10 @@ export class AppsService {
       const since = this.readPending()[toolkit]
       if (since === undefined) return
       if (Date.now() - since > forMs) { this.setPending(toolkit, false); return }
-      try { await this.checkApp(toolkit) } catch { /* try again */ }
+      // Signed out of Composio: stop; a new sign-in watches again.
+      if (!this.isConnected() || this.status_.state === 'error' || this.status_.state === 'connecting' || this.status_.state === 'waiting-for-browser') return
+      // Reading through MANAGE_CONNECTIONS (when WAIT isn't offered) stops after 5 minutes.
+      try { await this.checkApp(toolkit, { manage: Date.now() - since < 5 * 60_000 }) } catch { /* try again */ }
       if (this.isPending(toolkit) && !this.watchers.has(toolkit)) {
         this.watchers.set(toolkit, setTimeout(() => void tick(), every))
       }

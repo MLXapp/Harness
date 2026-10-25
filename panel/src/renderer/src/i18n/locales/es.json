@@ -3297,7 +3297,9 @@
     "checkAgain": "Comprobar de nuevo",
     "waitingApp": "Esperando a que termine el inicio de sesión…",
     "notYet": "Aún no ha terminado. Completa el inicio de sesión en tu navegador; esto se actualiza solo.",
-    "removeApp": "Quitar"
+    "removeApp": "Quitar",
+    "openSignIn": "Abrir inicio de sesión",
+    "removeTitle": "MLX Harness deja de usar {name} y bloquea sus acciones. La conexión sigue en tu cuenta de Composio hasta que la quites allí."
   },
   "skills": {
     "intro": "Las habilidades son carpetas con un SKILL.md: instrucciones (y a veces scripts) para un tipo de trabajo, en el mismo formato que Claude Code. El agente ve el nombre y la descripción y solo lee las instrucciones cuando una tarea las necesita. Los scripts se ejecutan con las herramientas normales, así que preguntan como cualquier comando.",
@@ -3546,6 +3548,10 @@
     "empty": "Esta respuesta no tiene archivos.",
     "localOnly": "Solo en este Mac",
     "openPreview": "Abrir vista previa",
-    "openFiles": "Abrir archivos"
+    "openFiles": "Abrir archivos",
+    "allowInternet": "Permitir internet",
+    "allowInternetTitle": "La página funciona sin conexión, así que no puede enviar nada a ningún sitio. Permítele cargar imágenes y datos de la web.",
+    "online": "Con internet · Desactivar",
+    "goOfflineTitle": "Volver a ejecutar la página sin conexión."
   }
 }

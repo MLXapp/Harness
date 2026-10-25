@@ -49,6 +49,8 @@ export function AppsPreference() {
   const connectApp = async (id: string) => {
     setBusy(id)
     try {
+      // Connecting an app that was removed (blocked) lets it be used again.
+      if (rules[id] === 'blocked') setRules(await window.api.apps.setRule(id, 'ask'))
       const r = await window.api.apps.connectApp(id)
       setNote(n => ({ ...n, [id]: r.ok ? (r.connected ? t('apps.alreadyConnected') : r.opened ? t('apps.finishInBrowser') : t('apps.waitingApp')) : (r.message || t('apps.connectFailed')) }))
       refreshStatus()
@@ -175,14 +177,19 @@ export function AppsPreference() {
                     <span className="inline-flex h-7 items-center gap-1.5 px-1 text-[12.5px] text-muted-foreground" data-vmlx-app-connected={app.id}>
                       <Check className="h-3.5 w-3.5 text-success" />{t('apps.connectedApp')}
                     </span>
-                    <Btn size="md" variant="plain" data-vmlx-control={`apps-remove-${app.id}`} onClick={() => void removeApp(app.id)}>{t('apps.removeApp')}</Btn>
+                    <Btn size="md" variant="plain" title={t('apps.removeTitle', { name: app.name })} data-vmlx-control={`apps-remove-${app.id}`} onClick={() => void removeApp(app.id)}>{t('apps.removeApp')}</Btn>
                   </span>
                 ) : pending.includes(app.id) ? (
-                  <Btn size="md" disabled={busy === app.id} data-vmlx-control={`apps-check-${app.id}`} onClick={() => void check(app.id)}>
-                    {busy === app.id && <Spinner />}{t('apps.checkAgain')}
-                  </Btn>
+                  <span className="inline-flex items-center gap-1">
+                    <Btn size="md" variant="plain" disabled={busy === app.id} data-vmlx-control={`apps-reopen-${app.id}`} onClick={() => void connectApp(app.id)}>
+                      <ExternalLink className="h-3.5 w-3.5" />{t('apps.openSignIn')}
+                    </Btn>
+                    <Btn size="md" disabled={busy === app.id} data-vmlx-control={`apps-check-${app.id}`} onClick={() => void check(app.id)}>
+                      {busy === app.id && <Spinner />}{t('apps.checkAgain')}
+                    </Btn>
+                  </span>
                 ) : (
-                  <Btn size="md" disabled={busy === app.id || rule === 'blocked'} data-vmlx-control={`apps-connect-${app.id}`} onClick={() => void connectApp(app.id)}>
+                  <Btn size="md" disabled={busy === app.id} data-vmlx-control={`apps-connect-${app.id}`} onClick={() => void connectApp(app.id)}>
                     {busy === app.id ? <Spinner /> : <ExternalLink className="h-3.5 w-3.5" />}{t('apps.connectApp')}
                   </Btn>
                 )}

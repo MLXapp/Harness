@@ -193,16 +193,16 @@ export async function runSelfTest(out: string, getWindow: () => BrowserWindow | 
       const files = [
         { path: 'index.html', content: '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><h1>Hi</h1><script src="script.js"></script></body></html>' },
         { path: 'style.css', content: 'h1 { color: rgb(1, 2, 3); }' },
-        { path: 'script.js', content: 'parent.postMessage({ selfTest: getComputedStyle(document.querySelector("h1")).color }, "*")' },
+        { path: 'script.js', content: 'const color = getComputedStyle(document.querySelector("h1")).color; fetch("https://example.com/x").then(() => "reached", () => "blocked").then(net => parent.postMessage({ selfTest: color, net, popup: window.open("https://example.com") === null ? "blocked" : "opened" }, "*"))' },
       ]
       const pub = await window.api.workspace.publish('self-test', 'm1', files, 'index.html')
       if (!pub.ok) return { error: pub.error || 'publish failed' }
       const got = await new Promise(resolve => {
         const frame = document.createElement('iframe')
-        frame.setAttribute('sandbox', 'allow-scripts allow-same-origin')
+        frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms')
         frame.style.cssText = 'position:fixed;width:10px;height:10px;opacity:0;left:-20px'
         const timer = setTimeout(() => resolve('timeout'), 8000)
-        window.addEventListener('message', e => { if (e.data && e.data.selfTest) { clearTimeout(timer); frame.remove(); resolve(e.data.selfTest) } })
+        window.addEventListener('message', e => { if (e.data && e.data.selfTest) { clearTimeout(timer); frame.remove(); resolve(e.data) } })
         frame.src = pub.url
         document.body.appendChild(frame)
       })
@@ -210,7 +210,9 @@ export async function runSelfTest(out: string, getWindow: () => BrowserWindow | 
       return { url: pub.url, got, disk: typeof disk.freeBytes }
     })()`)
     assert(!r.error, r.error)
-    assert(r.got === 'rgb(1, 2, 3)', `the page's stylesheet and script did not run (${r.got})`)
+    assert(r.got?.selfTest === 'rgb(1, 2, 3)', `the page's stylesheet and script did not run (${JSON.stringify(r.got)})`)
+    assert(r.got?.net === 'blocked', 'an offline page reached the internet')
+    assert(r.got?.popup === 'blocked', 'the page opened a window')
     assert(r.disk === 'number', 'free disk space did not answer')
     return r.url
   })

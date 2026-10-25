@@ -72,3 +72,24 @@ describe('workspace artifacts', () => {
     expect(worthACard(extractArtifacts('**main.swift**\n```swift\nimport Foundation\nprint(1)\nprint(2)\n```'))).toBe(true)
   })
 })
+
+describe('workspace artifacts, review cases', () => {
+  it('ignores a caption title, php pages, servers and finds indented fences', () => {
+    const caption = extractArtifacts('```html title="Landing page"\n<!doctype html>\n<html>\n<body>x</body></html>\n```')
+    expect(caption.entry).toBe('index.html')
+    const php = extractArtifacts('```php\n<!doctype html>\n<?php echo 1; ?>\n</html>\n```')
+    expect(php.entry).toBeNull()
+    const withServer = extractArtifacts('**index.html**\n```html\n<!doctype html>\n<html><body></body></html>\n```\n**server.js**\n```js\nconst express = require("express")\nconst app = express()\napp.listen(3000)\n```')
+    const html = previewFiles(withServer)!.files.find(f => f.path === 'index.html')!.content
+    expect(html).not.toContain('server.js')
+    const listed = extractArtifacts('1. Create the page:\n\n    ```html\n    <!doctype html>\n    <html>\n    <body>hi</body></html>\n    ```')
+    expect(listed.files[0]).toMatchObject({ path: 'index.html', kind: 'web' })
+    expect(listed.files[0].code.startsWith('<!doctype html>')).toBe(true)
+  })
+  it('drops other imports and named exports in a React preview', () => {
+    const jsx = "import { Heart } from 'lucide-react'\nimport React, { useState } from 'react'\nexport function Helper() { return null }\nexport default function App() {\n  return <div>hi</div>\n}"
+    const page = previewFiles(extractArtifacts('```jsx\n' + jsx + '\n```'))!.files.find(f => f.path === 'index.html')!.content
+    expect(page).not.toContain('lucide-react')
+    expect(page).not.toContain('export function Helper')
+  })
+})

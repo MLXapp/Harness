@@ -72,7 +72,7 @@ function nameFromLine(line: string): string | null {
 }
 
 function kindFor(lang: string, code: string): ArtifactKind {
-  if (lang === 'html' || (/^\s*<!doctype html|^\s*<html[\s>]/i.test(code))) return 'web'
+  if (lang === 'html') return 'web'
   if (lang === 'svg' || (lang === 'xml' && /^\s*<svg[\s>]/i.test(code))) return 'svg'
   if ((lang === 'jsx' || lang === 'tsx' || lang === 'js') && looksLikeReactComponent(code)) return 'react'
   if (lang === 'md') return 'markdown'
@@ -94,17 +94,19 @@ function fencedBlocks(markdown: string): Block[] {
   let i = 0
   let prose: string[] = []
   while (i < lines.length) {
-    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(lines[i])
-    if (!fence) { prose.push(lines[i]); i++; continue }
-    const marker = fence[1]
-    const info = fence[2].trim()
+    // Fences inside list items are indented; up to 8 spaces still count.
+    const fence = /^( {0,8})(`{3,}|~{3,})(.*)$/.exec(lines[i])
+    if (!fence || (fence[2][0] === '`' && fence[3].includes('`'))) { prose.push(lines[i]); i++; continue }
+    const indent = fence[1].length
+    const marker = fence[2]
+    const info = fence[3].trim()
+    const close = new RegExp(`^ {0,${indent + 3}}${marker[0] === '`' ? '`' : '~'}{${marker.length},}\\s*$`)
     const body: string[] = []
     i++
     let closed = false
     while (i < lines.length) {
-      const close = new RegExp(`^ {0,3}${marker[0] === '`' ? '`' : '~'}{${marker.length},}\\s*$`).exec(lines[i])
-      if (close) { closed = true; i++; break }
-      body.push(lines[i])
+      if (close.test(lines[i])) { closed = true; i++; break }
+      body.push(indent ? lines[i].replace(new RegExp(`^ {0,${indent}}`), '') : lines[i])
       i++
     }
     const before = [...prose].reverse().find(l => l.trim()) ?? ''
@@ -127,7 +129,9 @@ export function extractArtifacts(markdown: string): ArtifactSet {
     let lang = normLang(rawLang.replace(/[{}]/g, ''))
     let name: string | null = null
     const meta = rest.join(' ')
-    const metaName = /(?:title|file(?:name)?|path)\s*=\s*["']?([^"'\s]+)/i.exec(meta)?.[1] ?? FILE_RE.exec(meta)?.[1] ?? null
+    // A name in the fence must look like a file ("title=Landing page" is a caption, not a name).
+    const metaRaw = /(?:title|file(?:name)?|path)\s*=\s*["']?([^"'\s]+)/i.exec(meta)?.[1] ?? FILE_RE.exec(meta)?.[1] ?? null
+    const metaName = metaRaw && /\.[A-Za-z0-9]{1,8}$/.test(metaRaw) ? metaRaw : null
     if (/^[\w.-]+\.[A-Za-z0-9]{1,8}$/.test(rawLang) && LANG_FOR_EXT[rawLang.split('.').pop()!.toLowerCase()]) {
       name = rawLang
       lang = LANG_FOR_EXT[rawLang.split('.').pop()!.toLowerCase()]
@@ -219,7 +223,10 @@ export function previewFiles(set: ArtifactSet): { files: Array<{ path: string; c
   if (entryFile.kind === 'web') {
     let html = entryFile.code
     const css = set.files.filter(f => f.language === 'css' && !html.includes(f.path))
-    const js = set.files.filter(f => f.language === 'js' && f.kind !== 'react' && !html.includes(f.path))
+    // Only a page's own scripts are linked in (script.js, main.js, app.js),
+    // never a server ("server.js", require, process.env) the reply also wrote.
+    const js = set.files.filter(f => f.language === 'js' && f.kind !== 'react' && !html.includes(f.path) &&
+      /^(script|main|app|index)(-\d+)?\.js$/.test(f.path) && !/\brequire\s*\(|\bprocess\.env\b|from\s+['"]express['"]/.test(f.code))
     const links = css.map(f => `<link rel="stylesheet" href="${escapeAttr(f.path)}">`).join('\n')
     const scripts = js.map(f => `<script src="${escapeAttr(f.path)}"></script>`).join('\n')
     if (links) html = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, `${links}\n</head>`) : `${links}\n${html}`
@@ -243,11 +250,14 @@ function svgPage(file: ArtifactFile): string {
 function reactPage(file: ArtifactFile, styles: ArtifactFile[]): string {
   // Imports of React itself are dropped (React is global here); "export
   // default" becomes the component that is mounted.
+  // Imports can't load here: React's are global, others are dropped (what
+  // they named shows as an error in the preview, not a blank page).
   const source = file.code
-    .replace(/^\s*import\s+[^;]*?from\s+['"]react(?:-dom(?:\/client)?)?['"];?\s*$/gm, '')
-    .replace(/^\s*import\s+['"][^'"]+\.css['"];?\s*$/gm, '')
+    .replace(/^\s*import\s+[\s\S]*?from\s+['"][^'"]+['"];?\s*$/gm, '')
+    .replace(/^\s*import\s+['"][^'"]+['"];?\s*$/gm, '')
     .replace(/export\s+default\s+function\s+([A-Za-z_$][\w$]*)/, 'function $1')
     .replace(/export\s+default\s+/, 'window.__App = ')
+    .replace(/^(\s*)export\s+(?=(?:async\s+)?function|const|let|class)/gm, '$1')
   const name = /export\s+default\s+function\s+([A-Za-z_$][\w$]*)/.exec(file.code)?.[1]
   const mount = `const __Root = window.__App || ${name ?? 'typeof App !== "undefined" ? App : null'};`
   const json = JSON.stringify(`const { useState, useEffect, useRef, useMemo, useCallback, useReducer, useContext, createContext, Fragment } = React;\n${source}\n${mount}\nReactDOM.createRoot(document.getElementById('root')).render(React.createElement(__Root));`)

@@ -73,13 +73,18 @@ describe('AppsService direct mode against an MCP server', () => {
 describe('connectionState', () => {
   it('says connected only on a positive signal', async () => {
     const { connectionState } = await import('../src/main/apps/composioPolicy')
-    expect(connectionState({ data: { results: { gmail: { status: 'active' } } } })).toBe('yes')
-    expect(connectionState({ gmail: { is_connected: true } })).toBe('yes')
-    expect(connectionState({ data: { results: { gmail: { status: 'INITIATED', redirect_url: 'https://connect.composio.dev/x' } } } })).toBe('no')
-    expect(connectionState({ gmail: { connection_status: 'EXPIRED' } })).toBe('no')
-    expect(connectionState(undefined, 'Something went wrong')).toBe('unknown')
-    expect(connectionState({ data: {} })).toBe('unknown')
-    expect(connectionState(undefined, 'Gmail is already connected.')).toBe('yes')
+    expect(connectionState({ data: { results: { gmail: { status: 'active' } } } }, '', 'gmail')).toBe('yes')
+    expect(connectionState({ gmail: { is_connected: true } }, '', 'gmail')).toBe('yes')
+    expect(connectionState({ data: { results: { gmail: { status: 'INITIATED', redirect_url: 'https://connect.composio.dev/x' } } } }, '', 'gmail')).toBe('no')
+    expect(connectionState({ gmail: { connection_status: 'EXPIRED' } }, '', 'gmail')).toBe('no')
+    expect(connectionState(undefined, 'Something went wrong', 'gmail')).toBe('unknown')
+    expect(connectionState({ data: {} }, '', 'gmail')).toBe('unknown')
+    expect(connectionState(undefined, 'Gmail is already connected.', 'gmail')).toBe('yes')
+    // Review cases: negatives in text, and nested non-account flags.
+    expect(connectionState(undefined, 'No active connection for gmail yet.', 'gmail')).toBe('no')
+    expect(connectionState({ gmail: { status: 'initiated', auth_config: { status: 'ENABLED' }, redirect_url: 'https://x.dev/a' } }, '', 'gmail')).toBe('no')
+    expect(connectionState({ gmail: { toolkit: { slug: 'gmail', is_active: true }, status: 'initiated' } }, '', 'gmail')).toBe('no')
+    expect(connectionState({ results: { gmail: { status: 'timeout' } } }, '', 'gmail')).toBe('no')
   })
 })
 
@@ -95,6 +100,8 @@ describe('connection replies Composio sends', () => {
     // Results as a list naming the toolkit.
     expect(connectionState({ data: { results: [{ toolkit: 'slack', status: 'ACTIVE' }, { toolkit: 'gmail', status: 'INITIATED' }] } }, '', 'slack')).toBe('yes')
     expect(connectionState({ data: { results: [{ toolkit: 'slack', status: 'ACTIVE' }, { toolkit: 'gmail', status: 'INITIATED' }] } }, '', 'gmail')).toBe('no')
+    // An active account in the entry's account list counts.
+    expect(connectionState({ data: { results: { gmail: { status: 'initiated', connected_accounts: [{ status: 'ACTIVE' }] } } } }, '', 'gmail')).toBe('yes')
     // The user's own profile data is never read as a status.
     expect(connectionState({ data: { results: { gmail: { has_active_connection: true, current_user_info: { status: 'disabled' } } } } }, '', 'gmail')).toBe('yes')
   })
@@ -133,9 +140,10 @@ describe('connecting an app through the browser', () => {
     let pending: Record<string, number> = {}
     let changes = 0
     const opened: string[] = []
+    let rules: Record<string, any> = {}
     const storage: AppsStorage = {
       readOAuth: () => null, writeOAuth: () => {}, readKey: () => 'ck', writeKey: () => {},
-      readRules: () => ({}), writeRules: () => {}, chatEnabled: () => true, setChatEnabled: () => {},
+      readRules: () => rules, writeRules: v => { rules = v }, chatEnabled: () => true, setChatEnabled: () => {},
       readConnected: () => connected, writeConnected: v => { connected = v },
       readPending: () => pending, writePending: v => { pending = v },
     }
@@ -165,6 +173,7 @@ describe('connecting an app through the browser', () => {
 
     again.removeApp('gmail')
     expect(connected).toEqual([])
+    expect(rules).toEqual({ gmail: 'blocked' })
     expect(manageCalls).toBeGreaterThan(0)
     apps.removeApp('gmail')
   })

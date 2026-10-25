@@ -5,7 +5,7 @@
  * button. A download asks once (unless "Don't ask again"), and always says
  * so when the disk is too full or the build is too big for this Mac.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, Download, Eye, HardDrive, Info, Search } from 'lucide-react'
 import { useTranslation } from '../../i18n'
@@ -90,14 +90,14 @@ export function ModelCatalog({ downloading, downloaded, onDownload }: {
         </label>
       </div>
 
-      <div className="overflow-hidden rounded-[12px] border border-border/70 bg-[rgb(var(--bg-2-rgb)/0.5)]">
+      <AutoHeight className="overflow-hidden rounded-[12px] border border-border/70 bg-[rgb(var(--bg-2-rgb)/0.5)]">
         {models.length === 0 && <p className="px-4 py-6 text-center text-[13px] text-muted-foreground">{t('models.catalog.none')}</p>}
         {models.map((model, i) => (
           <ModelRow key={model.id} model={model} first={i === 0} open={open === model.id} memoryGB={memoryGB}
             onToggle={() => setOpen(o => (o === model.id ? null : model.id))}
             downloading={downloading} downloaded={downloaded} onDownload={v => void start(model, v)} />
         ))}
-      </div>
+      </AutoHeight>
       <p className="px-1 text-[12px] leading-[17px] text-muted-foreground">{t('models.catalog.footnote')}</p>
 
       <DownloadConfirm request={confirm} memoryGB={memoryGB} onClose={() => setConfirm(null)}
@@ -257,20 +257,37 @@ function DownloadConfirm({ request, memoryGB, onClose, onConfirm }: {
     const id = window.setTimeout(() => setCurrent(null), EXIT_MS)
     return () => window.clearTimeout(id)
   }, [request])
+  const panelRef = useRef<HTMLDivElement>(null)
+  // Focus moves into the dialog when it opens (its main button), stays in it
+  // (Tab cycles), and goes back to where it was when it closes.
   useEffect(() => {
     if (!request) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); onClose() } }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    const before = document.activeElement as HTMLElement | null
+    const raf = requestAnimationFrame(() => panelRef.current?.querySelector<HTMLElement>('[data-vmlx-dialog-default]')?.focus())
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); return }
+      if (e.key !== 'Tab' || !panelRef.current) return
+      const items = [...panelRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')]
+      if (items.length === 0) return
+      const first = items[0], last = items[items.length - 1]
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('keydown', onKey, true)
+      if (before && document.contains(before)) requestAnimationFrame(() => before.focus())
+    }
   }, [request, onClose])
   if (!current) return null
   const { model, variant, free } = current
   const check = checkDownload(variant.bytes, free, memoryGB)
   const need = memoryNeededGB(variant.bytes)
   return createPortal(
-    <div className={`mlx-sheet-root ${shown ? 'is-shown' : ''}`} data-vmlx-surface="catalog-download-confirm">
+    <div className={`mlx-sheet-root ${shown ? 'is-shown' : 'pointer-events-none'}`} data-vmlx-surface="catalog-download-confirm">
       <div className="mlx-sheet-scrim" onMouseDown={onClose} aria-hidden />
-      <div role="dialog" aria-modal="true" aria-label={t('models.catalog.confirmTitle', { name: model.name })}
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t('models.catalog.confirmTitle', { name: model.name })}
         className="mlx-sheet w-[440px] max-w-full p-5">
         {check.noSpace ? (
           <>
@@ -279,7 +296,7 @@ function DownloadConfirm({ request, memoryGB, onClose, onConfirm }: {
               {t('models.catalog.noSpaceDetail', { size: formatGB(variant.bytes), free: formatGB(free ?? 0) })}
             </p>
             <div className="mt-5 flex justify-end">
-              <Btn variant="primary" size="lg" onClick={onClose}>{t('common.ok')}</Btn>
+              <Btn variant="primary" size="lg" data-vmlx-dialog-default="" onClick={onClose}>{t('common.ok')}</Btn>
             </div>
           </>
         ) : (
@@ -320,7 +337,7 @@ function DownloadConfirm({ request, memoryGB, onClose, onConfirm }: {
               )}
               <span className="flex-1" />
               <Btn size="lg" onClick={onClose}>{t('common.cancel')}</Btn>
-              <Btn variant="primary" size="lg" data-vmlx-control="catalog-confirm-download" onClick={() => onConfirm(skipNext)}>
+              <Btn variant="primary" size="lg" data-vmlx-dialog-default="" data-vmlx-control="catalog-confirm-download" onClick={() => onConfirm(skipNext)}>
                 <Download className="h-3.5 w-3.5" />{t('models.catalog.download')}
               </Btn>
             </div>
@@ -329,5 +346,23 @@ function DownloadConfirm({ request, memoryGB, onClose, onConfirm }: {
       </div>
     </div>,
     document.body,
+  )
+}
+
+/** A box whose height follows its content smoothly (filters change the list without a jump). */
+function AutoHeight({ className, children }: { className?: string; children: ReactNode }) {
+  const inner = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState<number | undefined>(undefined)
+  useLayoutEffect(() => {
+    const el = inner.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setHeight(el.offsetHeight))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return (
+    <div className={`${className ?? ''} transition-[height] duration-300 ease-mlx`} style={{ height }}>
+      <div ref={inner}>{children}</div>
+    </div>
   )
 }

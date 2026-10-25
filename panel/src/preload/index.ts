@@ -501,8 +501,8 @@ const api = {
   },
   // Workspace: files a reply made, previewed from 127.0.0.1 (main/workspace).
   workspace: {
-    publish: (chatId: string, messageId: string, files: Array<{ path: string; content: string }>, entry: string): Promise<{ ok: boolean; url?: string; dir?: string; error?: string }> =>
-      ipcRenderer.invoke('workspace:publish', chatId, messageId, files, entry),
+    publish: (chatId: string, messageId: string, files: Array<{ path: string; content: string }>, entry: string, online?: boolean): Promise<{ ok: boolean; url?: string; dir?: string; error?: string }> =>
+      ipcRenderer.invoke('workspace:publish', chatId, messageId, files, entry, online === true),
     save: (files: Array<{ path: string; content: string }>, name: string): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> =>
       ipcRenderer.invoke('workspace:save', files, name),
     openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('workspace:openExternal', url),

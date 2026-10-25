@@ -505,7 +505,7 @@ declare global {
         openFolder: () => Promise<boolean>;
       };
       workspace: {
-        publish: (chatId: string, messageId: string, files: Array<{ path: string; content: string }>, entry: string) => Promise<{ ok: boolean; url?: string; dir?: string; error?: string }>;
+        publish: (chatId: string, messageId: string, files: Array<{ path: string; content: string }>, entry: string, online?: boolean) => Promise<{ ok: boolean; url?: string; dir?: string; error?: string }>;
         save: (files: Array<{ path: string; content: string }>, name: string) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
         openExternal: (url: string) => Promise<boolean>;
       };

@@ -7,7 +7,7 @@ import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { safeArtifactPath } from '../../shared/artifacts'
-import { isPreviewUrl, previewOrigin, startPreviewServer } from './previewServer'
+import { ONLINE_MARKER, isPreviewUrl, previewOrigin, startPreviewServer } from './previewServer'
 
 const MAX_BYTES = 25 * 1024 * 1024
 const ID = /^[\w-]{1,100}$/
@@ -50,7 +50,7 @@ function freeName(parent: string, base: string): string {
 }
 
 export function registerWorkspaceHandlers(getWindow: () => BrowserWindow | null): void {
-  ipcMain.handle('workspace:publish', async (_e, chatId: string, messageId: string, files: unknown, entry: string) => {
+  ipcMain.handle('workspace:publish', async (_e, chatId: string, messageId: string, files: unknown, entry: string, online?: boolean) => {
     if (!ID.test(String(chatId)) || !ID.test(String(messageId))) return { ok: false, error: 'Bad id.' }
     const checked = checkFiles(files)
     if (typeof checked === 'string') return { ok: false, error: checked }
@@ -61,6 +61,7 @@ export function registerWorkspaceHandlers(getWindow: () => BrowserWindow | null)
       rmSync(dir, { recursive: true, force: true })
       mkdirSync(dir, { recursive: true })
       writeAll(dir, checked)
+      if (online === true) writeFileSync(join(dir, ONLINE_MARKER), '1')
       const port = await startPreviewServer(workspaceRoot())
       const url = `http://127.0.0.1:${port}/${chatId}/${messageId}/${entryPath.split('/').map(encodeURIComponent).join('/')}`
       return { ok: true, url, dir }

@@ -1,4 +1,4 @@
-export function buildContentSecurityPolicy(options: { devRenderer?: boolean } = {}): string {
+export function buildContentSecurityPolicy(options: { devRenderer?: boolean; previewOrigin?: string | null } = {}): string {
   const scriptSrc = options.devRenderer
     ? " script-src 'self' 'unsafe-inline';"
     : " script-src 'self';"
@@ -23,6 +23,6 @@ export function buildContentSecurityPolicy(options: { devRenderer?: boolean } = 
     " media-src 'self' data: blob: mlx-media:;" +
     // The workspace panel shows a reply's website from MLX Harness's own
     // preview server (main/workspace/previewServer.ts, 127.0.0.1 only).
-    " frame-src 'self' http://127.0.0.1:*;"
+    ` frame-src 'self'${options.previewOrigin && /^http:\/\/127\.0\.0\.1:\d+$/.test(options.previewOrigin) ? ` ${options.previewOrigin}` : ''};`
   )
 }
