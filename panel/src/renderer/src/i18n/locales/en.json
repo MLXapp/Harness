@@ -3553,5 +3553,58 @@
     "allowInternetTitle": "The page runs offline, so it can't send anything anywhere. Allow it to load images and data from the web.",
     "online": "Online · Turn off",
     "goOfflineTitle": "Run the page offline again."
+  },
+  "installer": {
+    "windowTitle": "Install MLX Harness",
+    "footer": "Version {version} · Built on vMLX by JANGQ AI",
+    "folder": {
+      "system": "Applications",
+      "user": "Applications in your home folder"
+    },
+    "button": {
+      "install": "Install",
+      "quit": "Quit",
+      "open": "Open MLX Harness",
+      "retry": "Try Again"
+    },
+    "offer": {
+      "title": "Install MLX Harness in your Applications folder",
+      "text": "MLX Harness runs from there and keeps itself up to date.",
+      "textUser": "This account can't add apps to /Applications, so MLX Harness goes in Applications in your home folder.",
+      "replaces": "Replaces MLX Harness {version}.",
+      "quits": "MLX Harness {version} is open. Installing quits it first, then replaces it."
+    },
+    "installed": {
+      "title": "MLX Harness is already in your Applications folder",
+      "same": "This version, {version}, is installed there.",
+      "newer": "A newer version, {version}, is installed there.",
+      "inUser": "It's in Applications in your home folder."
+    },
+    "blocked": {
+      "title": "MLX Harness can't be installed",
+      "notWritable": "This account can't add apps to /Applications or to Applications in your home folder. Ask an administrator to install MLX Harness.",
+      "occupied": "Another app named MLX Harness is in your Applications folder. Rename or remove it, then try again."
+    },
+    "working": {
+      "title": "Installing MLX Harness…",
+      "done": "MLX Harness is installed"
+    },
+    "step": {
+      "quitting": "Waiting for MLX Harness {version} to quit…",
+      "copying": "Copying to {folder}…",
+      "checking": "Checking the signature…",
+      "finishing": "Finishing…",
+      "opening": "Opening MLX Harness…"
+    },
+    "bytes": "{done} of {total}",
+    "failed": {
+      "title": "MLX Harness couldn't be installed",
+      "copy": "Copying didn't finish. Try again.",
+      "space": "There isn't enough free space. MLX Harness needs about {gb} GB.",
+      "signature": "The copy didn't pass the signature check, so it wasn't installed. Download MLX Harness again from harness.mlx.app.",
+      "busy": "MLX Harness {version} didn't quit. Quit it, then try again.",
+      "notWritable": "MLX Harness can't write to the Applications folder. Try again, or ask an administrator to install it.",
+      "move": "The new copy couldn't be put in place. Try again."
+    }
   }
 }

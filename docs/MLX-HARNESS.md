@@ -231,6 +231,51 @@ show `notes`; to say more than the default line, edit `notes` in `latest.json` o
 DMG isn't signed and notarized by team CCKXS9W488 is refused by every running copy
 (they offer the manual download instead).
 
+## Installing from the DMG (0.5.5)
+
+The DMG holds just `MLX Harness.app` at its root (no Applications link; the
+background says "Open MLX Harness to install"). The in-app updater still finds the
+app there by name and bundle id (`findHarnessApp`), and CI fails a DMG without it
+or with an Applications link.
+
+Opened from a mounted disk image (or App-Translocated by macOS), the app shows a
+small install window instead of starting (`panel/src/main/app-installer.ts`, page
+`app-installer-page.ts`, preload `src/preload/installer.ts`; rules in
+`shared/appInstall.ts`, tests `tests/app-install-rules.test.ts`). It runs right after
+app ready, before the engine check, the preview server, the menu or any window;
+the single-instance lock may be held by an installed copy (then the installer
+still opens and offers to quit and replace it).
+
+- **Never a downgrade.** The same or a newer MLX Harness (bundle id
+  `app.mlx.studio`) in `/Applications` or `~/Applications` (either name), or
+  running anywhere, gets "Open MLX Harness" instead of Install. A version that
+  can't be read counts as not older.
+- **Install.** Older copies that are running are asked to quit (SIGTERM: their
+  own clean shutdown; up to 90 s, then their engines up to 30 s), the plan is
+  made again (a quitting copy may have swapped in a staged update), then `ditto`
+  copies the app to `.MLX Harness.install.app` next to the destination in a child
+  process (the bar follows `du` of the copy; free space is checked first), the
+  copy must carry our bundle id and this version and pass `codesign --verify
+  --strict` against `HARNESS_REQUIREMENT` (an unsigned build passes only when the
+  original fails too), loses its quarantine flag, and replaces the older copy with
+  two renames (the old one is deleted). Other older copies in the Applications
+  folders go to the Trash. `/Applications` is used when writable, else
+  `~/Applications`; an app with our name that isn't ours is never touched.
+- **After.** The window fades out, the app exits, and a detached script
+  (`RELAUNCH_SCRIPT`, positional arguments only) waits for the PID, opens the
+  installed copy and ejects the disk image without force (retrying up to 20 s,
+  left mounted if busy). Log: `userData/updates/install.log`.
+- **Why not `app.moveToApplicationsFolder()`:** Electron's mover copies the
+  bundle (about 1.5 GB) with NSFileManager on the main thread, so the window would
+  freeze with no progress; on the password path it never calls its
+  `conflictHandler` (it `rm -rf`s the destination), and it can't eject a disk
+  image the app was translocated from.
+- **Opting out:** `--mlx-no-install` or `MLX_HARNESS_NO_INSTALLER=1` starts the app
+  from the DMG as before (the updater then offers the manual download). CI's
+  self-test (`--mlx-self-test`) never shows the installer; it draws the install
+  window hidden and runs a real copy of the app through the same copy and
+  signature checks into a temporary folder.
+
 ## Merging upstream updates
 
 ```bash

@@ -7,8 +7,9 @@
  * features that only run inside Electron: the window renders and its preload
  * API answers over IPC, memory and scheduled-task stores, the agent browser
  * (own session, isolated-world scripts, refs, clicks, local-address blocking)
- * the Changes record/revert path through the tool hook, and the MLX Node
- * yield watcher. It writes a JSON report and exits 0 (all
+ * the Changes record/revert path through the tool hook, the MLX Node
+ * yield watcher, and the installer (its window, and a real copy of this app
+ * through Install's copy and signature checks). It writes a JSON report and exits 0 (all
  * passed), 1 (a check failed) or 2 (timed out). Nothing is left behind: the
  * memory entry it writes is deleted again.
  */
@@ -62,9 +63,9 @@ export async function runSelfTest(out: string, getWindow: () => BrowserWindow | 
     app.exit(code)
   }
   const deadline = setTimeout(() => {
-    checks.push({ name: 'finished within 150 s', ok: false, ms: Date.now() - started })
+    checks.push({ name: 'finished within 210 s', ok: false, ms: Date.now() - started })
     finish(2)
-  }, 150_000)
+  }, 210_000)
 
   await check('window rendered the app', async () => {
     const win = getWindow()
@@ -221,6 +222,13 @@ export async function runSelfTest(out: string, getWindow: () => BrowserWindow | 
   await check('MLX Node yield watcher runs', async () => {
     const { evaluateYield } = await import('./mlxNodeYield')
     await evaluateYield()
+  })
+
+  // The install window shown when the app is opened from its disk image, and a
+  // real copy of this app through the same copy + signature checks as Install.
+  await check('installer: window draws; a copy of this app passes the install checks', async () => {
+    const { installerSelfTest } = await import('./app-installer')
+    return installerSelfTest()
   })
 
   await check('no uncaught errors in the window', () => {

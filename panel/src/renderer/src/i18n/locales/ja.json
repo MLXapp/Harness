@@ -3553,5 +3553,58 @@
     "allowInternetTitle": "このページはオフラインで動くため、どこにも何も送れません。Web から画像やデータを読み込めるようにします。",
     "online": "オンライン · オフにする",
     "goOfflineTitle": "ページを再びオフラインで動かします。"
+  },
+  "installer": {
+    "windowTitle": "MLX Harness をインストール",
+    "footer": "バージョン {version} · JANGQ AI の vMLX をベースに構築",
+    "folder": {
+      "system": "「アプリケーション」フォルダ",
+      "user": "ホームフォルダ内の「アプリケーション」"
+    },
+    "button": {
+      "install": "インストール",
+      "quit": "終了",
+      "open": "MLX Harness を開く",
+      "retry": "もう一度試す"
+    },
+    "offer": {
+      "title": "MLX Harness を「アプリケーション」フォルダにインストール",
+      "text": "MLX Harness はそこから起動し、自動で最新の状態に保たれます。",
+      "textUser": "このアカウントでは /Applications にアプリを追加できないため、MLX Harness はホームフォルダ内の「アプリケーション」に入ります。",
+      "replaces": "MLX Harness {version} を置き換えます。",
+      "quits": "MLX Harness {version} が開いています。インストール時にまず終了してから置き換えます。"
+    },
+    "installed": {
+      "title": "MLX Harness はすでに「アプリケーション」フォルダにあります",
+      "same": "そこにこのバージョン（{version}）がインストールされています。",
+      "newer": "そこにより新しいバージョン {version} がインストールされています。",
+      "inUser": "ホームフォルダ内の「アプリケーション」にあります。"
+    },
+    "blocked": {
+      "title": "MLX Harness をインストールできません",
+      "notWritable": "このアカウントでは /Applications にもホームフォルダ内の「アプリケーション」にもアプリを追加できません。管理者に MLX Harness のインストールを依頼してください。",
+      "occupied": "「アプリケーション」フォルダに MLX Harness という名前の別のアプリがあります。名前を変更するか削除してから、もう一度お試しください。"
+    },
+    "working": {
+      "title": "MLX Harness をインストール中…",
+      "done": "MLX Harness をインストールしました"
+    },
+    "step": {
+      "quitting": "MLX Harness {version} の終了を待っています…",
+      "copying": "{folder}にコピー中…",
+      "checking": "署名を確認中…",
+      "finishing": "仕上げ中…",
+      "opening": "MLX Harness を開いています…"
+    },
+    "bytes": "{done} / {total}",
+    "failed": {
+      "title": "MLX Harness をインストールできませんでした",
+      "copy": "コピーが完了しませんでした。もう一度お試しください。",
+      "space": "空き容量が足りません。MLX Harness には約 {gb} GB が必要です。",
+      "signature": "コピーが署名の確認に合格しなかったため、インストールしませんでした。harness.mlx.app から MLX Harness をもう一度ダウンロードしてください。",
+      "busy": "MLX Harness {version} が終了しませんでした。終了してから、もう一度お試しください。",
+      "notWritable": "MLX Harness は「アプリケーション」フォルダに書き込めません。もう一度試すか、管理者にインストールを依頼してください。",
+      "move": "新しいコピーを所定の場所に移動できませんでした。もう一度お試しください。"
+    }
   }
 }

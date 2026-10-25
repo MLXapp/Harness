@@ -3553,5 +3553,58 @@
     "allowInternetTitle": "此页面离线运行，无法向任何地方发送数据。允许它从网络加载图片和数据。",
     "online": "已联网 · 关闭",
     "goOfflineTitle": "让页面重新离线运行。"
+  },
+  "installer": {
+    "windowTitle": "安装 MLX Harness",
+    "footer": "版本 {version} · 基于 JANGQ AI 的 vMLX 构建",
+    "folder": {
+      "system": "“应用程序”文件夹",
+      "user": "个人文件夹中的“应用程序”"
+    },
+    "button": {
+      "install": "安装",
+      "quit": "退出",
+      "open": "打开 MLX Harness",
+      "retry": "重试"
+    },
+    "offer": {
+      "title": "将 MLX Harness 安装到“应用程序”文件夹",
+      "text": "MLX Harness 将从那里运行，并自动保持最新。",
+      "textUser": "此帐户无法向 /Applications 添加应用，因此 MLX Harness 将安装到个人文件夹中的“应用程序”。",
+      "replaces": "将替换 MLX Harness {version}。",
+      "quits": "MLX Harness {version} 正在运行。安装时会先退出它，再进行替换。"
+    },
+    "installed": {
+      "title": "MLX Harness 已在“应用程序”文件夹中",
+      "same": "那里已安装此版本（{version}）。",
+      "newer": "那里已安装更新的版本 {version}。",
+      "inUser": "它位于个人文件夹中的“应用程序”。"
+    },
+    "blocked": {
+      "title": "无法安装 MLX Harness",
+      "notWritable": "此帐户无法向 /Applications 或个人文件夹中的“应用程序”添加应用。请让管理员安装 MLX Harness。",
+      "occupied": "“应用程序”文件夹中已有另一个名为 MLX Harness 的应用。请将其重命名或移除，然后重试。"
+    },
+    "working": {
+      "title": "正在安装 MLX Harness…",
+      "done": "MLX Harness 已安装"
+    },
+    "step": {
+      "quitting": "正在等待 MLX Harness {version} 退出…",
+      "copying": "正在拷贝到{folder}…",
+      "checking": "正在检查签名…",
+      "finishing": "即将完成…",
+      "opening": "正在打开 MLX Harness…"
+    },
+    "bytes": "{done} / {total}",
+    "failed": {
+      "title": "MLX Harness 安装失败",
+      "copy": "拷贝未完成。请重试。",
+      "space": "可用空间不足。MLX Harness 需要约 {gb} GB。",
+      "signature": "拷贝未通过签名检查，因此未安装。请从 harness.mlx.app 重新下载 MLX Harness。",
+      "busy": "MLX Harness {version} 未退出。请先退出它，然后重试。",
+      "notWritable": "MLX Harness 无法写入“应用程序”文件夹。请重试，或让管理员安装。",
+      "move": "无法将新拷贝放到位。请重试。"
+    }
   }
 }

@@ -38,7 +38,9 @@ export default defineConfig({
       outDir: 'dist/preload',
       rollupOptions: {
         input: {
-          index: resolve(__dirname, 'src/preload/index.ts')
+          index: resolve(__dirname, 'src/preload/index.ts'),
+          // The install window shown when MLX Harness is opened from its disk image.
+          installer: resolve(__dirname, 'src/preload/installer.ts')
         }
       }
     }

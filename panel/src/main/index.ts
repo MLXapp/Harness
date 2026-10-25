@@ -43,6 +43,7 @@ import { offerMlxNodeOnFirstRun } from './mlx-node'
 import { sessionManager } from './sessions'
 import { releaseMlxNodeYield, resumeMlxNodeYieldWatch, startMlxNodeYield } from './mlxNodeYield'
 import { runSelfTest, selfTestOutput } from './selfTest'
+import { focusInstaller, installerHandlesQuit, installerSourceAtStartup, runInstaller } from './app-installer'
 import { apiGateway } from './api-gateway'
 import { buildContentSecurityPolicy } from './csp'
 import { rendererSettingValue } from './settingsAccess'
@@ -198,6 +199,10 @@ process.on('unhandledRejection', (reason) => {
   console.error('[CRASH] Unhandled promise rejection:', reason)
 })
 
+// Opened from its disk image (or translocated by macOS): this launch may be
+// the installer (app-installer.ts), confirmed once the app is ready.
+const installerSource = installerSourceAtStartup({ selfTest: !!selfTestOut, secondaryInstance: allowSecondaryInstance })
+
 // Prevent multiple instances — second instance would corrupt SQLite
 const gotTheLock = allowSecondaryInstance || app.requestSingleInstanceLock()
 if (allowSecondaryInstance) {
@@ -207,9 +212,12 @@ if (proofOwnedEngineLifecycle) {
   console.log('[STARTUP] Proof-owned engine lifecycle enabled; global engine adoption is disabled')
 }
 if (!gotTheLock) {
-  app.quit()
+  // The installer still opens when an installed (older) copy holds the lock:
+  // it offers to quit and replace it. It never starts the app itself.
+  if (!installerSource) app.quit()
 } else {
   app.on('second-instance', () => {
+    if (focusInstaller()) return
     // Focus existing window when user tries to open a second instance
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore()
@@ -568,6 +576,18 @@ app.whenReady().then(async () => {
     if (savedLocale) setMainLocale(savedLocale)
   } catch {}
 
+  // Opened from the disk image: show the install window instead of starting.
+  if (installerSource) {
+    let took = false
+    try {
+      took = await runInstaller({ source: installerSource, lockHeld: gotTheLock })
+    } catch (e) {
+      console.error('[INSTALL] the installer failed to start; starting normally', e)
+    }
+    if (took) return
+    if (!gotTheLock) { app.quit(); return }
+  }
+
   // IPC bridge: renderer mirrors its locale to main so tray/menu/dialogs
   // stay in sync with the UI picker without a reload.
   ipcMain.handle('i18n:set-locale', (_, loc: string) => {
@@ -754,6 +774,8 @@ app.whenReady().then(async () => {
 app.on('will-quit', () => stopPreviewServer())
 
 app.on('before-quit', async (e) => {
+  // The install window (app opened from its disk image) has nothing else running.
+  if (installerHandlesQuit(e)) return
   if (isQuitting) { e.preventDefault(); return }
   // Closing the window keeps an agent turn running; quitting stops it, so ask
   // first when something would be interrupted (named in the dialog).

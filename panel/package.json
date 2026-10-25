@@ -1,7 +1,7 @@
 {
   "name": "mlx-harness",
   "productName": "MLX Harness",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "MLX Harness: run, chat with and serve AI models locally on Apple Silicon. Built on vMLX by JANGQ AI.",
   "main": "dist/main/index.mjs",
   "author": "Flex UK Limited (MLX Network) <info@mlx.app>",
@@ -129,21 +129,15 @@
       "writeUpdateInfo": true,
       "background": "build/dmg-background.png",
       "window": {
-        "width": 760,
-        "height": 460
+        "width": 560,
+        "height": 380
       },
-      "iconSize": 80,
+      "iconSize": 96,
       "contents": [
         {
-          "x": 160,
-          "y": 220,
+          "x": 280,
+          "y": 160,
           "name": "MLX Harness.app"
-        },
-        {
-          "x": 600,
-          "y": 220,
-          "type": "link",
-          "path": "/Applications"
         }
       ],
       "title": "MLX Harness ${version}"

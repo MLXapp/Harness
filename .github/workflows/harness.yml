@@ -187,17 +187,23 @@ jobs:
 
       # Launch the app from the final DMG and run its self-test (window and
       # preload IPC, memory and task stores, the agent browser in its own
-      # session, the MLX Node yield watcher). A failed launch fails the build.
+      # session, the MLX Node yield watcher, the install window and a real
+      # copy through Install's checks). A failed launch fails the build.
+      # The DMG holds just the app at its root (the app is its own installer;
+      # the in-app updater finds "MLX Harness.app" there).
       - name: Launch the app (self-test)
         working-directory: harness/panel/release
         run: |
           for dmg in MLX-Harness-*.dmg; do
             mnt="$(mktemp -d)"; run="$(mktemp -d)"
             hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$mnt" "$dmg" > /dev/null
+            test -d "$mnt/MLX Harness.app" || { echo "::error::$dmg has no MLX Harness.app at its root"; hdiutil detach "$mnt" -force; exit 1; }
+            if [[ -e "$mnt/Applications" || -L "$mnt/Applications" ]]; then echo "::error::$dmg still has an Applications link"; hdiutil detach "$mnt" -force; exit 1; fi
+            ls -la "$mnt"
             ditto "$mnt/MLX Harness.app" "$run/MLX Harness.app"
             hdiutil detach "$mnt" -quiet
             code=0
-            perl -e 'alarm 240; exec @ARGV' "$run/MLX Harness.app/Contents/MacOS/MLX Harness" \
+            perl -e 'alarm 330; exec @ARGV' "$run/MLX Harness.app/Contents/MacOS/MLX Harness" \
               --vmlx-user-data-dir="$run/user-data" --mlx-self-test="$run/report.json" > "$run/log.txt" 2>&1 || code=$?
             grep -E '\[SELFTEST\]' "$run/log.txt" || tail -50 "$run/log.txt"
             test -f "$run/report.json" && cat "$run/report.json"
@@ -252,7 +258,7 @@ jobs:
           ls -la dist
           gh release create "$TAG" dist/MLX-Harness-*.dmg dist/MLX-Harness-*.dmg.sha256 --target "$GITHUB_SHA" \
             --title "MLX Harness $VERSION" \
-            --notes "MLX Harness $VERSION for Apple silicon Macs (macOS 14.5 or later). Signed with Developer ID and notarized by Apple. Carries MLX Node inside and offers to install it on first run. Built on vMLX by JANGQ AI (Apache License 2.0)."
+            --notes "MLX Harness $VERSION for Apple silicon Macs (macOS 14.5 or later). Signed with Developer ID and notarized by Apple. Open MLX Harness from the disk image and it installs itself in Applications. Carries MLX Node inside and offers to install it on first run. Built on vMLX by JANGQ AI (Apache License 2.0)."
 
       - name: Point the update feed at it
         env:

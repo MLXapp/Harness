@@ -3553,5 +3553,58 @@
     "allowInternetTitle": "La página funciona sin conexión, así que no puede enviar nada a ningún sitio. Permítele cargar imágenes y datos de la web.",
     "online": "Con internet · Desactivar",
     "goOfflineTitle": "Volver a ejecutar la página sin conexión."
+  },
+  "installer": {
+    "windowTitle": "Instalar MLX Harness",
+    "footer": "Versión {version} · Basado en vMLX de JANGQ AI",
+    "folder": {
+      "system": "Aplicaciones",
+      "user": "Aplicaciones de tu carpeta de inicio"
+    },
+    "button": {
+      "install": "Instalar",
+      "quit": "Salir",
+      "open": "Abrir MLX Harness",
+      "retry": "Reintentar"
+    },
+    "offer": {
+      "title": "Instala MLX Harness en tu carpeta Aplicaciones",
+      "text": "MLX Harness se ejecuta desde allí y se mantiene actualizado solo.",
+      "textUser": "Esta cuenta no puede añadir apps a /Applications, así que MLX Harness irá a Aplicaciones de tu carpeta de inicio.",
+      "replaces": "Sustituye a MLX Harness {version}.",
+      "quits": "MLX Harness {version} está abierto. Al instalar, primero se cierra y luego se sustituye."
+    },
+    "installed": {
+      "title": "MLX Harness ya está en tu carpeta Aplicaciones",
+      "same": "Allí ya está instalada esta versión, la {version}.",
+      "newer": "Allí hay instalada una versión más reciente, la {version}.",
+      "inUser": "Está en Aplicaciones de tu carpeta de inicio."
+    },
+    "blocked": {
+      "title": "No se puede instalar MLX Harness",
+      "notWritable": "Esta cuenta no puede añadir apps a /Applications ni a Aplicaciones de tu carpeta de inicio. Pide a un administrador que instale MLX Harness.",
+      "occupied": "Hay otra app llamada MLX Harness en tu carpeta Aplicaciones. Cámbiale el nombre o elimínala y vuelve a intentarlo."
+    },
+    "working": {
+      "title": "Instalando MLX Harness…",
+      "done": "MLX Harness está instalado"
+    },
+    "step": {
+      "quitting": "Esperando a que MLX Harness {version} se cierre…",
+      "copying": "Copiando a {folder}…",
+      "checking": "Comprobando la firma…",
+      "finishing": "Terminando…",
+      "opening": "Abriendo MLX Harness…"
+    },
+    "bytes": "{done} de {total}",
+    "failed": {
+      "title": "No se pudo instalar MLX Harness",
+      "copy": "La copia no terminó. Vuelve a intentarlo.",
+      "space": "No hay suficiente espacio libre. MLX Harness necesita unos {gb} GB.",
+      "signature": "La copia no superó la comprobación de firma, así que no se instaló. Vuelve a descargar MLX Harness desde harness.mlx.app.",
+      "busy": "MLX Harness {version} no se cerró. Ciérralo y vuelve a intentarlo.",
+      "notWritable": "MLX Harness no puede escribir en la carpeta Aplicaciones. Vuelve a intentarlo o pide a un administrador que lo instale.",
+      "move": "No se pudo colocar la nueva copia. Vuelve a intentarlo."
+    }
   }
 }
