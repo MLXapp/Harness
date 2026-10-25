@@ -114,7 +114,9 @@ footer { flex: none; margin-top: 12px; font-size: 11px; color: var(--faint); }
 
 // Screens alternate between two layers: a new key fades the old one out and
 // the new one in; the same key only updates texts (soft fade) and the bar.
-const SCRIPT = `
+/** The page's script. Written to a file next to the page: the app's session policy (script-src 'self') blocks inline
+ * scripts, so the page loads it with <script src>. */
+export const INSTALLER_SCRIPT = `
 (() => {
   const stage = document.getElementById('stage')
   const icon = document.getElementById('icon')
@@ -232,8 +234,8 @@ const SCRIPT = `
 })()
 `
 
-export function installerPage(x: InstallerPageInput): string {
-  const csp = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+export function installerPage(x: InstallerPageInput & { script: string }): string {
+  const csp = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'self'"
   return `<!doctype html>
 <html lang="${esc(x.lang)}"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
@@ -246,6 +248,6 @@ export function installerPage(x: InstallerPageInput): string {
   <div id="stage" class="stage" aria-live="polite"></div>
   <footer>${esc(x.footer)}</footer>
 </main>
-<script>${SCRIPT}</script>
+<script src="${esc(x.script)}"></script>
 </body></html>`
 }

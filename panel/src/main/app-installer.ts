@@ -11,10 +11,10 @@ import { execFile, spawn, type ChildProcess } from 'child_process'
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from 'fs'
 import { rm } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
-import { join } from 'path'
+import { basename, join } from 'path'
 import { db } from './database'
 import { getLocale, setLocale, SUPPORTED_LOCALES, t } from './i18n'
-import { installerPage } from './app-installer-page'
+import { INSTALLER_SCRIPT, installerPage } from './app-installer-page'
 import { appBundlePath, codesignVerifyArgs } from '../shared/appUpdate'
 import {
   SYSTEM_APPS_DIR,
@@ -572,17 +572,20 @@ export function createInstallerWindow(o: InstallerWindowOptions): BrowserWindow 
   ipcMain.on('installer:ready', onReady)
   ipcMain.on('installer:act', onAct)
   const page = join(app.getPath('temp'), `mlx-harness-installer-${process.pid}-${w.id}.html`)
+  const script = page.replace(/\.html$/, '.js')
   w.on('closed', () => {
     ipcMain.removeListener('installer:ready', onReady)
     ipcMain.removeListener('installer:act', onAct)
-    try { rmSync(page, { force: true }) } catch { /* temp */ }
+    try { rmSync(page, { force: true }); rmSync(script, { force: true }) } catch { /* temp */ }
   })
   const html = installerPage({
     lang: getLocale() === 'zh' ? 'zh-Hans' : getLocale(),
     title: t('installer.windowTitle'),
     iconDataUrl: iconDataUrl(),
     footer: t('installer.footer', { version: app.getVersion() }),
+    script: basename(script),
   })
+  writeFileSync(script, INSTALLER_SCRIPT)
   writeFileSync(page, html)
   w.loadFile(page).catch((e: Error) => note(`loadFile: ${e.message}`))
   return w

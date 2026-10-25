@@ -29,7 +29,7 @@ import {
   type InstallerLaunchFacts,
 } from '../src/shared/appInstall'
 import { HARNESS_APP_NAME, HARNESS_BUNDLE_ID } from '../src/shared/appUpdate'
-import { installerPage } from '../src/main/app-installer-page'
+import { INSTALLER_SCRIPT, installerPage } from '../src/main/app-installer-page'
 
 const DMG_APP = '/Volumes/MLX Harness 0.5.5/MLX Harness.app'
 const TRANSLOCATED = '/private/var/folders/xy/abc123/T/AppTranslocation/0A1B2C3D-4E5F-6789-ABCD-EF0123456789/d/MLX Harness.app'
@@ -319,9 +319,12 @@ describe('after the installer quits: open the app, eject the image', () => {
 })
 
 describe('the install window page', () => {
-  const html = installerPage({ lang: 'en', title: 'Install <MLX> "Harness"', iconDataUrl: 'data:image/png;base64,AAAA', footer: 'Version 0.5.5 · Built on vMLX by JANGQ AI' })
+  const html = installerPage({ lang: 'en', title: 'Install <MLX> "Harness"', iconDataUrl: 'data:image/png;base64,AAAA', footer: 'Version 0.5.5 · Built on vMLX by JANGQ AI', script: 'installer.js' }) + INSTALLER_SCRIPT
   it('is self-contained behind a strict policy', () => {
-    expect(html).toContain(`content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"`)
+    expect(html).toContain(`content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'self'"`)
+    // no inline script: the app's session policy (script-src 'self') would block it
+    expect(html).toContain('<script src="installer.js"></script>')
+    expect(html).not.toMatch(/<script>/)
     expect(html).not.toMatch(/(src|href)="https?:/)
     expect(html).toContain('Install &lt;MLX&gt; &quot;Harness&quot;')
     expect(html).toContain('Built on vMLX by JANGQ AI')
