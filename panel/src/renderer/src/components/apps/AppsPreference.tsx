@@ -49,11 +49,11 @@ export function AppsPreference() {
   const connectApp = async (id: string) => {
     setBusy(id)
     try {
-      // Connecting an app that was removed (blocked) lets it be used again.
-      if (rules[id] === 'blocked') setRules(await window.api.apps.setRule(id, 'ask'))
       const r = await window.api.apps.connectApp(id)
       setNote(n => ({ ...n, [id]: r.ok ? (r.connected ? t('apps.alreadyConnected') : r.opened ? t('apps.finishInBrowser') : t('apps.waitingApp')) : (r.message || t('apps.connectFailed')) }))
       refreshStatus()
+      // Connecting a removed (blocked) app unblocks it in main: show that.
+      setRules(await window.api.apps.rules())
     } catch (err: any) {
       setNote(n => ({ ...n, [id]: String(err?.message ?? t('apps.connectFailed')) }))
     } finally {
@@ -64,7 +64,7 @@ export function AppsPreference() {
   const check = async (id: string, quiet = false) => {
     if (!quiet) setBusy(id)
     try {
-      const r = await window.api.apps.checkApp(id)
+      const r = await window.api.apps.checkApp(id, quiet)
       if (r.connected) setNote(n => ({ ...n, [id]: t('apps.nowConnected') }))
       else if (!quiet) setNote(n => ({ ...n, [id]: r.ok ? t('apps.notYet') : (r.message || t('apps.connectFailed')) }))
       refreshStatus()
@@ -84,6 +84,8 @@ export function AppsPreference() {
   const removeApp = async (id: string) => {
     setNote(n => ({ ...n, [id]: '' }))
     window.dispatchEvent(new CustomEvent('vmlx:apps-status', { detail: await window.api.apps.removeApp(id) }))
+    // Remove also blocks the app's actions: show the rule it now has.
+    setRules(await window.api.apps.rules())
   }
   useEffect(() => {
     if (pending.length === 0) return

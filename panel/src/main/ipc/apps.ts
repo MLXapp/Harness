@@ -113,9 +113,10 @@ export function registerAppsHandlers(): void {
     if (typeof toolkit !== 'string' || !/^[a-z0-9_]{2,40}$/.test(toolkit)) return { ok: false, opened: 0, message: 'Unknown app.' }
     try { return await apps.connectApp(toolkit) } catch (err: any) { return { ok: false, opened: 0, message: String(err?.message ?? err) } }
   })
-  ipcMain.handle('apps:checkApp', async (_e, toolkit: string) => {
+  ipcMain.handle('apps:checkApp', async (_e, toolkit: string, quiet?: boolean) => {
     if (typeof toolkit !== 'string' || !/^[a-z0-9_]{2,40}$/.test(toolkit)) return { ok: false, connected: false }
-    try { return await apps.checkApp(toolkit) } catch (err: any) { return { ok: false, connected: false, message: String(err?.message ?? err) } }
+    // A quiet check (window focus) only waits; it never asks Composio to start a sign-in.
+    try { return await apps.checkApp(toolkit, { manage: quiet !== true }) } catch (err: any) { return { ok: false, connected: false, message: String(err?.message ?? err) } }
   })
   ipcMain.handle('apps:removeApp', (_e, toolkit: string) => {
     if (typeof toolkit === 'string' && /^[a-z0-9_]{2,40}$/.test(toolkit)) apps.removeApp(toolkit)

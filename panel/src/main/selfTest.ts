@@ -193,7 +193,7 @@ export async function runSelfTest(out: string, getWindow: () => BrowserWindow | 
       const files = [
         { path: 'index.html', content: '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><h1>Hi</h1><script src="script.js"></script></body></html>' },
         { path: 'style.css', content: 'h1 { color: rgb(1, 2, 3); }' },
-        { path: 'script.js', content: 'const color = getComputedStyle(document.querySelector("h1")).color; fetch("https://example.com/x").then(() => "reached", () => "blocked").then(net => parent.postMessage({ selfTest: color, net, popup: window.open("https://example.com") === null ? "blocked" : "opened" }, "*"))' },
+        { path: 'script.js', content: 'const color = getComputedStyle(document.querySelector("h1")).color; fetch("https://example.com/x").then(() => "reached", () => "blocked").then(net => parent.postMessage({ selfTest: color, net, popup: window.open("https://example.com") === null ? "blocked" : "opened", rtc: typeof RTCPeerConnection }, "*"))' },
       ]
       const pub = await window.api.workspace.publish('self-test', 'm1', files, 'index.html')
       if (!pub.ok) return { error: pub.error || 'publish failed' }
@@ -213,6 +213,7 @@ export async function runSelfTest(out: string, getWindow: () => BrowserWindow | 
     assert(r.got?.selfTest === 'rgb(1, 2, 3)', `the page's stylesheet and script did not run (${JSON.stringify(r.got)})`)
     assert(r.got?.net === 'blocked', 'an offline page reached the internet')
     assert(r.got?.popup === 'blocked', 'the page opened a window')
+    assert(r.got?.rtc === 'undefined', 'an offline page still has WebRTC')
     assert(r.disk === 'number', 'free disk space did not answer')
     return r.url
   })

@@ -9,7 +9,7 @@
  * exported for tests.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http'
-import { createReadStream, existsSync, statSync } from 'fs'
+import { createReadStream, existsSync, readFileSync, statSync } from 'fs'
 import { extname, join, relative, resolve, sep } from 'path'
 
 const TYPES: Record<string, string> = {
@@ -47,6 +47,12 @@ export const PREVIEW_CSP_ONLINE =
   " img-src 'self' https: data: blob:;" +
   " media-src 'self' https: data: blob:;" +
   " form-action 'self'; object-src 'none'; base-uri 'self'"
+
+/**
+ * Put before an offline page: no WebRTC (its STUN/TURN lookups are outside
+ * CSP), also not through a child frame of the same origin.
+ */
+export const OFFLINE_GUARD = `<script>(()=>{const k=['RTCPeerConnection','webkitRTCPeerConnection','RTCDataChannel','RTCIceCandidate','RTCSessionDescription'];const s=w=>{try{for(const n of k){try{Object.defineProperty(w,n,{value:undefined,writable:false,configurable:false})}catch(e){}}}catch(e){}};s(window);const d=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentWindow');Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',{get(){const w=d.get.call(this);if(w)s(w);return w}});const c=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentDocument');Object.defineProperty(HTMLIFrameElement.prototype,'contentDocument',{get(){const w=d.get.call(this);if(w)s(w);return c.get.call(this)}})})()</script>`
 
 /** Marker file in a reply's folder: the user allowed its page the internet (never served: a dotfile). */
 export const ONLINE_MARKER = '.online'
@@ -95,8 +101,18 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       'X-Content-Type-Options': 'nosniff',
       'Cross-Origin-Resource-Policy': 'same-origin',
       'Referrer-Policy': 'no-referrer',
+      'X-DNS-Prefetch-Control': 'off',
     })
     if (req.method === 'HEAD') { res.end(); return }
+    // Offline pages also lose WebRTC (CSP does not cover it).
+    if (!online && /\.html?$/i.test(file)) {
+      let html = ''
+      try { html = readFileSync(file, 'utf8') } catch { res.end(); return }
+      // After the doctype, so the page keeps standards mode.
+      const m = /^\s*<!doctype[^>]*>/i.exec(html)
+      res.end(m ? m[0] + OFFLINE_GUARD + html.slice(m[0].length) : OFFLINE_GUARD + html)
+      return
+    }
     // A file replaced while it is read (a newer version published) just ends the reply.
     const stream = createReadStream(file)
     stream.on('error', () => { try { res.destroy() } catch { /* closed */ } })

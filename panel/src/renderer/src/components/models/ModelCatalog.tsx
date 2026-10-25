@@ -90,7 +90,7 @@ export function ModelCatalog({ downloading, downloaded, onDownload }: {
         </label>
       </div>
 
-      <AutoHeight className="overflow-hidden rounded-[12px] border border-border/70 bg-[rgb(var(--bg-2-rgb)/0.5)]">
+      <AutoHeight animateKey={`${category}|${query}`} className="overflow-hidden rounded-[12px] border border-border/70 bg-[rgb(var(--bg-2-rgb)/0.5)]">
         {models.length === 0 && <p className="px-4 py-6 text-center text-[13px] text-muted-foreground">{t('models.catalog.none')}</p>}
         {models.map((model, i) => (
           <ModelRow key={model.id} model={model} first={i === 0} open={open === model.id} memoryGB={memoryGB}
@@ -258,6 +258,8 @@ function DownloadConfirm({ request, memoryGB, onClose, onConfirm }: {
     return () => window.clearTimeout(id)
   }, [request])
   const panelRef = useRef<HTMLDivElement>(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
   // Focus moves into the dialog when it opens (its main button), stays in it
   // (Tab cycles), and goes back to where it was when it closes.
   useEffect(() => {
@@ -265,7 +267,7 @@ function DownloadConfirm({ request, memoryGB, onClose, onConfirm }: {
     const before = document.activeElement as HTMLElement | null
     const raf = requestAnimationFrame(() => panelRef.current?.querySelector<HTMLElement>('[data-vmlx-dialog-default]')?.focus())
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); return }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeRef.current(); return }
       if (e.key !== 'Tab' || !panelRef.current) return
       const items = [...panelRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')]
       if (items.length === 0) return
@@ -279,7 +281,7 @@ function DownloadConfirm({ request, memoryGB, onClose, onConfirm }: {
       window.removeEventListener('keydown', onKey, true)
       if (before && document.contains(before)) requestAnimationFrame(() => before.focus())
     }
-  }, [request, onClose])
+  }, [!!request]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!current) return null
   const { model, variant, free } = current
   const check = checkDownload(variant.bytes, free, memoryGB)
@@ -349,10 +351,23 @@ function DownloadConfirm({ request, memoryGB, onClose, onConfirm }: {
   )
 }
 
-/** A box whose height follows its content smoothly (filters change the list without a jump). */
-function AutoHeight({ className, children }: { className?: string; children: ReactNode }) {
+/**
+ * A box whose height follows its content. A filter change (`animateKey`)
+ * glides to the new height; a row opening inside (which animates itself)
+ * is followed at once, so nothing is clipped or left behind.
+ */
+function AutoHeight({ className, animateKey, children }: { className?: string; animateKey: string; children: ReactNode }) {
   const inner = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState<number | undefined>(undefined)
+  const [glide, setGlide] = useState(false)
+  const lastKey = useRef(animateKey)
+  useLayoutEffect(() => {
+    if (lastKey.current === animateKey) return
+    lastKey.current = animateKey
+    setGlide(true)
+    const id = window.setTimeout(() => setGlide(false), 340)
+    return () => window.clearTimeout(id)
+  }, [animateKey])
   useLayoutEffect(() => {
     const el = inner.current
     if (!el) return
@@ -361,7 +376,7 @@ function AutoHeight({ className, children }: { className?: string; children: Rea
     return () => ro.disconnect()
   }, [])
   return (
-    <div className={`${className ?? ''} transition-[height] duration-300 ease-mlx`} style={{ height }}>
+    <div className={`${className ?? ''} ${glide ? 'transition-[height] duration-300 ease-mlx' : ''}`} style={{ height }}>
       <div ref={inner}>{children}</div>
     </div>
   )

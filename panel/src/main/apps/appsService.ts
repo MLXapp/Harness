@@ -222,7 +222,7 @@ export class AppsService {
     if (!this.via()) return null
     if (!this.connecting) {
       this.connecting = this.open()
-        .then(c => { this.client = c; this.setStatus({ state: 'connected', via: this.via() }); return c })
+        .then(c => { this.client = c; this.setStatus({ state: 'connected', via: this.via() }); this.resumePending(); return c })
         .catch(err => {
           this.client = null
           const msg = err instanceof UnauthorizedError ? 'Composio sign-in expired. Connect again in Preferences → Apps.' : String(err?.message ?? err)
@@ -272,6 +272,8 @@ export class AppsService {
       callback.close()
       // A newer sign-in started meanwhile: leave its status alone.
       if (this.signIn !== abort) return this.status_
+      // Still signed in with the earlier tokens: keep watching open sign-ins.
+      if (this.isConnected()) this.resumePending()
       this.setStatus(abort.signal.aborted
         ? { state: 'off', via: null }
         : { state: 'error', via: null, error: err?.code === 'EADDRINUSE' ? 'Another app is using the sign-in port. Close it and try again.' : String(err?.message ?? err) })
@@ -415,6 +417,9 @@ export class AppsService {
   /** Start connecting one app (Preferences → Apps): opens its sign-in page. */
   async connectApp(toolkit: string): Promise<{ ok: boolean; opened: number; connected?: boolean; message?: string }> {
     const gen = this.generation
+    // Connecting an app that was removed (blocked) lets it be used again.
+    if (this.rules()[toolkit.toLowerCase()] === 'blocked') this.setRule(toolkit, 'ask')
+    this.lastManage.set(toolkit, Date.now())
     const { json, text, isError } = await this.call('COMPOSIO_MANAGE_CONNECTIONS', { toolkits: [toolkit] })
     if (isError) return { ok: false, opened: 0, message: text.slice(0, 300) }
     if (gen !== this.generation) return { ok: false, opened: 0 }
@@ -435,7 +440,8 @@ export class AppsService {
     await this.deps.openExternal(links[0].url)
     // Pending until Composio reports the connection active: watched in the
     // background (also after the window or the app is closed and reopened).
-    this.setPending(toolkit, true)
+    // A sign-in opened again starts the watch window again.
+    this.setPending(toolkit, true, true)
     this.watch(toolkit)
     return { ok: true, opened: 1, connected: false }
   }
@@ -539,10 +545,12 @@ export class AppsService {
       const since = this.readPending()[toolkit]
       if (since === undefined) return
       if (Date.now() - since > forMs) { this.setPending(toolkit, false); return }
-      // Signed out of Composio: stop; a new sign-in watches again.
-      if (!this.isConnected() || this.status_.state === 'error' || this.status_.state === 'connecting' || this.status_.state === 'waiting-for-browser') return
+      // Signed out of Composio: stop (a new sign-in watches again). A
+      // passing error or a sign-in in progress just waits for the next tick.
+      if (!this.isConnected()) return
+      const busy = this.status_.state === 'error' || this.status_.state === 'connecting' || this.status_.state === 'waiting-for-browser'
       // Reading through MANAGE_CONNECTIONS (when WAIT isn't offered) stops after 5 minutes.
-      try { await this.checkApp(toolkit, { manage: Date.now() - since < 5 * 60_000 }) } catch { /* try again */ }
+      if (!busy) { try { await this.checkApp(toolkit, { manage: Date.now() - since < 5 * 60_000 }) } catch { /* try again */ } }
       if (this.isPending(toolkit) && !this.watchers.has(toolkit)) {
         this.watchers.set(toolkit, setTimeout(() => void tick(), every))
       }
@@ -557,9 +565,9 @@ export class AppsService {
 
   private readPending(): Record<string, number> { return { ...(this.deps.storage.readPending?.() ?? {}) } }
 
-  private setPending(toolkit: string, on: boolean): void {
+  private setPending(toolkit: string, on: boolean, restart = false): void {
     const pending = this.readPending()
-    if (on === toolkit in pending) return
+    if (on === toolkit in pending && !(on && restart)) return
     if (on) pending[toolkit] = Date.now(); else delete pending[toolkit]
     this.deps.storage.writePending?.(pending)
     if (!on) { const t = this.watchers.get(toolkit); if (t) clearTimeout(t); this.watchers.delete(toolkit) }

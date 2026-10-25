@@ -516,7 +516,7 @@ declare global {
         cancel: () => Promise<import('./shared/apps').AppsStatusView>;
         disconnect: () => Promise<import('./shared/apps').AppsStatusView>;
         connectApp: (toolkit: string) => Promise<{ ok: boolean; opened: number; connected?: boolean; message?: string }>;
-        checkApp: (toolkit: string) => Promise<{ ok: boolean; connected: boolean; pending?: boolean; message?: string }>;
+        checkApp: (toolkit: string, quiet?: boolean) => Promise<{ ok: boolean; connected: boolean; pending?: boolean; message?: string }>;
         removeApp: (toolkit: string) => Promise<import('./shared/apps').AppsStatusView>;
         rules: () => Promise<Record<string, import('./shared/apps').AppRule>>;
         setRule: (toolkit: string, rule: import('./shared/apps').AppRule) => Promise<Record<string, import('./shared/apps').AppRule>>;

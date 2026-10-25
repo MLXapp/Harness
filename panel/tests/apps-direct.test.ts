@@ -85,6 +85,8 @@ describe('connectionState', () => {
     expect(connectionState({ gmail: { status: 'initiated', auth_config: { status: 'ENABLED' }, redirect_url: 'https://x.dev/a' } }, '', 'gmail')).toBe('no')
     expect(connectionState({ gmail: { toolkit: { slug: 'gmail', is_active: true }, status: 'initiated' } }, '', 'gmail')).toBe('no')
     expect(connectionState({ results: { gmail: { status: 'timeout' } } }, '', 'gmail')).toBe('no')
+    expect(connectionState(undefined, 'Gmail: 1 active, 0 expired', 'gmail')).toBe('yes')
+    expect(connectionState(undefined, 'The Gmail connection has expired.', 'gmail')).toBe('no')
   })
 })
 

@@ -253,7 +253,7 @@ function reactPage(file: ArtifactFile, styles: ArtifactFile[]): string {
   // Imports can't load here: React's are global, others are dropped (what
   // they named shows as an error in the preview, not a blank page).
   const source = file.code
-    .replace(/^\s*import\s+[\s\S]*?from\s+['"][^'"]+['"];?\s*$/gm, '')
+    .replace(/^\s*import\s+[^;'"]*?\s*from\s+['"][^'"]+['"];?[ \t]*$/gm, '')
     .replace(/^\s*import\s+['"][^'"]+['"];?\s*$/gm, '')
     .replace(/export\s+default\s+function\s+([A-Za-z_$][\w$]*)/, 'function $1')
     .replace(/export\s+default\s+/, 'window.__App = ')

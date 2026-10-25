@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ONLINE_MARKER, PREVIEW_CSP, PREVIEW_CSP_ONLINE, isPreviewUrl, resolveUnder, startPreviewServer, stopPreviewServer } from '../src/main/workspace/previewServer'
+import { OFFLINE_GUARD, ONLINE_MARKER, PREVIEW_CSP, PREVIEW_CSP_ONLINE, isPreviewUrl, resolveUnder, startPreviewServer, stopPreviewServer } from '../src/main/workspace/previewServer'
 import { buildContentSecurityPolicy } from '../src/main/csp'
 
 const root = mkdtempSync(join(tmpdir(), 'mlx-ws-'))
@@ -33,8 +33,11 @@ describe('workspace preview server', () => {
     expect(isPreviewUrl(`http://127.0.0.1:${port}/chat1/m1/index.html`)).toBe(true)
     expect(isPreviewUrl(`http://127.0.0.1:${port + 1}/x`)).toBe(false)
 
+    writeFileSync(join(root, 'chat1', 'm1', 'doc.html'), '<!DOCTYPE html><h1>d</h1>')
     const page = await get(port, '/chat1/m1/index.html?v=3')
-    expect(page).toMatchObject({ status: 200, body: '<h1>hi</h1>', csp: PREVIEW_CSP })
+    expect(page).toMatchObject({ status: 200, body: OFFLINE_GUARD + '<h1>hi</h1>', csp: PREVIEW_CSP })
+    expect((await get(port, '/chat1/m1/doc.html')).body).toBe('<!DOCTYPE html>' + OFFLINE_GUARD + '<h1>d</h1>')
+    expect((await get(port, '/chat1/m2/index.html')).body).toBe('<h1>web</h1>')
     expect(PREVIEW_CSP).toContain("connect-src 'self'")
     expect(PREVIEW_CSP).toContain("img-src 'self' data: blob:")
     expect((await get(port, '/chat1/m2/index.html')).csp).toBe(PREVIEW_CSP_ONLINE)

@@ -54,7 +54,7 @@ export function WorkspacePanel({ chatId, open, messageId, content, streaming, in
   // The frame (and whatever the page runs) goes away once the panel has closed.
   const [frameAlive, setFrameAlive] = useState(open)
   useEffect(() => {
-    if (open) { setFrameAlive(true); return }
+    if (open) { setFrameAlive(alive => { if (!alive) setFrameReady(false); return true }); return }
     const id = window.setTimeout(() => setFrameAlive(false), 420)
     return () => window.clearTimeout(id)
   }, [open])
@@ -94,7 +94,7 @@ export function WorkspacePanel({ chatId, open, messageId, content, streaming, in
           // Marked published only once it is; each version gets its own address so the frame reloads.
           published.current = key
           setFrameReady(false)
-          setUrl(`${r.url}?v=${++version.current}`)
+          setUrl(/^https?:/.test(r.url) ? `${r.url}?v=${++version.current}` : r.url)
         } else setError(r.error || t('workspace.previewFailed'))
       })
       .catch(err => { if (alive) setError(String(err?.message ?? err)) })

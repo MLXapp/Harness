@@ -244,10 +244,12 @@ export function connectionState(json: unknown, text = '', toolkit?: string): 'ye
     }
   }
   if (entry === undefined && connectionLinks(json).length > 0) return 'no'
-  // Text last, negatives first ("no active connection" is not "active connection").
-  if (/\b(not connected|no active connection|not yet connected|expired|needs? to (connect|authenticate|authorize)|timed? ?out)\b/i.test(text)) return 'no'
+  // Text last: a count of active connections decides first, then negatives
+  // ("no active connection" is not "active connection"), then positives.
   const active = /\b(\d+)\s+active\b/i.exec(text)
-  if (active) return Number(active[1]) > 0 ? 'yes' : 'unknown'
+  if (active && Number(active[1]) > 0) return 'yes'
+  if (/\b(not connected|no active connection|not yet connected|connection (has )?expired|(has|is) expired|needs? to (connect|authenticate|authorize)|timed out)\b/i.test(text)) return 'no'
+  if (active) return 'unknown'
   if (/\b(already connected|is connected|connection is active|connected successfully)\b/i.test(text)) return 'yes'
   return 'unknown'
 }

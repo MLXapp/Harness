@@ -515,7 +515,7 @@ const api = {
     cancel: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:cancel'),
     disconnect: (): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:disconnect'),
     connectApp: (toolkit: string): Promise<{ ok: boolean; opened: number; connected?: boolean; message?: string }> => ipcRenderer.invoke('apps:connectApp', toolkit),
-    checkApp: (toolkit: string): Promise<{ ok: boolean; connected: boolean; pending?: boolean; message?: string }> => ipcRenderer.invoke('apps:checkApp', toolkit),
+    checkApp: (toolkit: string, quiet?: boolean): Promise<{ ok: boolean; connected: boolean; pending?: boolean; message?: string }> => ipcRenderer.invoke('apps:checkApp', toolkit, quiet === true),
     removeApp: (toolkit: string): Promise<import('../shared/apps').AppsStatusView> => ipcRenderer.invoke('apps:removeApp', toolkit),
     rules: (): Promise<Record<string, import('../shared/apps').AppRule>> => ipcRenderer.invoke('apps:rules'),
     setRule: (toolkit: string, rule: import('../shared/apps').AppRule): Promise<Record<string, import('../shared/apps').AppRule>> => ipcRenderer.invoke('apps:setRule', toolkit, rule),
