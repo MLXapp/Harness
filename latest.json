@@ -1,14 +1,14 @@
 {
-  "version": "0.5.3",
-  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.3/MLX-Harness-0.5.3-arm64.dmg",
-  "sha256": "f360c38b4cabac8bceb3bef1938bf75481262c5eff38ce61e33fc3a5b6efa25c",
-  "size": 592085848,
-  "date": "2026-10-24",
+  "version": "0.5.4",
+  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.4/MLX-Harness-0.5.4-arm64.dmg",
+  "sha256": "9127576926a8df5ae37eca175263b2c0d927e13f4febc16141bb47be55e73f03",
+  "size": 592055725,
+  "date": "2026-10-25",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.3/MLX-Harness-0.5.3-arm64.dmg",
-      "sha256": "f360c38b4cabac8bceb3bef1938bf75481262c5eff38ce61e33fc3a5b6efa25c"
+      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.4/MLX-Harness-0.5.4-arm64.dmg",
+      "sha256": "9127576926a8df5ae37eca175263b2c0d927e13f4febc16141bb47be55e73f03"
     }
   },
-  "notes": "Big MoE models start on smaller Macs: Qwen3-MoE, Qwen3-Next and Mixtral models larger than memory stream their experts from the SSD, with a cache sized from free memory."
+  "notes": "Apps stay connected after you sign in. A workspace beside the chat previews the websites and apps a model writes. The Models page lists popular models with their sizes, memory and abliterated builds."
 }
