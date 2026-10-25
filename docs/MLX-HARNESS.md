@@ -244,7 +244,9 @@ small install window instead of starting (`panel/src/main/app-installer.ts`, pag
 `shared/appInstall.ts`, tests `tests/app-install-rules.test.ts`). It runs right after
 app ready, before the engine check, the preview server, the menu or any window;
 the single-instance lock may be held by an installed copy (then the installer
-still opens and offers to quit and replace it).
+still opens and offers to quit and replace it). The page is written to a temp
+file and loaded like the main window's (file page, contextIsolation preload); if it
+hasn't come up after 6 s the same question is asked with a native dialog.
 
 - **Never a downgrade.** The same or a newer MLX Harness (bundle id
   `app.mlx.studio`) in `/Applications` or `~/Applications` (either name), or

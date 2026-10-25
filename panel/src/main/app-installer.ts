@@ -6,9 +6,9 @@
 // a newer MLX Harness already installed is opened instead (never a
 // downgrade); an older one is quit if running, then replaced.
 // The rules are pure functions in ../shared/appInstall.ts (tested there).
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, type IpcMainEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, type IpcMainEvent } from 'electron'
 import { execFile, spawn, type ChildProcess } from 'child_process'
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statfsSync, statSync } from 'fs'
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from 'fs'
 import { rm } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
 import { join } from 'path'
@@ -502,6 +502,12 @@ function iconDataUrl(): string {
   return 'data:,'
 }
 
+/** Per window: what its page went through (preload errors, console, loads). */
+const installerTrace = new Map<number, string[]>()
+export function installerWindowTrace(w: BrowserWindow): string {
+  return (installerTrace.get(w.id) ?? []).join(' | ')
+}
+
 export interface InstallerWindowOptions {
   first: InstallerScreen
   onAction: (action: InstallerAction) => void
@@ -529,9 +535,11 @@ export function createInstallerWindow(o: InstallerWindowOptions): BrowserWindow 
     vibrancy: 'under-window',
     visualEffectState: 'active',
     backgroundColor: '#00000000',
+    // Same setup as the main window (file page, preload with contextIsolation),
+    // the combination this packaged app is known to run.
     webPreferences: {
       preload: join(__dirname, '../preload/installer.js'),
-      sandbox: true,
+      sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,
@@ -540,6 +548,18 @@ export function createInstallerWindow(o: InstallerWindowOptions): BrowserWindow 
   })
   w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   w.webContents.on('will-navigate', (e) => e.preventDefault())
+  // What the page went through, for the log and the self-test.
+  const trace: string[] = []
+  const note = (s: string) => { if (trace.length < 40) trace.push(s.slice(0, 300)) }
+  w.webContents.on('preload-error', (_e, path, err) => note(`preload error in ${path}: ${err?.message ?? err}`))
+  w.webContents.on('did-fail-load', (_e, code, desc) => note(`load failed: ${code} ${desc}`))
+  w.webContents.on('did-finish-load', () => note('loaded'))
+  w.webContents.on('render-process-gone', (_e, d) => note(`renderer gone: ${d.reason}`))
+  w.webContents.on('console-message', (event: any, ...args: any[]) => {
+    const msg = typeof args[1] === 'string' ? args[1] : event?.message
+    note(`console: ${String(msg)}`)
+  })
+  installerTrace.set(w.id, trace)
   const own = (e: IpcMainEvent) => !w.isDestroyed() && e.sender === w.webContents
   const onReady = (e: IpcMainEvent) => {
     if (!own(e)) return
@@ -551,9 +571,11 @@ export function createInstallerWindow(o: InstallerWindowOptions): BrowserWindow 
   }
   ipcMain.on('installer:ready', onReady)
   ipcMain.on('installer:act', onAct)
+  const page = join(app.getPath('temp'), `mlx-harness-installer-${process.pid}-${w.id}.html`)
   w.on('closed', () => {
     ipcMain.removeListener('installer:ready', onReady)
     ipcMain.removeListener('installer:act', onAct)
+    try { rmSync(page, { force: true }) } catch { /* temp */ }
   })
   const html = installerPage({
     lang: getLocale() === 'zh' ? 'zh-Hans' : getLocale(),
@@ -561,7 +583,8 @@ export function createInstallerWindow(o: InstallerWindowOptions): BrowserWindow 
     iconDataUrl: iconDataUrl(),
     footer: t('installer.footer', { version: app.getVersion() }),
   })
-  void w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+  writeFileSync(page, html)
+  w.loadFile(page).catch((e: Error) => note(`loadFile: ${e.message}`))
   return w
 }
 
@@ -632,7 +655,46 @@ export async function runInstaller(o: { source: InstallerSource; lockHeld: boole
     e.preventDefault()
     if (!busy) void leave(null)
   })
+  // Safety net: a page that never comes up must not leave an invisible app.
+  const pending = win
+  setTimeout(() => {
+    if (leaving || pending.isDestroyed() || pending.isVisible()) return
+    log(`the install window did not come up (${installerWindowTrace(pending)}); asking with a dialog instead`)
+    win = null
+    pending.destroy()
+    void askWithDialog()
+  }, 6000)
   return true
+}
+
+/** The same question as a native dialog (only if the window's page failed to load). */
+async function askWithDialog(): Promise<void> {
+  if (!ctx || !plan) return
+  const s = screenForPlan(plan)
+  const buttons = [s.primary, s.secondary].filter((b): b is NonNullable<typeof b> => !!b)
+  const { response } = await dialog.showMessageBox({
+    type: 'none',
+    message: s.title,
+    detail: [s.text, s.note].filter(Boolean).join('\n\n'),
+    buttons: buttons.map(b => b.label),
+    defaultId: 0,
+    cancelId: Math.max(0, buttons.findIndex(b => b.action === 'quit')),
+    noLink: true,
+  })
+  const action = buttons[response]?.action ?? 'quit'
+  if (action === 'install' && plan.action === 'install') {
+    await install(ctx)
+    // install() leaves on success; on failure say why, then quit; if the situation changed, ask again.
+    if (leaving) return
+    if (screen?.key === 'failed') {
+      await dialog.showMessageBox({ type: 'warning', message: screen.title, detail: screen.text, buttons: [t('installer.button.quit')], noLink: true })
+      await leave(null)
+      return
+    }
+    return askWithDialog()
+  }
+  if (action === 'retry') { await refreshPlan(ctx); return askWithDialog() }
+  await act(action)
 }
 
 /**
@@ -645,8 +707,13 @@ export async function installerSelfTest(): Promise<string> {
   if (!appPath) throw new Error('not running from an app bundle')
 
   const drawn = await new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('the install window did not draw within 15 s')), 15_000)
-    createInstallerWindow({
+    let tw: BrowserWindow | null = null
+    const timer = setTimeout(() => {
+      const why = tw ? installerWindowTrace(tw) : 'no window'
+      if (tw && !tw.isDestroyed()) tw.destroy()
+      reject(new Error(`the install window did not draw within 15 s (${why})`))
+    }, 15_000)
+    tw = createInstallerWindow({
       first: {
         key: 'offer', title: t('installer.offer.title'), text: t('installer.offer.text'), note: '',
         primary: { label: t('installer.button.install'), action: 'install' },
