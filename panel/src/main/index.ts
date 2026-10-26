@@ -6,6 +6,7 @@ import { registerMainWindow } from './mainWindowRef'
 import { getPowerMode } from './powerMode'
 import { app, BrowserWindow, ipcMain, dialog, shell, session, nativeTheme, clipboard } from 'electron'
 import { installIpcSenderGuard } from './ipcSenderGuard'
+import { installWebContentsGuard } from './webContentsGuard'
 import { join } from 'path'
 import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -581,6 +582,8 @@ registerMediaScheme()
 
 // App ready
 app.whenReady().then(async () => {
+  // Every window in the default session: app pages only, no webviews or pop-ups, permissions only for the app.
+  installWebContentsGuard(isAppPageUrl)
   handleMediaProtocol(mediaRoot)
   // Electron's development executable otherwise retains its generic Dock icon.
   if (is.dev && process.platform === 'darwin') {
