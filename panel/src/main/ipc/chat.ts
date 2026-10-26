@@ -24,6 +24,7 @@ import {
   AGENTIC_SYSTEM_PROMPT,
 } from "../tools/registry";
 import { engineMcpHeaders } from "../engineMcpToken";
+import { APPROVAL_SUBJECT_MAX_CHARS } from "../../shared/visibleText";
 import {
   executeBuiltinTool,
   isPrivateTarget,
@@ -2370,6 +2371,14 @@ export function registerChatHandlers(
           // The probe passed but no profile: never run unconfined silently.
           return { ok: false, message: approvalRefusalMessage("unavailable", toolName) };
         }
+        // The card must show the whole call: one too long to show is refused, not cut.
+        const shownSubject = subjectOverride || decision.subject;
+        if (shownSubject.length > APPROVAL_SUBJECT_MAX_CHARS) {
+          return {
+            ok: false,
+            message: `Not run: this ${toolName} call is too long to show for approval (${shownSubject.length} characters, at most ${APPROVAL_SUBJECT_MAX_CHARS}). Split it into smaller steps, or write long content to a file first.`,
+          };
+        }
         const broker = approvalBroker;
         let denyNote = "";
         const outcome = broker
@@ -2378,10 +2387,7 @@ export function registerChatHandlers(
               toolCallId,
               toolName,
               kind: decision.kind,
-              subject: (() => {
-                const subject = subjectOverride || decision.subject;
-                return subject.length > 10000 ? `${subject.slice(0, 10000)}…` : subject;
-              })(),
+              subject: shownSubject,
               reason: decision.justification ?? statedIntent(modelText),
               why: decision.why,
               allowAlways: decision.allowAlways,

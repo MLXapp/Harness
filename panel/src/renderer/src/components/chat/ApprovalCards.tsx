@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { Reveal } from '../ui/Reveal'
+import { showInvisibleCharacters } from '../../../../shared/visibleText'
 
 /**
  * Inline approval cards for the coding agent (permission presets).
@@ -168,13 +169,13 @@ export function ApprovalCards({ chatId }: { chatId: string }) {
                   </div>
                   {card.subject && (
                     <pre className={`mt-2.5 max-h-56 overflow-auto rounded-[10px] bg-[rgb(var(--bg-3-rgb)/0.7)] px-3 py-2 text-[12.5px] leading-[18px] whitespace-pre-wrap select-text ${card.kind === 'app' || card.why === 'schedule' || card.why === 'memory-untrusted' ? 'font-sans break-words [overflow-wrap:anywhere]' : 'font-mono break-all'}`}>
-                      {card.subject}
+                      {showInvisibleCharacters(card.subject)}
                     </pre>
                   )}
                   {card.reason && (
                     <p className="mt-2 text-[12.5px] leading-[17px]">
                       <span className="text-muted-foreground">{t('chat.approval.reason')}: </span>
-                      <span className="whitespace-pre-wrap">{card.reason}</span>
+                      <span className="whitespace-pre-wrap">{showInvisibleCharacters(card.reason)}</span>
                     </p>
                   )}
                   <div className="mt-3 flex flex-wrap items-center gap-2">
