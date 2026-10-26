@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildSeatbeltProfile,
+  defaultSecretPaths,
   looksLikeSandboxDenial,
   resetSeatbeltProbeForTests,
   sbplString,
@@ -65,6 +66,60 @@ describe('Seatbelt profile generation', () => {
     expect(seatbeltArgv('(version 1)', 'echo hi')).toEqual(['/usr/bin/sandbox-exec', '-p', '(version 1)', '/bin/bash', '-c', 'echo hi'])
     expect(shellInvocation('echo hi', '(version 1)')).toEqual({ file: '/usr/bin/sandbox-exec', args: ['-p', '(version 1)', '/bin/bash', '-c', 'echo hi'] })
     expect(shellInvocation('echo hi', null)).toEqual({ file: '/bin/bash', args: ['-c', 'echo hi'] })
+  })
+})
+
+describe('hardened Seatbelt rules', () => {
+  const hardening = {
+    secretPaths: ['/Users/a/.ssh', '/Users/a/Library/Application Support/MLX Studio'],
+    allowPaths: ['/Users/a/Library/Application Support/MLX Studio/agent-spill/c1'],
+    deniedLocalPorts: [8080, 8000, 0, 70000],
+  }
+  it('refuses Apple Events, LaunchServices, secret folders and the app\'s ports, after the allows they narrow', () => {
+    const profile = buildSeatbeltProfile({ writableRoots: ['/Users/a'], denyNetwork: true, hardening })
+    expect(profile).toContain('(deny appleevent-send)')
+    expect(profile).toContain('(global-name "com.apple.coreservices.launchservicesd")')
+    expect(profile).toContain('(deny file-read* file-write* (subpath "/Users/a/.ssh") (subpath "/Users/a/Library/Application Support/MLX Studio"))')
+    expect(profile).toContain('(allow file-read* file-write* (subpath "/Users/a/Library/Application Support/MLX Studio/agent-spill/c1"))')
+    expect(profile).toContain('(deny network-outbound (remote ip "localhost:8080") (remote ip "localhost:8000"))')
+    expect(profile).not.toContain('localhost:0"')
+    expect(profile).not.toContain('localhost:70000')
+    // Last match wins: each deny follows the allow it narrows.
+    expect(profile.indexOf('(allow file-write* (subpath "/Users/a")')).toBeLessThan(profile.indexOf('(deny file-read* file-write*'))
+    expect(profile.indexOf('(deny file-read* file-write*')).toBeLessThan(profile.indexOf('agent-spill/c1'))
+    expect(profile.indexOf('"localhost:*"')).toBeLessThan(profile.indexOf('"localhost:8080"'))
+  })
+  it('guards git hooks and config of nested repositories, in any letter case', () => {
+    const profile = buildSeatbeltProfile({ writableRoots: ['/w/my.proj'], denyNetwork: false, hardening: { secretPaths: [] } })
+    const re = new RegExp(profile.match(/\(regex #"([^"]+)"\)/)![1])
+    for (const p of ['/w/my.proj/.git/hooks/pre-commit', '/w/my.proj/a/b/.GIT/Config', '/w/my.proj/sub/.git/config.worktree', '/w/my.proj/.git/commondir']) {
+      expect(re.test(p), p).toBe(true)
+    }
+    for (const p of ['/w/my.proj/.git/HEAD', '/w/my.proj/.gitignore', '/w/myxproj/.git/config', '/w/my.proj/hooks/x']) {
+      expect(re.test(p), p).toBe(false)
+    }
+  })
+
+  it('leaves port rules out of a writes-only profile, and the basic profile unchanged', () => {
+    expect(buildSeatbeltProfile({ writableRoots: ['/w'], denyNetwork: false, hardening })).not.toContain('network-outbound')
+    expect(buildSeatbeltProfile({ writableRoots: ['/w'], denyNetwork: true, hardening: null }))
+      .toBe(buildSeatbeltProfile({ writableRoots: ['/w'], denyNetwork: true }))
+  })
+  it('lists the usual credential folders and the app data folder', () => {
+    const paths = defaultSecretPaths('/Users/a', '/Users/a/Library/Application Support/MLX Studio')
+    for (const p of ['/Users/a/.ssh', '/Users/a/.aws', '/Users/a/.gnupg', '/Users/a/.config/gh', '/Users/a/.netrc', '/Users/a/.docker',
+      '/Users/a/.kube', '/Users/a/.cache/huggingface/token', '/Users/a/Library/Keychains', '/Users/a/Library/Application Support/Google/Chrome',
+      '/Users/a/Library/Application Support/MLX Studio']) {
+      expect(paths).toContain(p)
+    }
+    // Model weights in the Hugging Face cache stay readable.
+    expect(paths).not.toContain('/Users/a/.cache/huggingface')
+  })
+  it('an injected hardened probe applies the hardening; a basic one ignores it', () => {
+    resetSeatbeltProbeForTests({ available: true, network: true, hardened: true })
+    expect(workspaceSandboxProfile('/w', undefined, hardening)).toContain('(deny appleevent-send)')
+    resetSeatbeltProbeForTests({ available: true, network: true })
+    expect(workspaceSandboxProfile('/w', undefined, hardening)).not.toContain('appleevent')
   })
 })
 

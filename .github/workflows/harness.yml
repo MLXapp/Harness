@@ -60,6 +60,16 @@ jobs:
       - name: Unit tests
         run: node scripts/vitest-ci.mjs
 
+      # The Workspace sandbox on this Mac: builds the profile the app builds and
+      # proves that ordinary commands (shell, git, node, python) still run under
+      # it, and that what it refuses is refused: writes outside the working
+      # folder, credential folders and the app's data, git hooks and config,
+      # the app's own local ports, LaunchServices and Apple Events.
+      - name: Seatbelt probe
+        env:
+          MLX_SEATBELT_PROBE: "1"
+        run: npx --no-install vitest run tests/seatbelt-macos-probe.test.ts
+
   dmg:
     name: Build the DMG
     needs: panel

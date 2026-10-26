@@ -7,6 +7,7 @@ import { getPowerMode } from './powerMode'
 import { app, BrowserWindow, ipcMain, dialog, shell, session, nativeTheme, clipboard } from 'electron'
 import { installIpcSenderGuard } from './ipcSenderGuard'
 import { installWebContentsGuard } from './webContentsGuard'
+import { registerAppPortSource } from './appPorts'
 import { join } from 'path'
 import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -581,6 +582,9 @@ registerMainWindow(() => mainWindow, () => createWindow())
 registerMediaScheme()
 
 // App ready
+// The Workspace sandbox refuses the app's own ports: the gateway and the preview server.
+registerAppPortSource(() => [apiGateway.running ? apiGateway.activePort : null, Number(previewOrigin()?.split(':').pop()) || null])
+
 app.whenReady().then(async () => {
   // Every window in the default session: app pages only, no webviews or pop-ups, permissions only for the app.
   installWebContentsGuard(isAppPageUrl)

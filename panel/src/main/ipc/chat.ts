@@ -1,5 +1,6 @@
 // vMLX panel chat IPC — authored by Jinho Jang
 import { app, ipcMain, BrowserWindow, Notification, net } from "electron";
+import { homedir } from "os";
 import { v4 as uuidv4 } from "uuid";
 import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
@@ -77,10 +78,12 @@ import { turnChanges } from "./changes";
 import { BROWSER_TOOL_NAME, describeBrowserAction } from "../browser/toolDefinition";
 import { t as tMain } from "../i18n";
 import {
+  defaultSecretPaths,
   looksLikeSandboxDenial,
   seatbeltSupport,
   workspaceSandboxProfile,
 } from "../agent/seatbelt";
+import { appLocalPorts } from "../appPorts";
 import {
   SummaryStreamCollector,
   TokenCalibrator,
@@ -2363,9 +2366,31 @@ export function registerChatHandlers(
         if (decision.action === "deny") return { ok: false, message: decision.message };
         if (decision.action === "allow") {
           if (!decision.sandbox) return { ok: true, sandboxProfile: null };
+          const spillDir = join(agentSpillRoot(), chatId);
           const profile = workspaceSandboxProfile(
             overrides?.workingDirectory ?? "",
-            join(agentSpillRoot(), chatId),
+            spillDir,
+            // Credentials and the app's own data stay out of reach (the spill
+            // folder inside it excepted), and so do the app's own local ports.
+            {
+              secretPaths: defaultSecretPaths(homedir(), (() => {
+                try { return app.getPath("userData"); } catch { return null; }
+              })()),
+              allowPaths: [spillDir],
+              deniedLocalPorts: [
+                ...appLocalPorts(),
+                ...(() => {
+                  try {
+                    return db
+                      .getSessions()
+                      .filter((s) => s.type !== "remote" && s.status !== "stopped" && s.status !== "error")
+                      .map((s) => s.port);
+                  } catch {
+                    return [];
+                  }
+                })(),
+              ],
+            },
           );
           if (profile) return { ok: true, sandboxProfile: profile };
           // The probe passed but no profile: never run unconfined silently.
