@@ -1,14 +1,14 @@
 {
-  "version": "0.5.4",
-  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.4/MLX-Harness-0.5.4-arm64.dmg",
-  "sha256": "9127576926a8df5ae37eca175263b2c0d927e13f4febc16141bb47be55e73f03",
-  "size": 592055725,
-  "date": "2026-10-25",
+  "version": "0.5.5",
+  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.5/MLX-Harness-0.5.5-arm64.dmg",
+  "sha256": "a68ed2d8ae3f7389f5e0b03dec2311459d2fbe07087206d88637ef8272a5aad0",
+  "size": 591942829,
+  "date": "2026-10-26",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.4/MLX-Harness-0.5.4-arm64.dmg",
-      "sha256": "9127576926a8df5ae37eca175263b2c0d927e13f4febc16141bb47be55e73f03"
+      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.5/MLX-Harness-0.5.5-arm64.dmg",
+      "sha256": "a68ed2d8ae3f7389f5e0b03dec2311459d2fbe07087206d88637ef8272a5aad0"
     }
   },
-  "notes": "Apps stay connected after you sign in. A workspace beside the chat previews the websites and apps a model writes. The Models page lists popular models with their sizes, memory and abliterated builds."
+  "notes": "Opening MLX Harness from the disk image now installs it in Applications for you, with a smooth progress bar, and never replaces a newer copy."
 }
