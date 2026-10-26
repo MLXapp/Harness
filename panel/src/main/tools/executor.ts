@@ -10,7 +10,16 @@ import * as electron from 'electron'
 import { db } from '../database'
 import { attachChildProcessStreamErrorGuard } from '../childProcessStreamGuards'
 import { looksLikeSandboxDenial, sandboxExec, seatbeltSupport } from '../agent/seatbelt'
-import { isProtectedGitPath, sandboxEscalationMarker } from '../agent/permissions'
+import {
+  GIT_PINNED_PROGRAM_KEYS,
+  GIT_SAFE_ENV,
+  hardenedGitArgv,
+  isDestructiveGitArgv,
+  isGitDirPath,
+  isProtectedGitPath,
+  parseGitCommand,
+  sandboxEscalationMarker,
+} from '../agent/permissions'
 import { findLoose, nearestFragment, spliceLines } from '../agent/editMatch'
 import { FileBackups, ago, shownPath } from '../agent/fileBackups'
 import { discoverSkills, loadSkill } from '../agent/skills'
@@ -115,6 +124,26 @@ function resolvePath(workingDir: string, userPath: string): string {
     throw new Error(`Path escapes working directory: ${userPath}`)
   }
   return realResolved
+}
+
+/** Writes into a `.git` folder or onto a `.git` file are allowed for this call (the user approved it, or Full access). */
+const gitInternalsHook = new AsyncLocalStorage<boolean>()
+
+/**
+ * resolvePath for a write. The resolved (real) path is checked as well as the
+ * name the model gave: a link, a different letter case or a folder walk must
+ * not reach `.git` (hooks and config run later, outside any sandbox) without
+ * the approval the plain path would have needed.
+ */
+function resolveWritePath(workingDir: string, userPath: string): string {
+  const full = resolvePath(workingDir, userPath)
+  if (!gitInternalsHook.getStore() && isGitDirPath(relative(realpathSync(workingDir), full))) {
+    throw new Error(
+      `Not changed: ${userPath} is inside a git folder (.git). Git's own files are changed with the git tool; ` +
+      `if this file really needs editing, name its .git path directly so the user is asked to approve it.`
+    )
+  }
+  return full
 }
 
 // ─── Read-only roots ─────────────────────────────────────────────────────────
@@ -232,6 +261,12 @@ export interface ExecuteToolOptions {
   sandboxProfile?: string | null
   /** Called before a file tool changes a file (the turn's Changes checkpoint). */
   beforeChange?: (fullPath: string) => void
+  /**
+   * The user approved this call as shown (or chose Full access): a write may
+   * go into a `.git` folder. Otherwise the file tools refuse any write whose
+   * real path is inside one.
+   */
+  allowGitInternals?: boolean
 }
 
 /** The program + argv prefix for a shell command, sandboxed when a profile is given. */
@@ -265,7 +300,8 @@ export async function executeBuiltinTool(
   maxResultChars?: number,
   options: ExecuteToolOptions = {}
 ): Promise<ToolResult> {
-  return changeHook.run(options.beforeChange ?? null, () => executeBuiltinToolInner(toolName, args, workingDir, maxResultChars, options))
+  return gitInternalsHook.run(options.allowGitInternals === true, () =>
+    changeHook.run(options.beforeChange ?? null, () => executeBuiltinToolInner(toolName, args, workingDir, maxResultChars, options)))
 }
 
 async function executeBuiltinToolInner(
@@ -427,7 +463,7 @@ function readFile(path: string, workingDir: string, offset?: number, limit?: num
 function writeFile(path: string, content: string, workingDir: string): ToolResult {
   if (!path) return { content: 'Missing required parameter: path', is_error: true }
   if (content === undefined || content === null) return { content: 'Missing required parameter: content', is_error: true }
-  const fullPath = resolvePath(workingDir, path)
+  const fullPath = resolveWritePath(workingDir, path)
   const existed = existsSync(fullPath)
   noteChange(fullPath)
   const saved = existed ? fileBackups.save(fullPath, workingDir, 'write_file') : null
@@ -453,7 +489,7 @@ function editFile(
     return { content: 'Missing required parameter: replacement_text', is_error: true }
   }
 
-  const fullPath = resolvePath(workingDir, path)
+  const fullPath = resolveWritePath(workingDir, path)
   if (!existsSync(fullPath)) {
     return { content: `File not found: ${path}`, is_error: true }
   }
@@ -686,7 +722,7 @@ function fileInfo(path: string, workingDir: string): ToolResult {
 
 function createDirectory(path: string, workingDir: string): ToolResult {
   if (!path) return { content: 'Missing required parameter: path', is_error: true }
-  const fullPath = resolvePath(workingDir, path)
+  const fullPath = resolveWritePath(workingDir, path)
   mkdirSync(fullPath, { recursive: true })
   return { content: `Created directory: ${fullPath}`, is_error: false }
 }
@@ -698,7 +734,7 @@ function createDirectory(path: string, workingDir: string): ToolResult {
  */
 async function deleteFile(path: string, workingDir: string): Promise<ToolResult> {
   if (!path) return { content: 'Missing required parameter: path', is_error: true }
-  const fullPath = resolvePath(workingDir, path)
+  const fullPath = resolveWritePath(workingDir, path)
   if (!existsSync(fullPath)) {
     return { content: `Path not found: ${path}`, is_error: true }
   }
@@ -742,8 +778,8 @@ async function deleteFile(path: string, workingDir: string): Promise<ToolResult>
 function moveFile(source: string, destination: string, workingDir: string): ToolResult {
   if (!source) return { content: 'Missing required parameter: source', is_error: true }
   if (!destination) return { content: 'Missing required parameter: destination', is_error: true }
-  const srcPath = resolvePath(workingDir, source)
-  const dstPath = resolvePath(workingDir, destination)
+  const srcPath = resolveWritePath(workingDir, source)
+  const dstPath = resolveWritePath(workingDir, destination)
   if (!existsSync(srcPath)) {
     return { content: `Source not found: ${source}`, is_error: true }
   }
@@ -761,7 +797,7 @@ function moveFile(source: string, destination: string, workingDir: string): Tool
  * back its newest copy; with an id, put back that copy.
  */
 function restoreFile(path: string | undefined, id: string | undefined, workingDir: string): ToolResult {
-  const fullPath = path ? resolvePath(workingDir, path) : undefined
+  const fullPath = path ? resolveWritePath(workingDir, path) : undefined
   if (!fullPath && !id) {
     const list = fileBackups.list(workingDir).slice(0, 20)
     if (list.length === 0) return { content: 'No saved copies for this folder yet.', is_error: false }
@@ -775,7 +811,7 @@ function restoreFile(path: string | undefined, id: string | undefined, workingDi
   const target = id ? all.find(e => e.id === id) : all.find(e => e.path === fullPath)
   if (target) {
     let resolved: string
-    try { resolved = resolvePath(workingDir, target.path) } catch (err) {
+    try { resolved = resolveWritePath(workingDir, target.path) } catch (err) {
       return { content: `Not restored: ${(err as Error).message}`, is_error: true }
     }
     if (resolved !== target.path) {
@@ -798,8 +834,8 @@ function restoreFile(path: string | undefined, id: string | undefined, workingDi
 function copyFile(source: string, destination: string, workingDir: string): ToolResult {
   if (!source) return { content: 'Missing required parameter: source', is_error: true }
   if (!destination) return { content: 'Missing required parameter: destination', is_error: true }
-  const srcPath = resolvePath(workingDir, source)
-  const dstPath = resolvePath(workingDir, destination)
+  const srcPath = resolveWritePath(workingDir, source)
+  const dstPath = resolveWritePath(workingDir, destination)
   if (!existsSync(srcPath)) {
     return { content: `Source not found: ${source}`, is_error: true }
   }
@@ -934,7 +970,7 @@ function patchFile(path: string, patch: string, workingDir: string): ToolResult 
   if (!path) return { content: 'Missing required parameter: path', is_error: true }
   if (!patch) return { content: 'Missing required parameter: patch', is_error: true }
 
-  const fullPath = resolvePath(workingDir, path)
+  const fullPath = resolveWritePath(workingDir, path)
   if (!existsSync(fullPath)) {
     return { content: `File not found: ${path}`, is_error: true }
   }
@@ -1026,7 +1062,7 @@ function batchEdit(
     return { content: 'Missing or empty edits array', is_error: true }
   }
 
-  const fullPath = resolvePath(workingDir, path)
+  const fullPath = resolveWritePath(workingDir, path)
   if (!existsSync(fullPath)) {
     return { content: `File not found: ${path}`, is_error: true }
   }
@@ -1410,7 +1446,7 @@ function insertText(path: string, line: number, text: string, workingDir: string
   if (!path) return { content: 'Missing required parameter: path', is_error: true }
   if (text === undefined || text === null) return { content: 'Missing required parameter: text', is_error: true }
   if (line === undefined || line === null) return { content: 'Missing required parameter: line', is_error: true }
-  const fullPath = resolvePath(workingDir, path)
+  const fullPath = resolveWritePath(workingDir, path)
   if (!existsSync(fullPath)) return { content: `File not found: ${path}`, is_error: true }
 
   const content = readFileSync(fullPath, 'utf-8')
@@ -1429,7 +1465,7 @@ function replaceLines(path: string, startLine: number, endLine: number, text: st
   if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) {
     return { content: 'Missing or invalid start_line/end_line parameters', is_error: true }
   }
-  const fullPath = resolvePath(workingDir, path)
+  const fullPath = resolveWritePath(workingDir, path)
   if (!existsSync(fullPath)) return { content: `File not found: ${path}`, is_error: true }
 
   const content = readFileSync(fullPath, 'utf-8')
@@ -1544,7 +1580,7 @@ function applyRegex(pattern: string, replacement: string, path: string, glob: st
   if (!pattern) return { content: 'Missing required parameter: pattern', is_error: true }
   if (replacement === undefined) return { content: 'Missing required parameter: replacement', is_error: true }
 
-  const fullPath = resolvePath(workingDir, path)
+  const fullPath = resolveWritePath(workingDir, path)
   if (!existsSync(fullPath)) return { content: `Path not found: ${path}`, is_error: true }
 
   let regex: RegExp
@@ -1558,7 +1594,7 @@ function applyRegex(pattern: string, replacement: string, path: string, glob: st
     targetFiles.push(fullPath)
   } else {
     try {
-      const fdArgs = ['--color=never', '--type', 'f']
+      const fdArgs = ['--color=never', '--type', 'f', '--exclude', '.git']
       if (glob) fdArgs.push('--glob', glob)
       fdArgs.push(fullPath)
       const output = execFileSync('fd', fdArgs, { encoding: 'utf-8', timeout: 10000 })
@@ -1577,7 +1613,13 @@ function applyRegex(pattern: string, replacement: string, path: string, glob: st
 
   const results: string[] = []
   let totalReplacements = 0
-  for (const file of targetFiles) {
+  const realWorkingDir = realpathSync(workingDir)
+  for (const listed of targetFiles) {
+    // Every file is resolved and checked like a named write: it stays in the
+    // working folder and out of .git (any letter case, links followed).
+    let file: string
+    try { file = resolvePath(workingDir, listed) } catch { continue }
+    if (!gitInternalsHook.getStore() && isGitDirPath(relative(realWorkingDir, file))) continue
     try {
       const content = readFileSync(file, 'utf-8')
       const matches = content.match(regex)
@@ -1802,44 +1844,66 @@ function getCurrentDatetime(): ToolResult {
 
 // ─── Git ─────────────────────────────────────────────────────────────────────
 
+/** The user's own global values for the git program settings, read at most once a minute. */
+let gitPinnedCache: { at: number; values: Record<string, string> } | null = null
+function gitPinnedPrograms(env: NodeJS.ProcessEnv): Record<string, string> {
+  if (gitPinnedCache && Date.now() - gitPinnedCache.at < 60_000) return gitPinnedCache.values
+  const values: Record<string, string> = {}
+  try {
+    // --global reads only the user's own ~/.gitconfig (never a repository's config).
+    const out = execFileSync('git', ['config', '--global', '--get-regexp', '^(core\\.sshcommand|gpg\\.program|gpg\\.ssh\\.program|gpg\\.x509\\.program)$'], {
+      cwd: tmpdir(), env, encoding: 'utf-8', timeout: 5000,
+    })
+    for (const line of out.split('\n')) {
+      const sp = line.indexOf(' ')
+      if (sp <= 0) continue
+      const key = GIT_PINNED_PROGRAM_KEYS.find(k => k.toLowerCase() === line.slice(0, sp).toLowerCase())
+      if (key) values[key] = line.slice(sp + 1)
+    }
+  } catch { /* no global config, or nothing set: git's defaults */ }
+  gitPinnedCache = { at: Date.now(), values }
+  return values
+}
+
+/** The environment git runs in: the app's, minus inherited GIT_* variables, plus no pager/editor/prompt. */
+function gitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('GIT_')) env[k] = v
+  return { ...env, ...GIT_SAFE_ENV }
+}
+
 function gitCommand(command: string, workingDir: string): ToolResult {
   if (!command) return { content: 'Missing required parameter: command', is_error: true }
 
-  // Block shell metacharacters that could enable command injection via /bin/sh -c.
-  // Includes newlines (\n, \r) which bypass single-line metachar checks but still
-  // inject separate commands when passed to /bin/sh -c, and < > for redirection.
-  if (/[;|&`$(){}<>\n\r]/.test(command)) {
-    return { content: `Blocked: "git ${command}" contains shell metacharacters. Use run_command for complex shell commands.`, is_error: true }
+  // One parse, and the exact argv runs with no shell in between.
+  const parsed = parseGitCommand(command)
+  if (!parsed.ok) {
+    return { content: `Blocked: "git ${command}" ${parsed.error}. Pass plain words; quote a word with spaces as a whole ("like this"). Use run_command for complex shell commands.`, is_error: true }
+  }
+  if (isDestructiveGitArgv(parsed.argv)) {
+    return { content: `Blocked: "git ${command}" is a destructive operation. Use run_command if you really need this.`, is_error: true }
   }
 
-  // Block destructive operations
-  const dangerous = [
-    /push\s+.*--force/, /push\s+-f\b/,
-    /reset\s+--hard/,
-    /clean\s+-f/, /clean\s+.*-fd/,
-    /branch\s+-D\b/
-  ]
-  for (const re of dangerous) {
-    if (re.test(command)) {
-      return { content: `Blocked: "git ${command}" is a destructive operation. Use run_command if you really need this.`, is_error: true }
-    }
-  }
-
-  // Use shell execution via /bin/sh -c to handle quoted args correctly
-  // (e.g., git commit -m "fix: some bug" would break with naive split)
+  const env = gitEnv()
+  const argv = hardenedGitArgv(parsed.argv, gitPinnedPrograms(env))
+  // help reads no repository: keep the repository's config (viewer settings) out of it.
+  const sub = parsed.argv.find(w => !w.startsWith('-') || w === '--version')
+  if (sub === 'help') env.GIT_DIR = join(tmpdir(), 'mlx-harness-no-repo')
   try {
-    const output = execFileSync('/bin/sh', ['-c', `git ${command}`], {
+    const output = execFileSync('git', argv, {
       cwd: workingDir,
+      env,
       encoding: 'utf-8',
       timeout: 30000,
-      maxBuffer: 10 * 1024 * 1024
+      maxBuffer: 10 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
     return { content: `$ git ${command}\n\n${output}`, is_error: false }
   } catch (err: any) {
     const stdout = err.stdout?.toString() || ''
     const stderr = err.stderr?.toString() || ''
     const combined = [stdout, stderr ? `STDERR:\n${stderr}` : ''].filter(Boolean).join('\n\n')
-    if (err.status === 1 && command.startsWith('diff')) {
+    if (err.status === 1 && sub === 'diff') {
       return { content: `$ git ${command}\n\n${combined}`, is_error: false }
     }
     return { content: `$ git ${command}\n\nExit code: ${err.status ?? 'unknown'}\n\n${combined}`, is_error: true }

@@ -645,7 +645,7 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'git',
-      description: 'Run git commands in the working directory. Supports status, diff, log, blame, add, commit, branch, checkout, stash, show, and more. Blocks destructive operations (push --force, reset --hard).',
+      description: 'Run git commands in the working directory. Supports status, diff, log, blame, add, commit, branch, checkout, stash, show, and more. The words go to git as given, without a shell: quote a whole word that has spaces ("like this"). Blocks destructive operations (push --force, reset --hard).',
       parameters: {
         type: 'object',
         properties: {

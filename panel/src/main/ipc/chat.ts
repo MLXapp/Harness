@@ -2301,7 +2301,7 @@ export function registerChatHandlers(
         modelText: string,
         /** A clearer line for the approval card than the raw arguments. */
         subjectOverride?: string,
-      ): Promise<{ ok: true; sandboxProfile: string | null } | { ok: false; message: string }> => {
+      ): Promise<{ ok: true; sandboxProfile: string | null; approved?: boolean } | { ok: false; message: string }> => {
         const decision = decideToolPermission({
           preset: permissionPreset,
           toolName,
@@ -2358,7 +2358,7 @@ export function registerChatHandlers(
             set.add(key);
           }
           // Approved as shown: runs outside the sandbox.
-          return { ok: true, sandboxProfile: null };
+          return { ok: true, sandboxProfile: null, approved: true };
         }
         if (outcome === "aborted") {
           throw Object.assign(new Error("AbortError"), { name: "AbortError" });
@@ -5648,6 +5648,8 @@ export function registerChatHandlers(
                         undefined,
                         {
                           sandboxProfile: gate.sandboxProfile,
+                          // A write into .git only after the user approved this call (or chose Full access).
+                          allowGitInternals: gate.approved === true || permissionPreset === "full",
                           // Changes review: the file's state before this turn first touched it.
                           beforeChange: (fullPath) => turnChanges.noteBefore(chatId, fullPath),
                         },

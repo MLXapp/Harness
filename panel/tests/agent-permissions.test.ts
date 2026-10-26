@@ -5,6 +5,10 @@ import {
   approvalRefusalMessage,
   classifyGitCommand,
   decideToolPermission,
+  hardenedGitArgv,
+  isDestructiveGitArgv,
+  parseGitCommand,
+  isGitDirPath,
   isProtectedGitPath,
   normalizePermissionPreset,
   PLAN_MODE_REFUSAL,
@@ -81,6 +85,22 @@ describe('permission preset resolution', () => {
     expect(decide({ toolName: 'copy_file', args: { source: 'x', destination: '.git/config' } })).toMatchObject({ action: 'ask' })
   })
 
+  it('treats any .git folder or .git file, in any letter case, as git internals', () => {
+    expect(isGitDirPath('.git')).toBe(true)
+    expect(isGitDirPath('.git/HEAD')).toBe(true)
+    expect(isGitDirPath('.GIT/hooks/pre-commit')).toBe(true)
+    expect(isGitDirPath('vendor/lib/.Git/config')).toBe(true)
+    expect(isGitDirPath('sub/.git')).toBe(true)
+    expect(isGitDirPath('sub\\.git\\config')).toBe(true)
+    expect(isGitDirPath('.github/workflows/ci.yml')).toBe(false)
+    expect(isGitDirPath('.gitignore')).toBe(false)
+    expect(isGitDirPath('src/git/config.ts')).toBe(false)
+    expect(decide({ toolName: 'write_file', args: { path: '.GIT/hooks/pre-commit' } })).toMatchObject({ action: 'ask', why: 'git-internals' })
+    expect(decide({ toolName: 'move_file', args: { source: 'x', destination: 'sub/.git' } })).toMatchObject({ action: 'ask', why: 'git-internals' })
+    expect(decide({ toolName: 'delete_file', args: { path: '.git' } })).toMatchObject({ action: 'ask', why: 'git-internals' })
+    expect(decide({ toolName: 'write_file', args: { path: '.gitignore' } })).toEqual({ action: 'allow', sandbox: false })
+  })
+
   it('"Always allow" is an exact command match per tool', () => {
     const alwaysAllowed = new Set([alwaysAllowKey('run_command', 'npm ci')])
     expect(decide({ preset: 'read-only', toolName: 'run_command', args: { command: 'npm ci' }, alwaysAllowed })).toEqual({ action: 'allow', sandbox: false })
@@ -145,6 +165,64 @@ describe('git command classes', () => {
     ['cat-file --filters HEAD:a', 'outside'], ['help -w log', 'outside'], ['help log', 'read'],
   ])('git %s → %s', (cmd, cls) => {
     expect(classifyGitCommand(cmd)).toBe(cls)
+  })
+
+  it.each([
+    ['pu"sh" origin main'], ['"pu"sh origin main'], ["pu'sh'"], ['"-"c core.pager=x log'], ["'-c'x log"],
+    ['st\\atus'], ['status \\'], ['commit -m "a"b'], ['log "unclosed'], ['status\nlog'], ['status; ls'],
+  ])('a word assembled from quoted pieces or escapes never comes back local or read: %s', cmd => {
+    expect(parseGitCommand(cmd).ok).toBe(false)
+    expect(classifyGitCommand(cmd)).toBe('outside')
+    expect(decideToolPermission({ preset: 'workspace', toolName: 'git', args: { command: cmd }, isBuiltin: true, sandboxAvailable: true }))
+      .toMatchObject({ action: 'ask', why: 'outside' })
+  })
+
+  it('parses plain and wholly quoted words into argv', () => {
+    expect(parseGitCommand('commit -m "fix: a thing"')).toEqual({ ok: true, argv: ['commit', '-m', 'fix: a thing'] })
+    expect(parseGitCommand(`commit -m "it's done"`)).toEqual({ ok: true, argv: ['commit', '-m', "it's done"] })
+    expect(parseGitCommand("log  --format='%h %s'  -3")).toEqual({ ok: false, error: expect.any(String) })
+    expect(parseGitCommand("log --format '%h %s' -3")).toEqual({ ok: true, argv: ['log', '--format', '%h %s', '-3'] })
+    expect(parseGitCommand('add ""')).toEqual({ ok: true, argv: ['add', ''] })
+    expect(parseGitCommand('   ').ok).toBe(false)
+  })
+
+  it.each([
+    ['frobnicate', 'outside'], ['co main', 'outside'], ['filter-branch --tree-filter x', 'outside'],
+    ['mergetool', 'outside'], ['difftool HEAD', 'outside'], ['rebase -x make main', 'outside'],
+    ['rebase --exec=make main', 'outside'], ['rebase -i main', 'local'], ['bisect run make', 'outside'],
+    ['bisect start', 'local'], ['merge -s ort feature', 'local'], ['merge -s custom feature', 'outside'],
+    ['merge --strategy=custom feature', 'outside'], ['cherry-pick -s abc123', 'local'],
+    ['add /etc/hosts', 'outside'], ['add ../x', 'outside'], ['add src/a..b.ts', 'local'], ['diff main..feature', 'read'],
+    ['log -- ~/x', 'outside'], ['commit -m "../ is fine in a message"', 'local'], ['commit -F /tmp/msg', 'outside'],
+    ['format-patch -o ../out HEAD~1', 'outside'], ['init --template=t', 'outside'], ['init', 'local'],
+    ['worktree list', 'read'], ['worktree add ../wt', 'outside'], ['config --global --get user.name', 'outside'],
+    ['config --file=x --list', 'outside'], ['stash show -p', 'read'], ['help -a', 'read'], ['', 'outside'],
+  ])('git %s → %s (allowlist, programs and paths)', (cmd, cls) => {
+    expect(classifyGitCommand(cmd)).toBe(cls)
+  })
+
+  it('blocks the destructive forms on argv', () => {
+    const d = (c: string) => isDestructiveGitArgv((parseGitCommand(c) as { argv: string[] }).argv)
+    expect(d('push --force origin main')).toBe(true)
+    expect(d('push --force-with-lease')).toBe(true)
+    expect(d('push -uf origin x')).toBe(true)
+    expect(d('push origin +main')).toBe(true)
+    expect(d('reset --hard HEAD~1')).toBe(true)
+    expect(d('clean -fd')).toBe(true)
+    expect(d('clean -n')).toBe(false)
+    expect(d('branch -D x')).toBe(true)
+    expect(d('branch -d x')).toBe(false)
+    expect(d('push origin main')).toBe(false)
+  })
+
+  it('runs with safe options first and no external diff or textconv', () => {
+    const argv = hardenedGitArgv(['--no-pager', 'diff', '--stat'], { 'gpg.program': '/opt/homebrew/bin/gpg' })
+    expect(argv.slice(0, 2)).toEqual(['-c', 'core.hooksPath=/dev/null'])
+    for (const o of ['core.fsmonitor=false', 'core.pager=cat', 'protocol.ext.allow=never', 'core.sshCommand=ssh', 'gpg.program=/opt/homebrew/bin/gpg']) {
+      expect(argv[argv.indexOf(o) - 1]).toBe('-c')
+    }
+    expect(argv.slice(-5)).toEqual(['--no-pager', 'diff', '--no-ext-diff', '--no-textconv', '--stat'])
+    expect(hardenedGitArgv(['commit', '-m', 'x']).slice(-3)).toEqual(['commit', '-m', 'x'])
   })
 })
 

@@ -192,3 +192,59 @@ describe('run_applescript result contract', () => {
     })
   })
 })
+
+describe('git tool runs argv without a shell', () => {
+  it('commits with a quoted message, skips repository hooks, and refuses spliced words', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const { chmodSync } = await import('node:fs')
+    const workingDir = makeRoot('vmlx-tool-git-')
+    execFileSync('git', ['init', '-q'], { cwd: workingDir })
+    execFileSync('git', ['config', 'user.name', 'T'], { cwd: workingDir })
+    execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: workingDir })
+    writeFileSync(join(workingDir, 'a.txt'), 'a\n')
+    const marker = join(workingDir, 'hook-ran')
+    writeFileSync(join(workingDir, '.git', 'hooks', 'pre-commit'), `#!/bin/sh\ntouch "${marker}"\n`)
+    chmodSync(join(workingDir, '.git', 'hooks', 'pre-commit'), 0o755)
+
+    expect((await executeBuiltinTool('git', { command: 'add a.txt' }, workingDir)).is_error).toBe(false)
+    const commit = await executeBuiltinTool('git', { command: 'commit -q -m "first: with spaces"' }, workingDir)
+    expect(commit.is_error).toBe(false)
+    expect(existsSync(marker)).toBe(false)
+    expect(execFileSync('git', ['log', '-1', '--format=%s'], { cwd: workingDir, encoding: 'utf8' }).trim()).toBe('first: with spaces')
+
+    const spliced = await executeBuiltinTool('git', { command: 'st"at"us' }, workingDir)
+    expect(spliced.is_error).toBe(true)
+    expect(spliced.content).toMatch(/^Blocked/)
+    const forced = await executeBuiltinTool('git', { command: 'reset --hard HEAD' }, workingDir)
+    expect(forced.content).toMatch(/destructive/)
+  })
+})
+
+describe('writes never reach .git without approval', () => {
+  it('refuses a .git target reached through a link, a gitfile or a folder walk', async () => {
+    const workingDir = makeRoot('vmlx-tool-gitdir-')
+    mkdirSync(join(workingDir, '.git', 'hooks'), { recursive: true })
+    writeFileSync(join(workingDir, '.git', 'config'), '[core]\n')
+    writeFileSync(join(workingDir, 'a.txt'), 'hello\n')
+    symlinkSync(join(workingDir, '.git'), join(workingDir, 'meta'))
+
+    const viaLink = await executeBuiltinTool('write_file', { path: 'meta/hooks/pre-commit', content: 'x' }, workingDir)
+    expect(viaLink.is_error).toBe(true)
+    expect(viaLink.content).toMatch(/git folder/)
+    expect(existsSync(join(workingDir, '.git', 'hooks', 'pre-commit'))).toBe(false)
+
+    const viaMove = await executeBuiltinTool('move_file', { source: 'a.txt', destination: 'meta/a.txt' }, workingDir)
+    expect(viaMove.is_error).toBe(true)
+    expect(existsSync(join(workingDir, 'a.txt'))).toBe(true)
+
+    const gitfile = await executeBuiltinTool('write_file', { path: 'sub/.git', content: 'gitdir: x' }, workingDir)
+    expect(gitfile.is_error).toBe(true)
+
+    const walk = await executeBuiltinTool('apply_regex', { pattern: 'core', replacement: 'CHANGED', path: '.' }, workingDir)
+    expect(readFileSync(join(workingDir, '.git', 'config'), 'utf8')).toBe('[core]\n')
+    expect(walk.content).not.toMatch(/config/)
+
+    const approved = await executeBuiltinTool('write_file', { path: '.git/info/exclude', content: 'x\n' }, workingDir, undefined, { allowGitInternals: true })
+    expect(approved.is_error).toBe(false)
+  })
+})
