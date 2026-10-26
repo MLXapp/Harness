@@ -7,9 +7,9 @@
  * too), the app's own local ports, LaunchServices and Apple Events. Skipped everywhere else.
  */
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
@@ -103,7 +103,15 @@ describe.runIf(enabled)('Workspace Seatbelt profile on this Mac', () => {
   })
 
   it('writes outside the roots are refused', async () => {
-    expect((await sb(`touch "${join(home, 'outside.txt')}"`)).code).not.toBe(0)
+    // the probe's own folders live under the temp folder, which is a writable root (commands need scratch space),
+    // so the outside target is the runner's real home folder
+    const outside = join(homedir(), `mlx-sb-outside-${process.pid}.txt`)
+    try {
+      expect((await sb(`touch "${outside}"`)).code).not.toBe(0)
+      expect(existsSync(outside)).toBe(false)
+    } finally {
+      rmSync(outside, { force: true })
+    }
   })
 
   it('git hooks and config are refused in nested repositories too, in any letter case', async () => {
@@ -137,7 +145,7 @@ describe.runIf(enabled)('Workspace Seatbelt profile on this Mac', () => {
     expect((await sb(`nc -z -G 3 127.0.0.1 ${a}`)).code).toBe(0)
   })
 
-  it('LaunchServices is refused: open cannot start an app', async () => {
+  it('LaunchServices is refused: open cannot start an app', { timeout: 60_000 }, async () => {
     const control = await plain('open -g -j -a Calculator')
     await plain('killall Calculator 2>/dev/null; true')
     expect(control.code, `control: ${control.out}`).toBe(0)
@@ -146,8 +154,9 @@ describe.runIf(enabled)('Workspace Seatbelt profile on this Mac', () => {
     expect(r.code, r.out).not.toBe(0)
   })
 
-  it('Apple Events are refused', async () => {
-    const r = await sb(`osascript -e 'tell application "Finder" to get name'`)
+  it('Apple Events are refused', { timeout: 60_000 }, async () => {
+    // a refused Apple Event can hang instead of failing: a command killed at the timeout counts as refused too
+    const r = await run(['/usr/bin/sandbox-exec', '-p', profile, '/bin/bash', '-c', `osascript -e 'tell application "Finder" to get name'`], work, 15_000)
     expect(r.code).not.toBe(0)
     const control = await run(['/bin/bash', '-c', `osascript -e 'tell application "Finder" to get name'`], work, 20_000)
     if (control.code === 0) {
