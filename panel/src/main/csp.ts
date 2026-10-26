@@ -1,4 +1,13 @@
-export function buildContentSecurityPolicy(options: { devRenderer?: boolean; previewOrigin?: string | null } = {}): string {
+/**
+ * The renderer's policy. Sent as a response header for loads that go through
+ * the session's webRequest (the dev server), and written into index.html as a
+ * <meta http-equiv> at build time (`meta: true`), because the packaged
+ * window loads a file:// page that may get no headers. Both apply where both
+ * exist, so the meta copy allows any 127.0.0.1 port for the preview frame and
+ * the header narrows it to the preview server's port.
+ * frame-ancestors is ignored in a <meta> policy, so only the header sends it.
+ */
+export function buildContentSecurityPolicy(options: { devRenderer?: boolean; previewOrigin?: string | null; meta?: boolean } = {}): string {
   const scriptSrc = options.devRenderer
     ? " script-src 'self' 'unsafe-inline';"
     : " script-src 'self';"
@@ -23,6 +32,11 @@ export function buildContentSecurityPolicy(options: { devRenderer?: boolean; pre
     " media-src 'self' data: blob: mlx-media:;" +
     // The workspace panel shows a reply's website from MLX Harness's own
     // preview server (main/workspace/previewServer.ts, 127.0.0.1 only).
-    ` frame-src 'self'${options.previewOrigin && /^http:\/\/127\.0\.0\.1:\d+$/.test(options.previewOrigin) ? ` ${options.previewOrigin}` : ''};`
+    (options.meta
+      ? " frame-src 'self' http://127.0.0.1:*;"
+      : ` frame-src 'self'${options.previewOrigin && /^http:\/\/127\.0\.0\.1:\d+$/.test(options.previewOrigin) ? ` ${options.previewOrigin}` : ''};`) +
+    // No plugins, no <base> rewriting relative URLs, no form posting the page away.
+    " object-src 'none'; base-uri 'none'; form-action 'none';" +
+    (options.meta ? '' : " frame-ancestors 'none';")
   )
 }

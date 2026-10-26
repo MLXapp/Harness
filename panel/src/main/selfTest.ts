@@ -77,6 +77,22 @@ export async function runSelfTest(out: string, getWindow: () => BrowserWindow | 
     return `${info.nodes} elements: ${JSON.stringify(info.text.slice(0, 80))}`
   })
 
+  if (app.isPackaged) {
+    await check('the page carries its content security policy and refuses inline script', async () => {
+      const r = await getWindow()!.webContents.executeJavaScript(`(() => {
+        const meta = !!document.querySelector('meta[http-equiv="Content-Security-Policy"]')
+        const s = document.createElement('script')
+        s.textContent = 'window.__mlxInlineRan = true'
+        document.head.appendChild(s)
+        s.remove()
+        return { meta, inline: window.__mlxInlineRan === true, electron: typeof window.electron }
+      })()`)
+      assert(r.meta, 'index.html has no Content-Security-Policy meta')
+      assert(!r.inline, 'an inline script ran')
+      assert(r.electron === 'undefined', 'window.electron is exposed')
+    })
+  }
+
   await check('preload API answers over IPC (tasks, memory, apps)', async () => {
     const r = await getWindow()!.webContents.executeJavaScript(`(async () => {
       const api = window.api
