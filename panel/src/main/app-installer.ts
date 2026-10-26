@@ -8,7 +8,7 @@
 // The rules are pure functions in ../shared/appInstall.ts (tested there).
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, type IpcMainEvent } from 'electron'
 import { execFile, spawn, type ChildProcess } from 'child_process'
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from 'fs'
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from 'fs'
 import { rm } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
 import { basename, join } from 'path'
@@ -572,12 +572,16 @@ export function createInstallerWindow(o: InstallerWindowOptions): BrowserWindow 
   }
   ipcMain.on('installer:ready', onReady)
   ipcMain.on('installer:act', onAct)
-  const page = join(app.getPath('temp'), `mlx-harness-installer-${process.pid}-${w.id}.html`)
-  const script = page.replace(/\.html$/, '.js')
+  // A fresh private folder (0700, unpredictable name) for the page and its
+  // script: the shared temp folder is writable by other programs, sandboxed
+  // agent commands included.
+  const pageDir = mkdtempSync(join(app.getPath('temp'), 'mlx-harness-installer-'))
+  const page = join(pageDir, 'installer.html')
+  const script = join(pageDir, 'installer.js')
   w.on('closed', () => {
     ipcMain.removeListener('installer:ready', onReady)
     ipcMain.removeListener('installer:act', onAct)
-    try { rmSync(page, { force: true }); rmSync(script, { force: true }) } catch { /* temp */ }
+    try { rmSync(pageDir, { recursive: true, force: true }) } catch { /* temp */ }
   })
   const html = installerPage({
     lang: getLocale() === 'zh' ? 'zh-Hans' : getLocale(),
@@ -586,8 +590,8 @@ export function createInstallerWindow(o: InstallerWindowOptions): BrowserWindow 
     footer: t('installer.footer', { version: app.getVersion() }),
     script: basename(script),
   })
-  writeFileSync(script, INSTALLER_SCRIPT)
-  writeFileSync(page, html)
+  writeFileSync(script, INSTALLER_SCRIPT, { flag: 'wx', mode: 0o600 })
+  writeFileSync(page, html, { flag: 'wx', mode: 0o600 })
   w.loadFile(page).catch((e: Error) => note(`loadFile: ${e.message}`))
   return w
 }
