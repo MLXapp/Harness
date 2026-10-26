@@ -99,6 +99,20 @@ function splitWords(command: string): string[] {
   return (command.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map(w => w.replace(/^["']|["']$/g, ''))
 }
 
+/** An option that makes a reading git subcommand run another program or write a file. */
+function isGitRunOrWriteOption(word: string): boolean {
+  return (
+    /^-[A-Za-z]*O/.test(word) ||
+    /^--open-files-in-pager(=|$)/.test(word) ||
+    /^--output(=|$)/.test(word) ||
+    /^--ext-diff$/.test(word) ||
+    /^--textconv$/.test(word) ||
+    /^--filters$/.test(word) ||
+    /^--exec(=|$)/.test(word) ||
+    /^--upload-pack(=|$)/.test(word)
+  )
+}
+
 /**
  * Classify the argument string of the `git` tool (without the leading "git").
  *  - outside: a global option before the subcommand (-C, -c, --git-dir,
@@ -120,6 +134,11 @@ export function classifyGitCommand(command: string): GitCommandClass {
   if (GIT_NETWORK_SUBCOMMANDS.has(sub)) return 'network'
   if (sub === 'remote' && rest.some(w => w === 'update' || w === 'prune' || w === 'show' || w === 'set-head')) return 'network'
   if (sub === 'archive' && rest.some(w => w.startsWith('--remote'))) return 'network'
+  // a "reading" subcommand stops being one with options that run a program or write a file: grep -O opens matches
+  // in a program it names, --output writes anywhere, --ext-diff/--textconv/--filters run configured commands, and
+  // help -w/-m/-i starts a viewer (security review, 26 Oct 2026)
+  if (GIT_READ_SUBCOMMANDS.has(sub) && rest.some(isGitRunOrWriteOption)) return 'outside'
+  if (sub === 'help' && rest.some(w => w.startsWith('-'))) return 'outside'
   if (GIT_READ_SUBCOMMANDS.has(sub)) return 'read'
   const listOnly = (flags: string[]) => rest.every(w => flags.includes(w))
   if (sub === 'branch' && listOnly(['-a', '-r', '-v', '-vv', '--list', '--show-current', '--all', '--remotes', '--merged', '--no-merged'])) return 'read'

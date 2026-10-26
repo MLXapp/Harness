@@ -140,6 +140,9 @@ describe('git command classes', () => {
     ['remote -v', 'read'], ['remote update', 'network'], ['--no-pager log', 'read'], ['-c core.pager=x log', 'outside'],
     ['-C ../other status', 'outside'], ['--git-dir=/x status', 'outside'], ['config --get user.name', 'read'],
     ['config user.name x', 'outside'], ['archive --remote=x HEAD', 'network'],
+    ['grep -O x', 'outside'], ['grep --open-files-in-pager=x y', 'outside'], ['grep -n foo', 'read'],
+    ['log --output=/tmp/x', 'outside'], ['diff --ext-diff', 'outside'], ['show --textconv HEAD:a', 'outside'],
+    ['cat-file --filters HEAD:a', 'outside'], ['help -w log', 'outside'], ['help log', 'read'],
   ])('git %s → %s', (cmd, cls) => {
     expect(classifyGitCommand(cmd)).toBe(cls)
   })
