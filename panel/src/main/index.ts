@@ -5,6 +5,7 @@ import { closeAllAgentBrowserWindows } from './browser/electronDriver'
 import { registerMainWindow } from './mainWindowRef'
 import { getPowerMode } from './powerMode'
 import { app, BrowserWindow, ipcMain, dialog, shell, session, nativeTheme, clipboard } from 'electron'
+import { installIpcSenderGuard } from './ipcSenderGuard'
 import { join } from 'path'
 import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -267,6 +268,9 @@ function isAppPageUrl(url: string): boolean {
   }
 }
 
+// Channels that change settings, files or processes answer only the app's own pages (registered below, after this).
+installIpcSenderGuard(isAppPageUrl)
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -284,7 +288,8 @@ function createWindow(): void {
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      // The bundled preload needs nothing but electron, so it runs sandboxed.
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     },
@@ -342,8 +347,9 @@ function createWindow(): void {
         resizable: true,
         webPreferences: {
           preload: join(__dirname, '../preload/index.js'),
-          sandbox: false,
+          sandbox: true,
           contextIsolation: true,
+          nodeIntegration: false,
         },
       })
       // Load the same renderer with query param to show downloads view

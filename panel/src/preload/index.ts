@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 import { withImageServerStartProgress, type ImageServerStartProgress } from '../shared/imageServerStartProgress'
 import { isNativeNavigationAction, type NativeNavigationAction } from '../shared/nativeNavigation'
 
@@ -725,17 +724,6 @@ const api = {
   },
 }
 
-// Use `contextBridge` APIs to expose Electron APIs to renderer only if context isolation is enabled
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', api)
-  } catch (error) {
-    console.error(error)
-  }
-} else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.api = api
-}
+// Every window runs with contextIsolation, so the renderer gets exactly `api`
+// and nothing else: no generic IPC passthrough, no copy of process.env.
+contextBridge.exposeInMainWorld('api', api)

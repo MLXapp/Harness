@@ -539,7 +539,8 @@ export function createInstallerWindow(o: InstallerWindowOptions): BrowserWindow 
     // the combination this packaged app is known to run.
     webPreferences: {
       preload: join(__dirname, '../preload/installer.js'),
-      sandbox: false,
+      // The bundled installer preload needs nothing but electron.
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,

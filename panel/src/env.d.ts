@@ -1,5 +1,3 @@
-import { ElectronAPI } from "@electron-toolkit/preload";
-
 declare global {
   /** An approval card from the coding agent (src/main/agent/approvals.ts). */
   interface ChatApprovalCard {
@@ -19,7 +17,6 @@ declare global {
   type ProviderResult<T> = ({ ok: true } & T) | { ok: false; error: string };
 
   interface Window {
-    electron: ElectronAPI;
     api: {
       navigation: {
         onAction: (callback: (action: import('./shared/nativeNavigation').NativeNavigationAction) => void) => () => void;
@@ -946,3 +943,5 @@ declare global {
     };
   }
 }
+
+export {};
