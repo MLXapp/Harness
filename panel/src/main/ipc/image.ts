@@ -2,9 +2,9 @@
 import { imageEditBody } from '../../shared/imageNativeInputs'
 import { ipcMain } from 'electron'
 import { v4 as uuidv4 } from 'uuid'
-import { join, resolve } from 'path'
+import { join, resolve, sep } from 'path'
 import { homedir } from 'os'
-import { mkdirSync, existsSync, unlinkSync, readdirSync, rmdirSync, readFileSync } from 'fs'
+import { mkdirSync, existsSync, unlinkSync, readdirSync, rmdirSync, readFileSync, realpathSync, statSync } from 'fs'
 import { publishImageOutputs, type ImageOutputFile } from '../imageOutputPublication'
 import { sessionManager } from '../sessions'
 import { sameLocalBundlePath } from '../local-bundle-identity'
@@ -188,6 +188,29 @@ function requestImageServerCancel(controller: AbortController): Promise<void> {
     req.on('timeout', () => req.destroy(new Error('Image cancel request timed out')))
     writeAndEndImageServerRequest(req, bodyStr)
   })
+}
+
+/** Image types the gallery reads and saves. */
+const GENERATED_IMAGE_EXTENSIONS = /\.(png|jpe?g|webp)$/i
+
+/**
+ * The real path of an image in ~/.mlxstudio/generated (generations and the
+ * source images copied for edits), or null for anything else: other folders,
+ * a sibling folder whose name merely starts the same, links leading out,
+ * non-image files.
+ */
+export function generatedImagePath(imagePath: unknown, root = join(homedir(), '.mlxstudio', 'generated')): string | null {
+  if (typeof imagePath !== 'string' || !imagePath) return null
+  try {
+    const realRoot = realpathSync(root)
+    const real = realpathSync(resolve(imagePath))
+    if (!real.startsWith(realRoot + sep)) return null
+    if (!GENERATED_IMAGE_EXTENSIONS.test(real)) return null
+    if (!statSync(real).isFile()) return null
+    return real
+  } catch {
+    return null
+  }
 }
 
 export function registerImageHandlers(): void {
@@ -1045,14 +1068,12 @@ export function registerImageHandlers(): void {
 
   ipcMain.handle('image:readFile', async (_, imagePath: string) => {
     try {
-      // Restrict to ~/.mlxstudio/ for security (prevent arbitrary file reads)
-      const allowedDir = resolve(homedir(), '.mlxstudio')
-      const resolved = resolve(imagePath)
-      if (!resolved.startsWith(allowedDir)) {
-        console.warn('[IMAGE] Blocked readFile outside ~/.mlxstudio/:', resolved)
+      // Only images in the generated-images folder (links resolved, image types only).
+      const resolved = generatedImagePath(imagePath)
+      if (!resolved) {
+        console.warn('[IMAGE] Blocked readFile outside the generated images folder:', imagePath)
         return null
       }
-      if (!existsSync(resolved)) return null
       const data = readFileSync(resolved)
       return `data:image/png;base64,${data.toString('base64')}`
     } catch (error) {
@@ -1065,11 +1086,10 @@ export function registerImageHandlers(): void {
 
   ipcMain.handle('image:saveFile', async (_, imagePath: string) => {
     try {
-      // Restrict source to ~/.mlxstudio/ for security (prevent arbitrary file reads)
-      const allowedDir = resolve(homedir(), '.mlxstudio')
-      const resolved = resolve(imagePath)
-      if (!resolved.startsWith(allowedDir)) {
-        console.warn('[IMAGE] Blocked saveFile outside ~/.mlxstudio/:', resolved)
+      // Only images in the generated-images folder (links resolved, image types only).
+      const resolved = generatedImagePath(imagePath)
+      if (!resolved) {
+        console.warn('[IMAGE] Blocked saveFile outside the generated images folder:', imagePath)
         return { success: false, error: 'Source path not allowed' }
       }
       const { dialog } = require('electron')
