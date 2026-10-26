@@ -7640,11 +7640,13 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(sec
 # routes keep their usual API-key rule.
 _MCP_CONTROL_TOKEN_ENV = "VMLX_MCP_CONTROL_TOKEN"
 _MCP_CONTROL_TOKEN_HEADER = "x-mlx-mcp-token"
+# Read once and removed from the environment, so MCP servers and other
+# programs this engine starts never inherit it.
+_MCP_CONTROL_TOKEN: str | None = (os.environ.pop(_MCP_CONTROL_TOKEN_ENV, "") or "").strip() or None
 
 
 def _mcp_control_token() -> str | None:
-    token = os.environ.get(_MCP_CONTROL_TOKEN_ENV, "").strip()
-    return token or None
+    return _MCP_CONTROL_TOKEN
 
 
 async def verify_mcp_control_token(request: Request):
