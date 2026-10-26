@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useToast } from '../Toast'
+import { sanitizeChatHtml } from '../chat/sanitizeChatHtml'
 import { normalizeHfEndpointSetting } from '../../../../shared/hfSettings'
 import { HF_MODEL_FEED_AUTHORS, type HfModelFeedSort } from '../../../../shared/hfModelFeed'
 import { useTranslation } from '../../i18n'
@@ -812,7 +813,8 @@ function simpleMarkdownToHtml(md: string): string {
 }
 
 function ReadmeContent({ markdown }: { markdown: string }) {
-  const html = simpleMarkdownToHtml(markdown)
+  // a model's README is someone else's HTML: the same sanitizer as chat replies, never the regexes alone
+  const html = sanitizeChatHtml(simpleMarkdownToHtml(markdown))
   return (
     <div
       className="prose prose-xs prose-invert max-w-none text-xs text-muted-foreground [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:mt-2 [&_p]:my-1 [&_img]:max-w-full [&_img]:rounded [&_img]:my-2 [&_table]:text-[11px] [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-border [&_th]:px-1.5 [&_th]:py-0.5 [&_th]:bg-muted [&_code]:bg-muted [&_code]:px-1 [&_code]:rounded [&_code]:text-[11px] [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_pre]:text-[11px] [&_pre]:overflow-x-auto [&_a]:text-primary [&_a]:underline [&_ul]:pl-4 [&_ul]:list-disc [&_ol]:pl-4 [&_li]:my-0.5 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-2 [&_blockquote]:italic [&_hr]:border-border [&_hr]:my-2"

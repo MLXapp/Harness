@@ -252,6 +252,21 @@ function attachSidebarGlassWorkaround(window: BrowserWindow): void {
   window.on('show', applyBackdrop)
 }
 
+/** A URL of the app's own renderer: the dev server in development, the packaged out/renderer files otherwise. */
+function isAppPageUrl(url: string): boolean {
+  try {
+    const u = new URL(url)
+    const dev = process.env['ELECTRON_RENDERER_URL']
+    if (dev) return u.origin === new URL(dev).origin
+    if (u.protocol !== 'file:') return false
+    const root = join(__dirname, '../../out/renderer')
+    const path = decodeURIComponent(u.pathname)
+    return path === root || path.startsWith(root + '/')
+  } catch {
+    return false
+  }
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -492,6 +507,17 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
   })
+
+  // The main window has the IPC bridge (preload), so it may only ever show the app's own pages. Anything else that tries to
+  // navigate it (a link without target, a <meta refresh> in rendered markdown, a redirect) is stopped here; web links
+  // open in the browser instead (security review, 26 Oct 2026).
+  const guardMainNav = (e: Electron.Event, url: string, open: boolean): void => {
+    if (isAppPageUrl(url)) return
+    e.preventDefault()
+    if (open && /^https?:\/\//i.test(url)) void shell.openExternal(url)
+  }
+  mainWindow.webContents.on('will-navigate', (e, url) => guardMainNav(e, url, true))
+  mainWindow.webContents.on('will-redirect', (e, url) => guardMainNav(e, url, false))
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     const { url } = details

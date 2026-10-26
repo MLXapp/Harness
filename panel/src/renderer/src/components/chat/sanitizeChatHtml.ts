@@ -19,6 +19,9 @@ import DOMPurify from 'dompurify'
 export function sanitizeChatHtml(html: string): string {
   return DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
+    // never anything that navigates, loads or frames another page in the app's window
+    FORBID_TAGS: ['meta', 'base', 'link', 'iframe', 'frame', 'frameset', 'object', 'embed', 'form', 'portal'],
+    FORBID_ATTR: ['formaction', 'srcdoc', 'ping'],
     ADD_TAGS: ['pre', 'code'],
     ADD_ATTR: [
       'class',
