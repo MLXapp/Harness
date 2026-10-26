@@ -23,6 +23,7 @@ import {
   isBuiltinTool,
   AGENTIC_SYSTEM_PROMPT,
 } from "../tools/registry";
+import { engineMcpHeaders } from "../engineMcpToken";
 import {
   executeBuiltinTool,
   isPrivateTarget,
@@ -5774,6 +5775,7 @@ export function registerChatHandlers(
                   headers: {
                     "Content-Type": "application/json",
                     ...authHeaders,
+                    ...engineMcpHeaders(),
                   },
                   body: JSON.stringify({
                     tool_name: tc.function.name,

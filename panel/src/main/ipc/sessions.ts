@@ -1,4 +1,5 @@
 import { appWindows } from '../browser/electronDriver'
+import { engineMcpHeaders } from '../engineMcpToken'
 import { ipcMain, BrowserWindow, dialog, app as electronApp, type OpenDialogOptions } from 'electron'
 import { readFileSync } from 'fs'
 import { sessionManager } from '../sessions'
@@ -61,7 +62,10 @@ async function fetchSessionJson(sessionId: string, path: string): Promise<any> {
   }
   const url = `http://${connectHost(session.host)}:${session.port}${path}`
   const response = await fetch(url, {
-    headers: sessionAuthHeaders(config),
+    headers: {
+      ...sessionAuthHeaders(config),
+      ...(path.startsWith('/v1/mcp/') ? engineMcpHeaders() : {}),
+    },
     signal: AbortSignal.timeout(5000),
   })
   if (!response.ok) {

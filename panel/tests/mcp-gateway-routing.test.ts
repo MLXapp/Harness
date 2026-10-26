@@ -27,7 +27,13 @@ interface BackendHandle {
   server: Server;
   port: number;
   requests: string[];
+  /** The MCP token header each request reached the engine with. */
+  tokens: string[];
 }
+
+/** The gateway's network key in these tests: running MCP tools through the gateway needs it. */
+const LAN_KEY = "mlxh-test-network-key";
+const withLanKey = { "Content-Type": "application/json", Authorization: `Bearer ${LAN_KEY}` };
 
 function listen(server: Server, port = 0): Promise<number> {
   return new Promise((resolve) => {
@@ -50,11 +56,13 @@ async function freePort(): Promise<number> {
 
 async function startMcpBackend(model: string, toolName: string): Promise<BackendHandle> {
   const requests: string[] = [];
+  const tokens: string[] = [];
   const server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
     req.on("end", () => {
       requests.push(`${req.method} ${req.url}`);
+      tokens.push(String(req.headers["x-mlx-mcp-token"] ?? ""));
       res.setHeader("Content-Type", "application/json");
       if (req.url?.startsWith("/v1/mcp/tools")) {
         res.end(JSON.stringify({
@@ -109,11 +117,11 @@ async function startMcpBackend(model: string, toolName: string): Promise<Backend
       res.end(JSON.stringify({ error: "not found" }));
     });
   });
-  return { server, port: await listen(server), requests };
+  return { server, port: await listen(server), requests, tokens };
 }
 
 async function startGateway(sessions: any[]): Promise<{ gateway: any; port: number }> {
-  dbMock.getSetting.mockReturnValue(undefined);
+  dbMock.getSetting.mockImplementation((key: string) => (key === "gateway_lan_key" ? LAN_KEY : undefined));
   dbMock.getSessions.mockReturnValue(sessions);
   dbMock.getSession.mockImplementation((id: string) => sessions.find((s) => s.id === id));
 
@@ -170,7 +178,7 @@ describe("MCP gateway routing", () => {
     const betaServers = await fetch(`http://127.0.0.1:${started.port}/v1/mcp/servers?model=beta-model`).then((r) => r.json());
     const betaExecute = await fetch(`http://127.0.0.1:${started.port}/v1/mcp/execute`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: withLanKey,
       body: JSON.stringify({
         model: "beta-model",
         tool_name: "beta_smoke__echo",
@@ -203,7 +211,7 @@ describe("MCP gateway routing", () => {
     const started = await startGateway(sessions);
     gateway = started.gateway;
     dbMock.getSetting.mockImplementation((key: string) =>
-      key === "gateway_single_model_mode" ? "true" : undefined,
+      key === "gateway_single_model_mode" ? "true" : key === "gateway_lan_key" ? LAN_KEY : undefined,
     );
     sessionManagerMock.stopSession.mockImplementation(async (id: string) => {
       const found = sessions.find((s) => s.id === id);
@@ -221,7 +229,7 @@ describe("MCP gateway routing", () => {
     const tools = await toolsResponse.json();
     const executeResponse = await fetch(`http://127.0.0.1:${started.port}/v1/mcp/execute`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: withLanKey,
       body: JSON.stringify({
         model: "beta-model",
         tool_name: "beta_smoke__echo",
@@ -272,6 +280,33 @@ describe("MCP gateway routing", () => {
     expect(b.requests).toEqual([]);
   });
 
+  it("runs MCP tools through the gateway only with the network key, and gives the engine the app's token", async () => {
+    const a = await startMcpBackend("alpha", "alpha_smoke__echo");
+    backends.push(a);
+    const started = await startGateway([session("a", a.port, "alpha-model")]);
+    gateway = started.gateway;
+    const { engineMcpToken } = await import("../src/main/engineMcpToken");
+
+    const refused = await fetch(`http://127.0.0.1:${started.port}/v1/mcp/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-mlx-mcp-token": "guess" },
+      body: JSON.stringify({ tool_name: "alpha_smoke__echo", arguments: { text: "x" } }),
+    });
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error.code).toBe("mcp_execute_needs_network_key");
+    expect(a.requests).toEqual([]);
+
+    const tools = await fetch(`http://127.0.0.1:${started.port}/v1/mcp/tools`, { headers: { "x-mlx-mcp-token": "guess" } });
+    expect(tools.status).toBe(200);
+    const ran = await fetch(`http://127.0.0.1:${started.port}/v1/mcp/execute`, {
+      method: "POST",
+      headers: withLanKey,
+      body: JSON.stringify({ tool_name: "alpha_smoke__echo", arguments: { text: "with-key" } }),
+    }).then((r) => r.json());
+    expect(ran.content).toBe("alpha:with-key");
+    expect(a.tokens).toEqual([engineMcpToken(), engineMcpToken()]);
+  });
+
   it("keeps direct single-session MCP gateway fallback compatible", async () => {
     const a = await startMcpBackend("alpha", "alpha_smoke__echo");
     backends.push(a);
@@ -304,7 +339,7 @@ describe("MCP gateway routing", () => {
       const qwenTool = process.env.VMLX_MCP_QWEN_TOOL || "smoke__echo";
       const qwenExec = await fetch(`http://127.0.0.1:${started.port}/v1/mcp/execute`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: withLanKey,
         body: JSON.stringify({
           model: "qwen36-mcp-smoke",
           tool_name: qwenTool,
@@ -336,7 +371,7 @@ describe("MCP gateway routing", () => {
       const tools = await fetch(`http://127.0.0.1:${started.port}/v1/mcp/tools?model=dsv4-mcp-smoke`).then((r) => r.json());
       const executed = await fetch(`http://127.0.0.1:${started.port}/v1/mcp/execute`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: withLanKey,
         body: JSON.stringify({
           model: "dsv4-mcp-smoke",
           tool_name: dsv4Tool,
@@ -365,7 +400,7 @@ describe("MCP gateway routing", () => {
       const tools = await fetch(`http://127.0.0.1:${started.port}/v1/mcp/tools?model=hy3-mcp-smoke`).then((r) => r.json());
       const executed = await fetch(`http://127.0.0.1:${started.port}/v1/mcp/execute`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: withLanKey,
         body: JSON.stringify({
           model: "hy3-mcp-smoke",
           tool_name: hy3Tool,

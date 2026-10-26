@@ -7632,6 +7632,35 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(sec
     return True
 
 
+# MCP tools run programs and reach services on the user's behalf. When MLX
+# Harness starts the engine it passes a random per-launch token in this
+# environment variable, and /v1/mcp/* then answers only requests that carry
+# it (the app's own main process), not any local program or page that can
+# reach the port. Without the variable (the engine run on its own) the
+# routes keep their usual API-key rule.
+_MCP_CONTROL_TOKEN_ENV = "VMLX_MCP_CONTROL_TOKEN"
+_MCP_CONTROL_TOKEN_HEADER = "x-mlx-mcp-token"
+
+
+def _mcp_control_token() -> str | None:
+    token = os.environ.get(_MCP_CONTROL_TOKEN_ENV, "").strip()
+    return token or None
+
+
+async def verify_mcp_control_token(request: Request):
+    """Require the launching app's MCP token on /v1/mcp/* when one was given."""
+    expected = _mcp_control_token()
+    if expected is None:
+        return True
+    offered = request.headers.get(_MCP_CONTROL_TOKEN_HEADER, "")
+    if not offered or not secrets.compare_digest(offered, expected):
+        raise HTTPException(
+            status_code=403,
+            detail="MCP tools on this engine are only available to the app that started it",
+        )
+    return True
+
+
 def _load_private_cache_attestation_token_file(path_value: str) -> str:
     """Read one owner-only proof token without following or racing a symlink."""
     path = Path(path_value)
@@ -20365,7 +20394,7 @@ async def _parse_image_edit_request_body(request: Request) -> dict[str, Any]:
 # =============================================================================
 
 
-@app.get("/v1/mcp/tools", dependencies=[Depends(verify_api_key)])
+@app.get("/v1/mcp/tools", dependencies=[Depends(verify_api_key), Depends(verify_mcp_control_token)])
 async def list_mcp_tools() -> MCPToolsResponse:
     """List all available MCP tools."""
     if _mcp_manager is None:
@@ -20391,7 +20420,7 @@ async def list_mcp_tools() -> MCPToolsResponse:
     return MCPToolsResponse(tools=tools, count=len(tools))
 
 
-@app.get("/v1/mcp/servers", dependencies=[Depends(verify_api_key)])
+@app.get("/v1/mcp/servers", dependencies=[Depends(verify_api_key), Depends(verify_mcp_control_token)])
 async def list_mcp_servers() -> MCPServersResponse:
     """Get status of all MCP servers."""
     if _mcp_manager is None:
@@ -20421,7 +20450,12 @@ async def list_mcp_servers() -> MCPServersResponse:
 
 
 @app.post(
-    "/v1/mcp/execute", dependencies=[Depends(verify_api_key), Depends(check_rate_limit)]
+    "/v1/mcp/execute",
+    dependencies=[
+        Depends(verify_api_key),
+        Depends(verify_mcp_control_token),
+        Depends(check_rate_limit),
+    ],
 )
 async def execute_mcp_tool(request: MCPExecuteRequest) -> MCPExecuteResponse:
     """Execute an MCP tool."""

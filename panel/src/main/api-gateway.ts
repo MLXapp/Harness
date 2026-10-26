@@ -9,6 +9,7 @@
 //   Ollama /api/* endpoints translated to OpenAI format before forwarding.
 
 import { GATEWAY_SINGLE_MODEL_MODE_KEY, isGatewaySettingEnabled } from '../shared/gatewaySettingsKeys'
+import { ENGINE_MCP_TOKEN_HEADER, engineMcpHeaders } from "./engineMcpToken";
 import { checkGatewayRequest, parseList, type GatewayPolicy } from "./gatewaySecurity";
 import { randomBytes } from "crypto";
 import os from "os";
@@ -872,6 +873,20 @@ export class ApiGateway extends EventEmitter {
       });
     }
 
+    // Running an MCP tool acts outside the app (files, mail, the web). In a
+    // chat each call can be approved; through the gateway only a client
+    // holding the network key may do it, not any local program or page.
+    if (url.split("?")[0] === "/v1/mcp/execute" && !this.offersLanKey(req)) {
+      return this.sendJson(res, 403, {
+        error: {
+          message:
+            "Running MCP tools through the gateway needs the network key (Bearer or x-api-key). MCP tools run in MLX Harness chats, where each call can be approved.",
+          type: "permission_error",
+          code: "mcp_execute_needs_network_key",
+        },
+      });
+    }
+
     // Cancel requests without model field: broadcast to all running backends.
     // Only the backend holding that request ID will actually cancel.
     const isCancel = method === "POST" && /\/cancel\/?$/.test(url);
@@ -1327,6 +1342,21 @@ export class ApiGateway extends EventEmitter {
     return headers;
   }
 
+  /**
+   * Headers for the engine: the client's, minus browser headers and any MCP
+   * token it sent; the app's own MCP token is added for /v1/mcp/* (execute
+   * only gets this far with the network key).
+   */
+  private proxyHeaders(clientReq: IncomingMessage, session: ResolvedSession): OutgoingHttpHeaders {
+    const headers: OutgoingHttpHeaders = {
+      ...withoutBrowserHeaders(clientReq.headers),
+      host: `${session.host}:${session.port}`,
+    };
+    delete headers[ENGINE_MCP_TOKEN_HEADER];
+    if ((clientReq.url || "").startsWith("/v1/mcp/")) Object.assign(headers, engineMcpHeaders());
+    return headers;
+  }
+
   private proxyRequest(
     clientReq: IncomingMessage,
     clientRes: ServerResponse,
@@ -1338,10 +1368,7 @@ export class ApiGateway extends EventEmitter {
       port: session.port,
       path: clientReq.url,
       method: clientReq.method,
-      headers: {
-        ...withoutBrowserHeaders(clientReq.headers),
-        host: `${session.host}:${session.port}`,
-      },
+      headers: this.proxyHeaders(clientReq, session),
       timeout: this.effectiveGatewayProxyTimeoutMs(session, body),
     };
 

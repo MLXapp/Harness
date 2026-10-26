@@ -1,4 +1,5 @@
 import { appWindows, isAgentBrowserWindow } from './browser/electronDriver'
+import { ENGINE_MCP_TOKEN_ENV, engineMcpToken } from './engineMcpToken'
 import { adoptNativeMtpConfig } from '../shared/nativeMtpAdoption'
 import { remoteServerBaseUrl } from '../shared/remoteApiUrl'
 import { markImageGenerationServerStopping, recordImageGenerationLog, requestImageGenerationServerStop } from './ipc/imageGenerationState'
@@ -3366,7 +3367,12 @@ export class SessionManager extends EventEmitter {
       '/opt/homebrew/bin',
       '/usr/local/bin',
     ].join(':')
-    const spawnEnv: Record<string, string | undefined> = { ...process.env, PATH: `${extraPath}:${process.env.PATH || ''}` }
+    const spawnEnv: Record<string, string | undefined> = {
+      ...process.env,
+      PATH: `${extraPath}:${process.env.PATH || ''}`,
+      // MCP tools on this engine answer only this app (see engineMcpToken.ts).
+      [ENGINE_MCP_TOKEN_ENV]: engineMcpToken(),
+    }
     // The Python CLI defaults mx.compile back ON for affine JANG bundles when
     // --enable-jit is absent. Production Auto now preserves Laguna's native
     // full/sliding cache and does not install selective TurboQuant, so cache
