@@ -20,6 +20,7 @@ import { autoStreamCandidate } from "../flashMoeAuto";
 import { estimateModelFileBytes } from "../modelLaunchMemory";
 import { spawn, ChildProcess } from "child_process";
 import { db } from "../database";
+import { isTooBroadModelRoot, looksLikeModelFolder } from "../modelFolder";
 import { detectModelConfigFromDir } from "../model-config-registry";
 import { configDeclaresDflash2 } from "../../shared/dflash2Drafter";
 import { findBundledDflash2Drafter, isDflash2DrafterSelection } from "../dflash2Bundle";
@@ -1272,6 +1273,9 @@ export function registerModelHandlers(): void {
       const userDirs = getUserDirectories(modelType);
       const builtins =
         modelType === "image" ? BUILTIN_IMAGE_PATHS : BUILTIN_MODEL_PATHS;
+      if (typeof dirPath !== "string" || !isAbsolute(dirPath)) {
+        return { success: false, error: "Choose a folder by its full path" };
+      }
       const normalized = dirPath.replace(/\/+$/, "");
       try {
         await access(normalized);
@@ -1279,6 +1283,16 @@ export function registerModelHandlers(): void {
         return {
           success: false,
           error: "Directory does not exist or is not accessible",
+        };
+      }
+      // A scan folder is also where "delete model" may delete: never a whole
+      // disk, a system folder or the home folder.
+      let realCandidate = normalized;
+      try { realCandidate = await realpath(normalized); } catch { /* checked as given */ }
+      if (isTooBroadModelRoot(normalized) || isTooBroadModelRoot(realCandidate)) {
+        return {
+          success: false,
+          error: "That folder is too broad to scan for models. Choose the folder that holds your models.",
         };
       }
       // Resolve symlinks for robust duplicate detection
@@ -2856,6 +2870,14 @@ export function registerModelHandlers(): void {
         return {
           success: false,
           error: `Refusing to delete the root directory '${real}' itself`,
+        };
+      }
+      // Only a model: weights, a model config or a Hugging Face repo folder,
+      // and never inside a folder too broad to be a model folder.
+      if (isTooBroadModelRoot(matchedRoot) || isTooBroadModelRoot(real) || !looksLikeModelFolder(real)) {
+        return {
+          success: false,
+          error: `Refusing to delete '${real}': it does not look like a model folder`,
         };
       }
 
