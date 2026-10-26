@@ -357,14 +357,18 @@ export function bannerVisible(state: UpdateState | null | undefined): boolean {
  *   $5 relaunch (1|0)    $6 open binary     $7 xattr binary $8 log file
  *   $9 where the new copy goes (the app path, or "MLX Harness.app" next to a
  *      copy still called "MLX Studio.app"; the app path when that exists)
+ *   $10 codesign binary   $11 the designated requirement the new copy must meet
  *
+ * The staged copy may have waited days since it was verified, so its
+ * signature is checked again against our requirement just before it is
+ * moved into place; if that fails nothing is touched.
  * Two renames on the same volume: current app → backup, staged → target.
  * If the second fails, the backup is renamed back. The new copy loses the
  * quarantine flag only if it has one; it is relaunched with `open`; the old
  * copy is deleted last.
  */
 export const SWAP_SCRIPT = `
-PID="$1"; APP="$2"; NEW="$3"; OLD="$4"; RELAUNCH="$5"; OPEN="$6"; XATTR="$7"; LOG="$8"; DEST="\${9:-$2}"
+PID="$1"; APP="$2"; NEW="$3"; OLD="$4"; RELAUNCH="$5"; OPEN="$6"; XATTR="$7"; LOG="$8"; DEST="\${9:-$2}"; CODESIGN="\${10}"; REQ="\${11}"
 trap '' HUP INT TERM
 exec >>"$LOG" 2>&1
 echo "[$(date)] MLX Harness update: waiting for pid $PID"
@@ -375,6 +379,8 @@ while kill -0 "$PID" 2>/dev/null; do
   sleep 0.25
 done
 if [ ! -d "$NEW" ]; then echo "staged app missing: $NEW"; exit 1; fi
+if [ -z "$CODESIGN" ] || [ -z "$REQ" ]; then echo "no signature check given; update not installed"; exit 1; fi
+if ! "$CODESIGN" --verify --deep --strict -R "=$REQ" "$NEW"; then echo "staged app failed its signature check; update not installed"; exit 1; fi
 if [ ! -d "$APP" ]; then echo "current app missing: $APP"; exit 1; fi
 if [ -e "$OLD" ]; then echo "backup path already exists: $OLD"; exit 1; fi
 if [ "$DEST" != "$APP" ] && [ -e "$DEST" ]; then echo "$DEST already exists; updating in place"; DEST="$APP"; fi
@@ -405,6 +411,8 @@ export interface SwapCommandInput {
   targetPath?: string
   openBin?: string
   xattrBin?: string
+  /** codesign, for the check just before the swap (default /usr/bin/codesign). */
+  codesignBin?: string
 }
 
 /** The exact argv for spawn('/bin/sh', args, { detached: true }). */
@@ -431,6 +439,7 @@ export function swapCommand(x: SwapCommandInput): { file: string; args: string[]
       '-c', SWAP_SCRIPT, 'mlx-harness-update',
       String(x.pid), x.appPath, x.stagedPath, x.backupPath, x.relaunch ? '1' : '0',
       x.openBin ?? '/usr/bin/open', x.xattrBin ?? '/usr/bin/xattr', x.logPath, target,
+      x.codesignBin ?? '/usr/bin/codesign', HARNESS_REQUIREMENT,
     ],
   }
 }

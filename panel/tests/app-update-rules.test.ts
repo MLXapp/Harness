@@ -233,6 +233,7 @@ describe('swap script', () => {
     expect(cmd.args.slice(3)).toEqual([
       '123', APP, '/Applications/.MLX Harness.update.app', '/Applications/.MLX Harness.old-123.app', '1',
       '/usr/bin/open', '/usr/bin/xattr', '/Users/a/Library/Application Support/MLX Harness/updates/swap.log', APP,
+      '/usr/bin/codesign', HARNESS_REQUIREMENT,
     ])
     expect(SWAP_SCRIPT).not.toContain('/Applications')
     // Every use of a variable is inside double quotes: with the quoted strings removed, none is left.
@@ -270,12 +271,16 @@ describe('swap script', () => {
     return { root, dir, app, staged, calls, bin, fake, backup: backupPathFor(app, 99), log: join(root, 'swap.log') }
   }
 
-  function runSwap(f: ReturnType<typeof fixture>, opts: { pid: number; relaunch: boolean; quarantined?: boolean; env?: NodeJS.ProcessEnv; target?: string }) {
+  function runSwap(f: ReturnType<typeof fixture>, opts: { pid: number; relaunch: boolean; quarantined?: boolean; env?: NodeJS.ProcessEnv; target?: string; signed?: boolean }) {
     const open = f.fake('open', 'exit 0')
     const xattr = f.fake('xattr', `if [ "$1" = "-p" ]; then exit ${opts.quarantined ? 0 : 1}; fi; exit 0`)
+    // codesign stand-in (not logged): records its arguments, passes unless signed: false
+    const codesign = join(f.bin, 'codesign')
+    writeFileSync(codesign, `#!/bin/sh\nprintf '%s\\n' "$@" > "${join(f.root, 'codesign.args')}"\nexit ${opts.signed === false ? 1 : 0}\n`)
+    chmodSync(codesign, 0o755)
     const { file, args } = swapCommand({
       pid: opts.pid, appPath: f.app, stagedPath: f.staged, backupPath: f.backup, relaunch: opts.relaunch,
-      logPath: f.log, openBin: open, xattrBin: xattr, targetPath: opts.target,
+      logPath: f.log, openBin: open, xattrBin: xattr, targetPath: opts.target, codesignBin: codesign,
     })
     return new Promise<number>((resolve) => {
       const child = spawn(file, args, { env: opts.env ?? process.env, stdio: 'ignore' })
@@ -322,6 +327,20 @@ describe('swap script', () => {
     expect(readFileSync(join(f.app, 'version'), 'utf8')).toBe('old')
     expect(existsSync(f.backup)).toBe(false)
     expect(calls(f).at(-1)).toBe(`open ${f.app}`) // the old one comes back up
+  })
+
+  it('checks the staged copy against our requirement just before the swap, and touches nothing when it fails', async () => {
+    const ok = fixture()
+    expect(await runSwap(ok, { pid: 999_999, relaunch: false })).toBe(0)
+    expect(readFileSync(join(ok.root, 'codesign.args'), 'utf8').trim().split('\n')).toEqual([
+      '--verify', '--deep', '--strict', '-R', `=${HARNESS_REQUIREMENT}`, ok.staged,
+    ])
+    const f = fixture()
+    expect(await runSwap(f, { pid: 999_999, relaunch: true, signed: false })).toBe(1)
+    expect(readFileSync(join(f.app, 'version'), 'utf8')).toBe('old')
+    expect(existsSync(f.staged)).toBe(true)
+    expect(existsSync(f.backup)).toBe(false)
+    expect(calls(f)).toEqual([])
   })
 
   it('touches nothing when the staged copy is missing', async () => {
@@ -373,7 +392,7 @@ describe('swap script', () => {
 
   it('refuses a target outside the app folder', () => {
     const ok = { pid: 1, appPath: LEGACY, stagedPath: stagingPathFor(LEGACY), backupPath: backupPathFor(LEGACY, 1), relaunch: false, logPath: '/tmp/l' }
-    expect(swapCommand({ ...ok, targetPath: APP }).args.at(-1)).toBe(APP)
+    expect(swapCommand({ ...ok, targetPath: APP }).args.at(-3)).toBe(APP)
     expect(() => swapCommand({ ...ok, targetPath: '/Users/a/Applications/MLX Harness.app' })).toThrow()
     expect(() => swapCommand({ ...ok, targetPath: 'MLX Harness.app' })).toThrow()
     expect(() => swapCommand({ ...ok, targetPath: stagingPathFor(LEGACY) })).toThrow()

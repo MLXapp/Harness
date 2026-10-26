@@ -8,6 +8,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as electron from 'electron'
+import { HARNESS_REQUIREMENT } from '../src/shared/appUpdate'
 
 const h = vi.hoisted(() => ({
   handlers: new Map<string, (...a: any[]) => any>(),
@@ -190,6 +191,7 @@ describe('in-app updater flow', () => {
       String(process.pid), appPath, join(root, 'Applications', '.MLX Harness.update.app'),
       join(root, 'Applications', `.MLX Harness.old-${process.pid}.app`), '1', '/usr/bin/open', '/usr/bin/xattr',
       join(updatesDir(), 'swap.log'), appPath,
+      '/usr/bin/codesign', HARNESS_REQUIREMENT,
     ])
   })
 
@@ -361,6 +363,7 @@ describe('a copy still called MLX Studio.app (0.1.x, or 0.2.0 installed by 0.1.1
       String(process.pid), appPath, join(root, 'Applications', '.MLX Harness.update.app'),
       join(root, 'Applications', `.MLX Studio.old-${process.pid}.app`), '1', '/usr/bin/open', '/usr/bin/xattr',
       join(updatesDir(), 'swap.log'), harness(),
+      '/usr/bin/codesign', HARNESS_REQUIREMENT,
     ])
   })
 
