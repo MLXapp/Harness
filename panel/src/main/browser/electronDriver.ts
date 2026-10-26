@@ -12,9 +12,11 @@
  */
 
 import { BrowserWindow, session as electronSession, type Session, type WebContents } from 'electron'
-import { lookup } from 'dns/promises'
 import { randomBytes } from 'crypto'
-import { cleanUserAgent, isPrivateHost, isRequestAllowed, type PageDriver } from './agentBrowser'
+import { cleanUserAgent, isRequestAllowed, type PageDriver } from './agentBrowser'
+import { resolvesPrivate } from './privateDns'
+
+export { resolvesPrivate }
 
 /** Isolated world for the agent's page scripts (any id ≥ 1000 is ours). */
 const AGENT_WORLD = 1999
@@ -48,28 +50,6 @@ export interface ElectronPageDriver extends PageDriver {
 }
 
 const ERR_ABORTED = -3
-
-/** host → { private?, until } for 60 s, so a page's many requests resolve once. */
-const dnsCache = new Map<string, { bad: boolean; until: number }>()
-const isIpLiteral = (h: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':')
-
-/** True when a host name resolves to any private, loopback or link-local address. */
-export async function resolvesPrivate(hostname: string): Promise<boolean> {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
-  if (!h || isIpLiteral(h)) return false // literals are judged by isPrivateHost
-  const hit = dnsCache.get(h)
-  if (hit && hit.until > Date.now()) return hit.bad
-  let bad = false
-  try {
-    const all = await lookup(h, { all: true, verbatim: true })
-    bad = all.some(a => isPrivateHost(a.address))
-  } catch {
-    bad = false // unresolvable: Chromium fails the request by itself
-  }
-  if (dnsCache.size > 500) dnsCache.clear()
-  dnsCache.set(h, { bad, until: Date.now() + 60_000 })
-  return bad
-}
 
 function prepareSession(ses: Session, allowLocal: () => boolean, note: (line: string) => void): void {
   ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))

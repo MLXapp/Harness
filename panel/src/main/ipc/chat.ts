@@ -25,6 +25,7 @@ import {
 } from "../tools/registry";
 import {
   executeBuiltinTool,
+  isPrivateTarget,
   registerReadOnlyRoot,
   WORKING_DIR_INDEPENDENT_TOOLS,
 } from "../tools/executor";
@@ -50,9 +51,12 @@ import {
   applyPermissionPresetToTools,
   approvalRefusalMessage,
   decideToolPermission,
+  egressUrlOf,
   normalizePermissionPreset,
   PLAN_MODE_NOTE,
   sandboxEscalationMarker,
+  urlMatchKey,
+  urlsIn,
 } from "../agent/permissions";
 import { ApprovalBroker, type ApprovalCard } from "../agent/approvals";
 import { asideMessages } from "../agent/aside";
@@ -751,6 +755,28 @@ function agentBrowser(chatId: string): AgentBrowser {
 }
 /** Chats whose context holds web pages or MCP results in this app run. */
 const chatsWithExternalData = new Set<string>();
+/**
+ * URLs the user wrote or a tool brought back, per chat (urlMatchKey form).
+ * Opening one of these is following a link; any other URL, once web pages or
+ * MCP results are in the chat, asks first (it could carry data out).
+ */
+const chatKnownUrls = new Map<string, Set<string>>();
+function noteKnownUrls(chatId: string, text: unknown): void {
+  if (typeof text !== "string" || !text) return;
+  const found = urlsIn(text);
+  if (found.length === 0) return;
+  let set = chatKnownUrls.get(chatId);
+  if (!set) chatKnownUrls.set(chatId, (set = new Set()));
+  for (const u of found) set.add(u);
+  if (set.size > 5000) chatKnownUrls.set(chatId, new Set([...set].slice(-4000)));
+}
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part: any) => (typeof part === "string" ? part : typeof part?.text === "string" ? part.text : ""))
+    .join("\n");
+}
 /** Chats whose context holds data read from an app (Composio) in this app run. */
 const chatsWithAppData = new Set<string>();
 /**
@@ -833,6 +859,7 @@ function clearChatAgentRuntime(chatId: string): void {
   planModeChats.delete(chatId);
   chatsWithAppData.delete(chatId);
   chatsWithExternalData.delete(chatId);
+  chatKnownUrls.delete(chatId);
   forgetChatMemoryBlock(chatId);
   turnChanges.forget(chatId);
   const browser = agentBrowsers.get(chatId);
@@ -2283,6 +2310,10 @@ export function registerChatHandlers(
       let appDataInTurn = chatsWithAppData.has(chatId);
       /** Web pages or MCP results came into this turn (memory writes ask). */
       let externalDataInTurn = appDataInTurn || chatsWithExternalData.has(chatId);
+      // Links the user wrote (and tool results kept in the history) count as known.
+      for (const m of messages as Array<{ role?: string; content?: unknown }>) {
+        if (m?.role === "user" || m?.role === "tool") noteKnownUrls(chatId, contentText(m.content));
+      }
       // Escalations the user refused this turn: the same one is not asked twice.
       const refusedEscalations = new Set<string>();
       /**
@@ -2302,11 +2333,19 @@ export function registerChatHandlers(
         /** A clearer line for the approval card than the raw arguments. */
         subjectOverride?: string,
       ): Promise<{ ok: true; sandboxProfile: string | null; approved?: boolean } | { ok: false; message: string }> => {
+        const egressUrl = isBuiltin ? egressUrlOf(toolName, toolArgs) : null;
+        const egressKey = egressUrl !== null ? urlMatchKey(egressUrl) : null;
+        let privateTarget = false;
+        if (isBuiltin && toolName === "fetch_url" && egressKey) {
+          try { privateTarget = await isPrivateTarget(new URL(egressKey).hostname); } catch { privateTarget = false; }
+        }
         const decision = decideToolPermission({
           preset: permissionPreset,
           toolName,
           args: toolArgs,
           isBuiltin,
+          knownUrl: !!egressKey && (chatKnownUrls.get(chatId)?.has(egressKey) ?? false),
+          privateTarget,
           sandboxAvailable: seatbeltSupport().available,
           alwaysAllowed: alwaysAllowedCommands.get(chatId),
           refusedEscalations,
@@ -5650,6 +5689,7 @@ export function registerChatHandlers(
                           sandboxProfile: gate.sandboxProfile,
                           // A write into .git only after the user approved this call (or chose Full access).
                           allowGitInternals: gate.approved === true || permissionPreset === "full",
+                          allowPrivateNetwork: gate.approved === true || permissionPreset === "full",
                           // Changes review: the file's state before this turn first touched it.
                           beforeChange: (fullPath) => turnChanges.noteBefore(chatId, fullPath),
                         },
@@ -5794,6 +5834,8 @@ export function registerChatHandlers(
               );
             }
             await flushToolStatusToRenderer();
+            // Links in a tool result may be followed later without asking.
+            noteKnownUrls(chatId, resultText);
 
             // What the MODEL sees: head + tail of a large result, with the
             // full text spilled to a file it can read (the card above keeps

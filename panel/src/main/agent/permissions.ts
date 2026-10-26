@@ -400,6 +400,55 @@ export interface PermissionInput {
   untrustedData?: boolean
   /** Web pages or MCP tool results are in this turn (memory writes ask). */
   externalData?: boolean
+  /**
+   * fetch_url / browser open: the URL appears word for word in the user's
+   * messages or in an earlier tool result (a link being followed, not one
+   * the model put together).
+   */
+  knownUrl?: boolean
+  /** fetch_url: the host is local or private, by name or by what it resolves to. */
+  privateTarget?: boolean
+}
+
+/** The form two URLs are compared in: parsed, fragment dropped (it never leaves the Mac). Null when not http(s). */
+export function urlMatchKey(raw: unknown): string | null {
+  let s = String(raw ?? '').trim()
+  if (!s) return null
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(s)) s = `https://${s.replace(/^\/+/, '')}`
+  try {
+    const u = new URL(s)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    u.hash = ''
+    return u.href
+  } catch {
+    return null
+  }
+}
+
+/** Every http(s) URL written out in a text, as urlMatchKey keys. */
+export function urlsIn(text: string): string[] {
+  const out: string[] = []
+  for (const m of String(text ?? '').matchAll(/https?:\/\/[^\s<>"'`\\\]}|]+/gi)) {
+    let u = m[0].replace(/[.,;:!?]+$/, '')
+    // A closing bracket that is not part of the URL (Markdown links, prose).
+    while (u.endsWith(')') && (u.match(/\(/g)?.length ?? 0) < (u.match(/\)/g)?.length ?? 0)) u = u.slice(0, -1).replace(/[.,;:!?]+$/, '')
+    const key = urlMatchKey(u)
+    if (key) out.push(key)
+  }
+  return out
+}
+
+/**
+ * The URL a call sends a request to, for the tools that can carry data out
+ * in it: fetch_url, and the browser's open/goto/navigate. Null otherwise.
+ */
+export function egressUrlOf(toolName: string, args: Record<string, unknown>): string | null {
+  if (toolName === 'fetch_url') return typeof args.url === 'string' ? args.url : ''
+  if (toolName === 'browser') {
+    const action = String(args.action ?? '').trim().toLowerCase()
+    if (action === 'open' || action === 'goto' || action === 'navigate') return typeof args.url === 'string' ? args.url : ''
+  }
+  return null
 }
 
 /** Tools that send something to the web: they ask once app data is in the turn. */
@@ -519,6 +568,17 @@ export function decideToolPermission(input: PermissionInput): PermissionDecision
     if (input.isBuiltin && EGRESS_TOOLS.has(toolName)) return { action: 'ask', kind: 'tool', subject, why: 'exfil', allowAlways: false }
     // Any MCP tool may reach the network; with app data in the chat it asks.
     if (!input.isBuiltin) return { action: 'ask', kind: 'mcp', subject, why: 'exfil', allowAlways: false }
+  }
+  if (preset !== 'full' && input.isBuiltin) {
+    const askTool = (why: string): PermissionDecision => ({ action: 'ask', kind: 'tool', subject, why, allowAlways: false })
+    // Local and private addresses (this Mac's own services, the LAN) ask first.
+    if (toolName === 'fetch_url' && input.privateTarget) return askTool('private-host')
+    // Once web pages or MCP results are in the chat, a URL the model put
+    // together (rather than one the user gave or a page linked to) could
+    // carry data out in its path or query, so it asks.
+    if (input.externalData && egressUrlOf(toolName, args) !== null && !input.knownUrl) return askTool('exfil-url')
+    // The clipboard often holds things meant for somewhere else (passwords, tokens).
+    if (toolName === 'clipboard_read') return askTool('clipboard')
   }
   if (input.plan) {
     return planModeAllows(toolName, args, input.isBuiltin)

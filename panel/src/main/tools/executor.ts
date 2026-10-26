@@ -23,6 +23,8 @@ import {
 import { findLoose, nearestFragment, spliceLines } from '../agent/editMatch'
 import { FileBackups, ago, shownPath } from '../agent/fileBackups'
 import { discoverSkills, loadSkill } from '../agent/skills'
+import { isPrivateHost } from '../browser/agentBrowser'
+import { resolvesPrivate } from '../browser/privateDns'
 import { tmpdir } from 'os'
 import { AsyncLocalStorage } from 'async_hooks'
 
@@ -267,6 +269,8 @@ export interface ExecuteToolOptions {
    * real path is inside one.
    */
   allowGitInternals?: boolean
+  /** The user approved this call (or Full access): fetch_url may reach a local or private address. */
+  allowPrivateNetwork?: boolean
 }
 
 /** The program + argv prefix for a shell command, sandboxed when a profile is given. */
@@ -364,7 +368,7 @@ async function executeBuiltinToolInner(
       case 'web_search':
         result = await webSearch(args.query, args.count); break
       case 'fetch_url':
-        result = await fetchUrl(args.url, args.max_length); break
+        result = await fetchUrl(args.url, args.max_length, options.allowPrivateNetwork === true); break
       case 'insert_text':
         result = insertText(args.path, args.line, args.text, workingDir); break
       case 'replace_lines':
@@ -1229,7 +1233,15 @@ async function webSearch(query: string, count?: number): Promise<ToolResult> {
   }
 }
 
-async function fetchUrl(url: string, maxLength?: number): Promise<ToolResult> {
+/** Most redirects fetch_url follows; each hop is checked like the first address. */
+const FETCH_MAX_REDIRECTS = 5
+
+/** A local or private host: by its name/literal, or by what the name resolves to. */
+export async function isPrivateTarget(hostname: string): Promise<boolean> {
+  return isPrivateHost(hostname) || (await resolvesPrivate(hostname))
+}
+
+async function fetchUrl(url: string, maxLength?: number, allowPrivate = false): Promise<ToolResult> {
   if (!url) return { content: 'Missing required parameter: url', is_error: true }
 
   // URL validation: only allow http/https schemes
@@ -1243,13 +1255,43 @@ async function fetchUrl(url: string, maxLength?: number): Promise<ToolResult> {
   }
 
   try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; vMLX/1.0)',
-        'Accept': 'text/html,application/json,text/plain,*/*'
-      },
-      signal: AbortSignal.timeout(30000)
-    })
+    // Redirects are followed by hand so every hop gets the same checks:
+    // http(s) only, and no local or private address unless the user
+    // approved one for this call.
+    let current = url
+    let res: Response | null = null
+    for (let hop = 0; hop <= FETCH_MAX_REDIRECTS; hop++) {
+      const at = new URL(current)
+      if (at.protocol !== 'http:' && at.protocol !== 'https:') {
+        return { content: `Not fetched: ${url} redirected to a ${at.protocol} address, which fetch_url does not follow.`, is_error: true }
+      }
+      if (!allowPrivate && (await isPrivateTarget(at.hostname))) {
+        return {
+          content: hop === 0
+            ? `Not fetched: ${at.hostname} is a local or private address. fetch_url only reaches public websites unless the user approves a local address.`
+            : `Not fetched: ${url} redirected to ${at.hostname}, a local or private address, so the redirect was not followed.`,
+          is_error: true,
+        }
+      }
+      res = await fetch(current, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; vMLX/1.0)',
+          'Accept': 'text/html,application/json,text/plain,*/*'
+        },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(30000)
+      })
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null
+      if (!location) break
+      if (hop === FETCH_MAX_REDIRECTS) {
+        return { content: `Not fetched: ${url} redirected more than ${FETCH_MAX_REDIRECTS} times.`, is_error: true }
+      }
+      try { current = new URL(location, current).href } catch {
+        return { content: `Not fetched: ${url} redirected to an invalid address.`, is_error: true }
+      }
+      try { await res.body?.cancel() } catch { /* nothing to drain */ }
+    }
+    if (!res) return { content: `Not fetched: ${url}`, is_error: true }
 
     if (!res.ok) {
       return { content: `HTTP ${res.status}: ${res.statusText} for ${url}`, is_error: true }

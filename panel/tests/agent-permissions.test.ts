@@ -5,6 +5,7 @@ import {
   approvalRefusalMessage,
   classifyGitCommand,
   decideToolPermission,
+  egressUrlOf,
   hardenedGitArgv,
   isDestructiveGitArgv,
   parseGitCommand,
@@ -14,6 +15,8 @@ import {
   PLAN_MODE_REFUSAL,
   readEscalation,
   sandboxEscalationMarker,
+  urlMatchKey,
+  urlsIn,
   type PermissionInput,
 } from '../src/main/agent/permissions'
 import { BUILTIN_TOOLS } from '../src/main/tools/registry'
@@ -297,5 +300,36 @@ describe('lasting tools: schedule_task and memory', () => {
     expect(d('forget', 'read-only', { untrustedData: true }, { id: 'm1' })).toMatchObject({ action: 'ask', why: 'memory-untrusted' })
     expect(d('recall', 'workspace', { externalData: true }, { query: 'x' }).action).toBe('allow')
     expect(d('remember', 'full', { plan: true }, { text: 'x' }).action).toBe('deny')
+  })
+})
+
+describe('data leaving the Mac', () => {
+  const d = (toolName: string, args: Record<string, unknown>, extra: Partial<PermissionInput> = {}, preset = 'workspace') =>
+    decideToolPermission({ preset, toolName, args, isBuiltin: true, sandboxAvailable: true, ...extra })
+  it('a URL the model put together asks once web or tool results are in the chat; a known link runs', () => {
+    expect(d('fetch_url', { url: 'https://example.com/a' }).action).toBe('allow')
+    expect(d('fetch_url', { url: 'https://example.com/a?q=1' }, { externalData: true })).toMatchObject({ action: 'ask', why: 'exfil-url' })
+    expect(d('fetch_url', { url: 'https://example.com/a?q=1' }, { externalData: true, knownUrl: true }).action).toBe('allow')
+    expect(d('browser', { action: 'open', url: 'https://x.y/z' }, { externalData: true })).toMatchObject({ action: 'ask', why: 'exfil-url' })
+    expect(d('browser', { action: 'snapshot' }, { externalData: true }).action).toBe('allow')
+    expect(d('web_search', { query: 'x' }, { externalData: true }).action).toBe('allow')
+    expect(d('fetch_url', { url: 'https://x.y/z' }, { externalData: true }, 'full').action).toBe('allow')
+    expect(d('fetch_url', { url: 'https://x.y/z' }, { externalData: true, plan: true })).toMatchObject({ action: 'ask', why: 'exfil-url' })
+  })
+  it('local and private addresses ask; the clipboard asks', () => {
+    expect(d('fetch_url', { url: 'http://127.0.0.1:8080/' }, { privateTarget: true })).toMatchObject({ action: 'ask', why: 'private-host' })
+    expect(d('fetch_url', { url: 'http://127.0.0.1:8080/' }, { privateTarget: true }, 'read-only')).toMatchObject({ action: 'ask', why: 'private-host' })
+    expect(d('fetch_url', { url: 'http://127.0.0.1:8080/' }, { privateTarget: true }, 'full').action).toBe('allow')
+    expect(d('clipboard_read', {})).toMatchObject({ action: 'ask', why: 'clipboard' })
+    expect(d('clipboard_read', {}, {}, 'read-only')).toMatchObject({ action: 'ask', why: 'clipboard' })
+    expect(d('clipboard_read', {}, {}, 'full').action).toBe('allow')
+  })
+  it('finds and compares URLs', () => {
+    expect(egressUrlOf('fetch_url', { url: 'https://a.b' })).toBe('https://a.b')
+    expect(egressUrlOf('browser', { action: 'click', ref: 'e1' })).toBeNull()
+    expect(egressUrlOf('read_file', { path: 'a' })).toBeNull()
+    expect(urlMatchKey('Example.COM/a#top')).toBe('https://example.com/a')
+    expect(urlMatchKey('javascript:alert(1)')).toBeNull()
+    expect(urlsIn('see [docs](https://e.com/a_(b)). and https://x.y/p?q=1, ok')).toEqual(['https://e.com/a_(b)', 'https://x.y/p?q=1'])
   })
 })

@@ -248,3 +248,33 @@ describe('writes never reach .git without approval', () => {
     expect(approved.is_error).toBe(false)
   })
 })
+
+describe('fetch_url and local addresses', () => {
+  it('refuses a local address unless approved, and checks every redirect hop', async () => {
+    const http = await import('node:http')
+    let hits = 0
+    const server = http.createServer((req, res) => {
+      hits++
+      if (req.url === '/loop') { res.writeHead(302, { location: '/loop' }); res.end(); return }
+      if (req.url === '/file') { res.writeHead(302, { location: 'file:///etc/hosts' }); res.end(); return }
+      res.writeHead(200, { 'content-type': 'text/plain' }); res.end('local ok')
+    })
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', () => r()))
+    const port = (server.address() as { port: number }).port
+    try {
+      const refused = await executeBuiltinTool('fetch_url', { url: `http://127.0.0.1:${port}/` }, '')
+      expect(refused.is_error).toBe(true)
+      expect(refused.content).toMatch(/local or private/)
+      expect(hits).toBe(0)
+      const approved = await executeBuiltinTool('fetch_url', { url: `http://127.0.0.1:${port}/` }, '', undefined, { allowPrivateNetwork: true })
+      expect(approved.is_error).toBe(false)
+      expect(approved.content).toContain('local ok')
+      const loop = await executeBuiltinTool('fetch_url', { url: `http://127.0.0.1:${port}/loop` }, '', undefined, { allowPrivateNetwork: true })
+      expect(loop.content).toMatch(/more than 5/)
+      const file = await executeBuiltinTool('fetch_url', { url: `http://127.0.0.1:${port}/file` }, '', undefined, { allowPrivateNetwork: true })
+      expect(file.content).toMatch(/file: address/)
+    } finally {
+      server.close()
+    }
+  })
+})
