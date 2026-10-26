@@ -10,7 +10,8 @@ import {
   staleSessionCountSql,
   staleSessionResetSql,
 } from "../shared/sessionStatusReconcile";
-import { decryptSecret, decryptValue, encryptValue } from "./secretStorage";
+import { decryptSecret, decryptValue, encryptValue, secretStorageAvailable } from "./secretStorage";
+import { isApiKeySettingKey, isEncryptedSettingKey } from "./settingsAccess";
 import { ensureProviderSchema, ProviderStore, type SecretBox } from "./providers/store";
 import { MediaJobStore } from "./media/store";
 import { MemoryStore } from "./memory/store";
@@ -198,6 +199,8 @@ export interface ChatOverrides {
   /** Agent permissions: undefined/"workspace" = sandboxed workspace (default), "read-only", "full". */
   permissionPreset?: "read-only" | "workspace" | "full";
 }
+
+
 
 class DatabaseManager {
   private db: Database.Database;
@@ -2358,10 +2361,19 @@ class DatabaseManager {
     const stmt = this.db.prepare("SELECT value FROM settings WHERE key = ?");
     const row = stmt.get(key) as { value: string } | undefined;
     if (!row?.value) return row?.value;
-    return key.toLowerCase().includes("apikey") ||
-      key.toLowerCase().includes("api_key")
-      ? decryptValue(row.value)
-      : row.value;
+    if (!isEncryptedSettingKey(key)) return row.value;
+    // A secret an older build saved as plain text is encrypted the first
+    // time it is read once the Keychain is usable.
+    if (!row.value.startsWith("enc:") && secretStorageAvailable()) {
+      try {
+        this.db
+          .prepare("UPDATE settings SET value = ? WHERE key = ? AND value = ?")
+          .run(encryptValue(row.value), key, row.value);
+      } catch {
+        /* stays readable as it was; tried again next time */
+      }
+    }
+    return decryptValue(row.value);
   }
 
   hasSetting(key: string): boolean {
@@ -2374,9 +2386,13 @@ class DatabaseManager {
 
   setSetting(key: string, value: string): void {
     this.ensureOpen();
-    const encValue =
-      key.toLowerCase().includes("apikey") ||
-      key.toLowerCase().includes("api_key")
+    // API keys are never stored in plain text (encryptValue throws without
+    // the Keychain). Other secrets (tokens, passwords, the gateway's network
+    // key) are encrypted whenever the Keychain is usable, and otherwise kept
+    // as before so the setting still works.
+    const encValue = isApiKeySettingKey(key)
+      ? encryptValue(value)
+      : isEncryptedSettingKey(key) && value && !value.startsWith("enc:") && secretStorageAvailable()
         ? encryptValue(value)
         : value;
     const stmt = this.db.prepare(

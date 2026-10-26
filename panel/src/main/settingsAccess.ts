@@ -14,3 +14,21 @@ export function rendererSettingValue(key: unknown, read: (key: string) => string
   if (isSecretSettingKey(key)) return null
   return read(key as string) ?? null
 }
+
+/** Settings whose value is an API key: always stored encrypted. */
+export function isApiKeySettingKey(key: string): boolean {
+  const k = key.toLowerCase()
+  return k.includes('apikey') || k.includes('api_key')
+}
+
+/** Settings whose owner stores Keychain ciphertext itself (and decrypts it on read). */
+const SELF_ENCRYPTED_SETTING_KEYS: ReadonlySet<string> = new Set(['composio_oauth_secret'])
+
+/**
+ * Settings stored encrypted: API keys, anything the renderer treats as a
+ * secret (tokens, passwords …, settingsAccess.ts) and the gateway's network key.
+ */
+export function isEncryptedSettingKey(key: string): boolean {
+  if (SELF_ENCRYPTED_SETTING_KEYS.has(key)) return false
+  return isApiKeySettingKey(key) || isSecretSettingKey(key) || /lan_key/i.test(key)
+}
