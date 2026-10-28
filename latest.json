@@ -1,14 +1,14 @@
 {
-  "version": "0.5.6",
-  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.6/MLX-Harness-0.5.6-arm64.dmg",
-  "sha256": "05847d2c3b2129bfb4ae6466944d5b695a6a2daa29821e64513a808ce18d8683",
-  "size": 592395439,
-  "date": "2026-10-27",
+  "version": "0.5.7",
+  "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.7/MLX-Harness-0.5.7-arm64.dmg",
+  "sha256": "723705a06bb4a808015d51879a34f7f94e6b424cc174b7b64d45b623c126fd96",
+  "size": 581729795,
+  "date": "2026-10-28",
   "downloads": {
     "sequoia": {
-      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.6/MLX-Harness-0.5.6-arm64.dmg",
-      "sha256": "05847d2c3b2129bfb4ae6466944d5b695a6a2daa29821e64513a808ce18d8683"
+      "url": "https://github.com/MLXapp/Harness/releases/download/v0.5.7/MLX-Harness-0.5.7-arm64.dmg",
+      "sha256": "723705a06bb4a808015d51879a34f7f94e6b424cc174b7b64d45b623c126fd96"
     }
   },
-  "notes": "Safer agent: git runs without a shell, nothing writes into .git without asking, local addresses, composed links and the clipboard ask first, a stricter Workspace sandbox and sandboxed app windows. Bundles MLX Node 0.9.9."
+  "notes": "MLX Node now installs and updates MLX Harness; the download no longer carries MLX Node inside."
 }
