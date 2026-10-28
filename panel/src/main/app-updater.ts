@@ -20,6 +20,7 @@ import { db } from './database'
 import { t } from './i18n'
 import { setUpdateCheckHandler } from './application-menu'
 import { decideUpdate, LATEST_MANIFEST_URLS, parseLatestRelease, type LatestRelease } from './update-manifest'
+import { findMlxNode } from './mlx-node'
 import {
   LEGACY_APP_NAMES,
   HARNESS_APP_NAME,
@@ -50,6 +51,8 @@ import {
   type InstallPlan,
   type UpdateFailure,
   type UpdateState,
+  MLX_NODE_APPS_LINK,
+  mlxNodeManagesUpdates,
 } from '../shared/appUpdate'
 
 const log = (...a: unknown[]) => console.log('[UPDATE]', ...a)
@@ -66,6 +69,18 @@ let started = false
 let state: UpdateState = { phase: 'idle', currentVersion }
 let release: LatestRelease | null = null
 let plan: InstallPlan | null = null
+/** MLX Node 0.11+ is installed and updates MLX Harness itself (read at each check). */
+let mlxNodeManages = false
+
+async function readMlxNodeManages(): Promise<boolean> {
+  try {
+    const node = await findMlxNode()
+    const v = node?.info?.CFBundleShortVersionString
+    return mlxNodeManagesUpdates(typeof v === 'string' ? v : null)
+  } catch {
+    return false
+  }
+}
 let staged: { appPath: string; stagingPath: string; version: string } | null = null
 let dismissedVersion: string | null = null
 let relaunchAfterSwap = false
@@ -141,6 +156,7 @@ function computePlan(r: LatestRelease): InstallPlan {
     parentWritable: !!appPath && writable(dirname(appPath)),
     appWritable: !!appPath && writable(appPath),
     hasChecksum: isSha256(r.sha256),
+    mlxNodeManages,
   })
 }
 
@@ -214,6 +230,7 @@ async function doCheck(manual: boolean): Promise<CheckOutcome> {
   }
   if (busy) return { kind: 'available', version: state.version! }
   release = r
+  mlxNodeManages = await readMlxNodeManages()
   plan = computePlan(r)
   log(`new version available: ${currentVersion} → ${r.version}${plan.ok ? '' : ` (manual: ${plan.reason})`}`)
   send({
@@ -224,7 +241,8 @@ async function doCheck(manual: boolean): Promise<CheckOutcome> {
     blocked: plan.ok ? null : plan.reason,
     dismissed: dismissedVersion === r.version,
   })
-  if (!manual) maybeNotify(r)
+  // MLX Node updates MLX Harness by itself once it's closed: no separate notification for that
+  if (!manual && !mlxNodeManages) maybeNotify(r)
   return { kind: 'available', version: r.version }
 }
 
@@ -427,6 +445,8 @@ async function doInstall(r: LatestRelease, p: Extract<InstallPlan, { ok: true }>
 
 function openManualDownload(): void {
   // The DMG for a copy that can't replace itself; the release page after a failed install.
+  // MLX Node 0.11+ installs and updates MLX Harness: open it on MLX Harness's row of its Apps page
+  if (state.blocked === 'mlxNode') { void shell.openExternal(MLX_NODE_APPS_LINK); return }
   const url = state.phase === 'error' || !release?.url ? HARNESS_LATEST_RELEASE_PAGE : release.url
   void shell.openExternal(url)
 }
@@ -565,7 +585,7 @@ export async function checkForUpdatesInteractive(): Promise<void> {
     type: 'info',
     message: t('update.dialog.availableTitle', { version: outcome.version }),
     detail: `${state.notes ? `${state.notes}\n\n` : ''}${t('update.dialog.availableDetail', { current: currentVersion })}${reason}`,
-    buttons: [auto ? t('update.banner.update') : t('update.banner.download'), t('update.banner.later')],
+    buttons: [auto ? t('update.banner.update') : state.blocked === 'mlxNode' ? t('update.banner.openNode') : t('update.banner.download'), t('update.banner.later')],
     defaultId: 0, cancelId: 1, noLink: true,
   })
   if (response !== 0) { dismissedVersion = outcome.version; patch({ dismissed: true }); return }

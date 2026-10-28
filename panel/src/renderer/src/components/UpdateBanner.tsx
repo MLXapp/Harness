@@ -157,7 +157,7 @@ export function UpdateBannerContent({ state, t, onUpdate, onLater, onRestart, on
           <button type="button" data-vmlx-control={state.blocked ? 'release-update-download' : 'release-update-install'}
             onClick={state.blocked ? onDownload : onUpdate} disabled={working}
             className="h-6 px-3 rounded-full bg-primary text-primary-foreground font-medium">
-            {state.blocked ? t('update.banner.download') : t('update.banner.update')}
+            {state.blocked === 'mlxNode' ? t('update.banner.openNode') : state.blocked ? t('update.banner.download') : t('update.banner.update')}
           </button>
         )}
         {actionsPhase === 'ready' && (

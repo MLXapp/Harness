@@ -2311,7 +2311,8 @@
       "ready": "MLX Harness {version} 已准备好安装",
       "restart": "重新启动以更新",
       "failed": "无法安装 MLX Harness {version}",
-      "retry": "重试"
+      "retry": "重试",
+      "openNode": "打开 MLX Node"
     },
     "reason": {
       "development": "开发版本：只有正式发布的应用才会安装更新。",
@@ -2332,7 +2333,8 @@
       "notNewer": "下载的版本并不比当前版本新。",
       "currentApp": "此 MLX Harness 副本不是已签名的正式版本，因此不会替换自身。",
       "copy": "无法在应用旁边准备新版本。请检查可用磁盘空间。",
-      "busy": "已在安装更新。"
+      "busy": "已在安装更新。",
+      "mlxNode": "退出 MLX Harness 后，MLX Node 会为它更新。也可以现在从 MLX Node 的 Apps 页面更新。"
     },
     "menu": {
       "check": "检查更新…"

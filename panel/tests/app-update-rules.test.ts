@@ -19,6 +19,8 @@ import {
   hdiutilAttachArgs,
   hdiutilDetachArgs,
   isNewerVersion,
+  mlxNodeManagesUpdates,
+  MLX_NODE_APPS_LINK,
   isOnMountedImage,
   isSha256,
   isTranslocated,
@@ -130,6 +132,18 @@ describe('in-place install decision', () => {
     expect(planInPlaceInstall(mac)).toEqual({ ok: true, appPath: APP, stagingPath: '/Applications/.MLX Harness.update.app' })
     expect(planInPlaceInstall({ ...mac, appPath: '/Users/a/Downloads/MLX Harness.app' }).ok).toBe(true)
     expect(planInPlaceInstall({ ...mac, appPath: '/Volumes/Fast SSD/Applications/MLX Harness.app' }).ok).toBe(true)
+  })
+  it('leaves updates to MLX Node 0.11 or later (it installs and updates MLX Harness)', () => {
+    expect(planInPlaceInstall({ ...mac, mlxNodeManages: true })).toEqual({ ok: false, reason: 'mlxNode' })
+    expect(planInPlaceInstall({ ...mac, mlxNodeManages: false }).ok).toBe(true)
+    expect(mlxNodeManagesUpdates('0.11.0')).toBe(true)
+    expect(mlxNodeManagesUpdates('0.12.3')).toBe(true)
+    expect(mlxNodeManagesUpdates('1.0')).toBe(true)
+    expect(mlxNodeManagesUpdates('0.10.9')).toBe(false)
+    expect(mlxNodeManagesUpdates('0.9.9')).toBe(false)
+    expect(mlxNodeManagesUpdates(null)).toBe(false)
+    expect(mlxNodeManagesUpdates('')).toBe(false)
+    expect(MLX_NODE_APPS_LINK).toBe('mlx://install?app=harness')
   })
   it('development builds only report', () => {
     expect(planInPlaceInstall({ ...mac, packaged: false })).toEqual({ ok: false, reason: 'development' })

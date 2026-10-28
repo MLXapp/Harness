@@ -2311,7 +2311,8 @@
       "ready": "MLX Harness {version}을(를) 설치할 준비가 되었습니다",
       "restart": "재시작하여 업데이트",
       "failed": "MLX Harness {version}을(를) 설치하지 못했습니다",
-      "retry": "다시 시도"
+      "retry": "다시 시도",
+      "openNode": "MLX Node 열기"
     },
     "reason": {
       "development": "개발 빌드입니다. 업데이트는 배포된 앱에서만 설치됩니다.",
@@ -2332,7 +2333,8 @@
       "notNewer": "다운로드한 버전이 현재 버전보다 새롭지 않습니다.",
       "currentApp": "이 MLX Harness는 서명된 릴리스가 아니어서 스스로 교체하지 않습니다.",
       "copy": "앱 옆에 새 버전을 준비하지 못했습니다. 디스크 여유 공간을 확인하세요.",
-      "busy": "이미 업데이트를 설치하고 있습니다."
+      "busy": "이미 업데이트를 설치하고 있습니다.",
+      "mlxNode": "MLX Harness를 종료하면 MLX Node가 업데이트합니다. 지금 하려면 MLX Node의 Apps 페이지에서 하세요."
     },
     "menu": {
       "check": "업데이트 확인…"

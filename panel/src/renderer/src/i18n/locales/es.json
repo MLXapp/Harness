@@ -2311,7 +2311,8 @@
       "ready": "MLX Harness {version} está listo para instalarse",
       "restart": "Reiniciar para actualizar",
       "failed": "No se pudo instalar MLX Harness {version}",
-      "retry": "Reintentar"
+      "retry": "Reintentar",
+      "openNode": "Abrir MLX Node"
     },
     "reason": {
       "development": "Versión de desarrollo: las actualizaciones solo se instalan en la app publicada.",
@@ -2332,7 +2333,8 @@
       "notNewer": "La descarga no es más reciente que esta versión.",
       "currentApp": "Esta copia de MLX Harness no es la versión firmada, así que no se reemplaza a sí misma.",
       "copy": "No se pudo preparar la nueva versión junto a la app. Comprueba el espacio libre en el disco.",
-      "busy": "Ya se está instalando una actualización."
+      "busy": "Ya se está instalando una actualización.",
+      "mlxNode": "MLX Node actualiza MLX Harness cuando lo cierras. O actualízalo ahora desde su página Apps."
     },
     "menu": {
       "check": "Buscar actualizaciones…"

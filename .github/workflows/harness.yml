@@ -108,22 +108,8 @@ jobs:
         working-directory: harness/panel
         run: /opt/homebrew/bin/npm ci
 
-      # MLX Harness carries MLX Node (app.mlx.mac) and installs it on first run.
-      # Download the public notarized build, check it (bundle id, team, strict
-      # signature, Gatekeeper) and stage it in panel/resources/bundled-node.
-      # Release (tag) builds fail without it; manual builds warn and go on.
-      - name: Bundle MLX Node
-        working-directory: harness/panel
-        env:
-          RELEASE: ${{ inputs.release }}
-        run: |
-          if ./scripts/fetch-mlx-node.sh; then exit 0; fi
-          rm -rf resources/bundled-node
-          if [[ "$GITHUB_REF" == refs/tags/v* || "$RELEASE" == "true" ]]; then
-            echo "::error::Couldn't fetch or verify MLX Node from mlx.app; a release must carry it."
-            exit 1
-          fi
-          echo "::warning::Couldn't fetch or verify MLX Node; this DMG is built without it (the app offers the download instead)."
+      # MLX Harness no longer carries MLX Node (0.5.7, plan "MLX Node as the hub"): MLX Node is the one download
+      # from mlx.app and installs and updates MLX Harness itself. The app offers MLX Node's download instead.
 
       # Optional Developer ID signing (electron-builder reads CSC_LINK and
       # CSC_KEY_PASSWORD) and notarisation (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD).
@@ -268,7 +254,7 @@ jobs:
           ls -la dist
           gh release create "$TAG" dist/MLX-Harness-*.dmg dist/MLX-Harness-*.dmg.sha256 --target "$GITHUB_SHA" \
             --title "MLX Harness $VERSION" \
-            --notes "MLX Harness $VERSION for Apple silicon Macs (macOS 14.5 or later). Signed with Developer ID and notarized by Apple. Open MLX Harness from the disk image and it installs itself in Applications. Carries MLX Node inside and offers to install it on first run. Built on vMLX by JANGQ AI (Apache License 2.0)."
+            --notes "MLX Harness $VERSION for Apple silicon Macs (macOS 14.5 or later). Signed with Developer ID and notarized by Apple. Open MLX Harness from the disk image and it installs itself in Applications. MLX Node (mlx.app/download) installs and updates it. Built on vMLX by JANGQ AI (Apache License 2.0)."
 
       - name: Point the update feed at it
         env:
@@ -287,7 +273,7 @@ jobs:
             const [v, url, sha, size] = process.argv.slice(1);
             const m = { version: v, url, sha256: sha, size: Number(size), date: new Date().toISOString().slice(0, 10),
               downloads: { sequoia: { url, sha256: sha } },
-              notes: process.env.NOTES || `MLX Harness ${v}. Signed and notarized. Carries MLX Node inside.` };
+              notes: process.env.NOTES || `MLX Harness ${v}. Signed and notarized. MLX Node installs and updates it.` };
             fs.writeFileSync("latest.json", JSON.stringify(m, null, 2) + "\n");
           ' "$VERSION" "$URL" "$SHA" "$(stat -c %s "dist/$DMG")"
           cat latest.json

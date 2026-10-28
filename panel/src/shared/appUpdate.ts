@@ -60,6 +60,7 @@ export type InstallBlock =
   | 'translocated' // macOS App Translocation (opened straight from Downloads, quarantined)
   | 'notWritable' // the app or its folder can't be written by this user
   | 'noChecksum' // the manifest has no SHA-256 for the download
+  | 'mlxNode' // MLX Node 0.11+ is installed: it updates MLX Harness while it's closed (plan "MLX Node as the hub")
 
 /** What went wrong during an install (every one falls back to downloading by hand). */
 export type UpdateFailure =
@@ -116,6 +117,16 @@ export function compareAppVersions(a: string, b: string): number {
 }
 
 /** True only when `candidate` is strictly newer than `running` (unparseable → false). */
+/** MLX Node from this version on installs and updates MLX Harness (its Apps page, 28 Oct 2026). */
+export const MLX_NODE_HUB_VERSION = '0.11.0'
+/** Where MLX Node opens on MLX Harness's row of its Apps page. */
+export const MLX_NODE_APPS_LINK = 'mlx://install?app=harness'
+
+/** Does an installed MLX Node of this version take care of MLX Harness's updates? */
+export function mlxNodeManagesUpdates(nodeVersion: string | null | undefined): boolean {
+  return !!nodeVersion && compareAppVersions(nodeVersion, MLX_NODE_HUB_VERSION) >= 0
+}
+
 export function isNewerVersion(candidate: string, running: string): boolean {
   return compareAppVersions(candidate, running) > 0
 }
@@ -239,6 +250,8 @@ export interface InstallFacts {
   appWritable: boolean
   /** The manifest carries a SHA-256 for the selected DMG. */
   hasChecksum: boolean
+  /** MLX Node 0.11 or later is installed: it installs and updates MLX Harness, so this copy leaves updates to it. */
+  mlxNodeManages?: boolean
 }
 
 export type InstallPlan =
@@ -253,6 +266,7 @@ export type InstallPlan =
 export function planInPlaceInstall(f: InstallFacts): InstallPlan {
   if (f.platform !== 'darwin') return { ok: false, reason: 'unsupported' }
   if (!f.packaged) return { ok: false, reason: 'development' }
+  if (f.mlxNodeManages) return { ok: false, reason: 'mlxNode' }
   if (!f.appPath || !f.appPath.endsWith('.app')) return { ok: false, reason: 'notApp' }
   if (isTranslocated(f.appPath)) return { ok: false, reason: 'translocated' }
   if (isOnMountedImage(f.appPath)) return { ok: false, reason: 'mountedDmg' }
