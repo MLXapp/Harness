@@ -114,10 +114,10 @@ describe('MLX Node packaging', () => {
     expect(skipped('/tmp/release/mac-arm64/MLX Harness.app/Contents/MacOS/MLX Harness')).toBe(false)
   })
 
-  it('keeps the staged copy out of git and fetches it in CI', () => {
+  it('keeps the staged copy out of git; CI no longer bundles it (MLX Node installs MLX Harness, 0.5.7)', () => {
     expect(readFileSync('../.gitignore', 'utf8')).toMatch(/^panel\/resources\/bundled-node\/$/m)
     const ci = readFileSync('../.github/workflows/harness.yml', 'utf8')
-    expect(ci).toContain('./scripts/fetch-mlx-node.sh')
+    expect(ci).not.toContain('./scripts/fetch-mlx-node.sh')
     expect(ci).toContain('refs/tags/v*')
     const fetch = readFileSync('scripts/fetch-mlx-node.sh', 'utf8')
     expect(fetch).toContain('https://mlx.app/api/download/mac')

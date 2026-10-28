@@ -45,6 +45,19 @@ async function readBundleInfo(appPath: string): Promise<Record<string, unknown> 
 
 const isMlxNode = (info: Record<string, unknown> | null): boolean => info?.CFBundleIdentifier === MLX_NODE_BUNDLE_ID
 
+/** Installed MLX Node in /Applications or ~/Applications only (no Spotlight query): the updater's quick look. */
+export async function findMlxNodeInApps(): Promise<{ path: string; info: Record<string, unknown> } | null> {
+  if (process.platform !== 'darwin') return null
+  for (const dir of [SYSTEM_APPS, userApps()]) {
+    for (const name of MLX_NODE_APP_NAMES) {
+      const path = join(dir, name)
+      const info = await readBundleInfo(path)
+      if (isMlxNode(info)) return { path, info: info! }
+    }
+  }
+  return null
+}
+
 /** Installed MLX Node: the usual folders under either name, then Spotlight (top-level apps only). */
 export async function findMlxNode(): Promise<{ path: string; info: Record<string, unknown> } | null> {
   if (process.platform !== 'darwin') return null

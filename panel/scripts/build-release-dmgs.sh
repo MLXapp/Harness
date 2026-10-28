@@ -26,6 +26,8 @@ AUTHORITATIVE_PYTHON="$ROOT_DIR/.venv/bin/python"
 PYTHON_ACTION_HELPER="$PANEL_DIR/scripts/release-python-action.cjs"
 
 GIT_BIN="/usr/bin/git"
+# runner images with Homebrew git first on the fixed PATH resolve that one
+[[ -x /opt/homebrew/bin/git ]] && GIT_BIN="/opt/homebrew/bin/git"
 NODE_BIN="/opt/homebrew/bin/node"
 NPM_BIN="/opt/homebrew/bin/npm"
 NPX_BIN="/opt/homebrew/bin/npx"

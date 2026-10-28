@@ -20,7 +20,7 @@ import { db } from './database'
 import { t } from './i18n'
 import { setUpdateCheckHandler } from './application-menu'
 import { decideUpdate, LATEST_MANIFEST_URLS, parseLatestRelease, type LatestRelease } from './update-manifest'
-import { findMlxNode } from './mlx-node'
+import { findMlxNodeInApps } from './mlx-node'
 import {
   LEGACY_APP_NAMES,
   HARNESS_APP_NAME,
@@ -74,7 +74,7 @@ let mlxNodeManages = false
 
 async function readMlxNodeManages(): Promise<boolean> {
   try {
-    const node = await findMlxNode()
+    const node = await findMlxNodeInApps()
     const v = node?.info?.CFBundleShortVersionString
     return mlxNodeManagesUpdates(typeof v === 'string' ? v : null)
   } catch {
